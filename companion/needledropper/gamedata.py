@@ -82,13 +82,13 @@ import logging
 import math
 import os
 import re
-import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Mapping, Optional, Sequence, Union
 
 from . import __version__ as _APP_VERSION
+from . import atomicio as _atomicio
 from . import savedvars
 
 __all__ = [
@@ -621,33 +621,13 @@ def _remove_stale_temps(folder: Path) -> None:
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
-    """Write ``data`` to ``path`` via a temp file in the same folder and ``os.replace``."""
+    """Write ``data`` to ``path`` via a temp file in the same folder and ``os.replace``
+    (:func:`needledropper.atomicio.atomic_write_bytes`: retried while the file is locked, and
+    written in place when Windows refuses the rename across devices -- WinError 17)."""
     if path.is_dir():
         raise GameDataError(f"refusing to write: {path} is a folder")
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=_TMP_SUFFIX, dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            try:
-                os.fsync(fh.fileno())
-            except OSError:
-                pass
-        for attempt in range(_REPLACE_ATTEMPTS):
-            try:
-                os.replace(tmp_name, path)
-                return
-            except PermissionError:
-                if attempt + 1 >= _REPLACE_ATTEMPTS:
-                    raise
-                time.sleep(_REPLACE_DELAY)
-    finally:
-        try:
-            os.remove(tmp_name)  # still there only if the replace did not happen
-        except FileNotFoundError:
-            pass
-        except OSError:
-            log.warning("could not remove the temp file %s", tmp_name)
+    _atomicio.atomic_write_bytes(path, data, retries=_REPLACE_ATTEMPTS, delay=_REPLACE_DELAY,
+                                 prefix=f".{path.name}.")
 
 
 def _write_if_changed(path: Path, data: bytes) -> bool:

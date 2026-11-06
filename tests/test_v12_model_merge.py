@@ -250,8 +250,10 @@ def test_a_new_user_drop_plays_on_arrival_without_a_reload():
     mark = h.mark()
     h.advance(15)
     fires = [e for e in h.events_since(mark) if e["type"] == FIRE]
-    assert fires and fires[0]["id"] == "zone:1436"
-    assert fires[0]["n"] == h.map_drop("zone:1436")["n"]
+    # v2 frames carry the song itself (Emit.lua): the user drop's id, song and soundtrack id
+    assert fires and fires[0]["dropId"] == "zone:1436"
+    assert (fires[0]["artist"], fires[0]["title"], fires[0]["youtube"]) == ("Toto", "Africa", "QAo_Ycocl1E")
+    assert fires[0]["setId"] == h.map_drop("zone:1436")["setId"]
     assert h.char_db()["journal"][-1]["title"] == "Africa"
 
 

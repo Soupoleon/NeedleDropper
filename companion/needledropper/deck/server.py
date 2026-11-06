@@ -69,11 +69,19 @@ APP_ID = "needledropper"
 PLAYER_WINDOW_SIZE = (420, 380)
 PLAYER_CONNECT_TIMEOUT = 8.0  # wait this long for an opened player window to connect
 PLAYER_RECONNECT_GRACE = 3.0  # a player that vanished this recently is probably reloading
+PLAYER_STARTUP_TIMEOUT = 20.0  # the hidden player window made at the app's start may take this long
+HIDE_AFTER_HIDE_S = 2.6  # the page fades its card out in 2.1 s; the window hides after that
+BROWSER_LOG_MAX = 1_000_000  # logs\browser.log (the browser's stderr): one older copy above this
+#: Chromium flags for a page that must keep working while its window is hidden (warm YouTube player,
+#: cue at ARM): without them a hidden page's timers and media are throttled (research 3.5; the
+#: occlusion feature too, real-client #15).
+NO_THROTTLE_FLAGS = ("--disable-background-timer-throttling", "--disable-backgrounding-occluded-windows",
+                     "--disable-renderer-backgrounding", "--disable-features=CalculateNativeWinOcclusion")
 
 CLIENT_PANEL = "panel"
 CLIENT_PLAYER = "player"
 CLIENT_KINDS = (CLIENT_PANEL, CLIENT_PLAYER)
-PLAYER_ONLY_CMDS = frozenset({"play", "stop", "fade"})
+PLAYER_ONLY_CMDS = frozenset({"play", "stop", "fade", "cue"})
 PANEL_ONLY_CMDS = frozenset({"state"})
 
 AUTO_OPEN_MODES = ("youtube", "always", "never")
@@ -231,6 +239,14 @@ class _Handler(BaseHTTPRequestHandler):
         return self.deck.host_allowed(self.headers.get("Host"))
 
     def _origin_ok(self) -> bool:
+        """A foreign ``Origin`` is refused; so is a request the browser marks as coming from another
+        site (``Sec-Fetch-Site`` other than ``same-origin`` / ``none``). DECK-EVENTS-NO-ORIGIN: a
+        no-cors ``<img src=".../events">`` from any web page carries no Origin header at all, but
+        modern browsers always say ``Sec-Fetch-Site: cross-site`` for it. A missing Origin alone is
+        fine (a same-origin EventSource sends none), and so are tools that send no Sec-Fetch-*."""
+        site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        if site and site not in ("same-origin", "none"):
+            return False
         origin = self.headers.get("Origin")
         return origin is None or self.deck.origin_allowed(origin)
 
@@ -510,10 +526,69 @@ class _Handler(BaseHTTPRequestHandler):
 Launcher = Callable[[list[str]], Any]
 
 
-def _default_launcher(args: list[str]) -> None:
+def child_environment() -> dict[str, str]:
+    """The environment for a program the app starts (the browser): without PyInstaller's own
+    variables (``_PYI_*``, ``_MEIPASS*``), which a frozen app's children would otherwise inherit."""
+    return {k: v for k, v in os.environ.items() if not k.upper().startswith(("_PYI_", "_MEIPASS"))}
+
+
+class _NormalDllSearch:
+    """PyInstaller's bootloader calls ``SetDllDirectoryW(<its unpack folder>)``, which child processes
+    inherit: a browser started from the frozen app could load the wrong DLLs from there (suspected for
+    real-client finding #11). Inside this block the normal search order applies
+    (``SetDllDirectoryW(NULL)``) -- just for creating the child; the app's own setting is put back
+    afterwards. A no-op outside a frozen Windows app."""
+
+    def __enter__(self) -> "_NormalDllSearch":
+        self.saved: Optional[str] = None
+        self.active = False
+        if sys.platform != "win32" or not getattr(sys, "frozen", False):
+            return self
+        try:
+            import ctypes
+            k32 = ctypes.windll.kernel32
+            buf = ctypes.create_unicode_buffer(32768)
+            n = k32.GetDllDirectoryW(len(buf), buf)
+            self.saved = buf.value if n else None
+            self.active = bool(k32.SetDllDirectoryW(None))
+        except Exception as exc:  # noqa: BLE001 - best effort
+            log.debug("SetDllDirectoryW(NULL) failed: %s", exc)
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        if not self.active:
+            return
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetDllDirectoryW(self.saved)
+        except Exception as e:  # noqa: BLE001
+            log.debug("restoring the DLL directory failed: %s", e)
+
+
+def _default_launcher(args: list[str], log_file: Optional[Path] = None) -> Any:
+    """Start ``args`` detached, with a clean environment; stderr goes to ``log_file`` when given (the
+    browser's own complaints, for the log folder). Returns the process (polled for an early exit)."""
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     close_fds=True, creationflags=flags if sys.platform == "win32" else 0)
+    err: Any = subprocess.DEVNULL
+    if log_file is not None:
+        try:
+            log_file.parent.mkdir(parents=True, exist_ok=True)
+            if log_file.is_file() and log_file.stat().st_size > BROWSER_LOG_MAX:
+                os.replace(log_file, log_file.with_name(log_file.name + ".1"))  # keep one older file
+            err = open(log_file, "ab")  # noqa: SIM115 - handed to the child, closed below
+        except OSError:
+            err = subprocess.DEVNULL
+    try:
+        with _NormalDllSearch():
+            return subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err,
+                                    close_fds=True, env=child_environment(),
+                                    creationflags=flags if sys.platform == "win32" else 0)
+    finally:
+        if err is not subprocess.DEVNULL:
+            err.close()
+
+
+_REAL_LAUNCHER = _default_launcher
 
 
 class Deck:
@@ -542,19 +617,30 @@ class Deck:
         self.connected_window_sec = connected_window_sec
         self._token = token or secrets.token_urlsafe(32)
         self.api: Optional[ApiHandler] = api
-        self.launcher: Launcher = launcher or _default_launcher
+        self.launcher: Launcher = launcher or self._launch
         self.url_opener: Callable[[str], Any] = url_opener or webbrowser.open
         # player-window policy
         self.auto_open = "youtube"
         self.browser = "edge"
         self.player_position: Optional[tuple[int, int]] = None
+        self.player_corner = "topright"
         self.profile_dir: Optional[Path] = None
+        self.browser_log: Optional[Path] = None   # the browser's stderr (logsrowser.log)
+        #: the never-activating window manager (deck/window.py; None: none, the plain window)
+        self.window: Any = None
+        #: True while the game is the foreground window: no player window is created then, because
+        #: Chromium activates a window when it creates it (real-client #8 / #13)
+        self.game_in_front: Callable[[], bool] = _game_in_front
+        self._player_proc: Any = None
+        self._player_kind: Optional[str] = None
+        self._bad_browsers: set[str] = set()
         self._server: Optional[_Server] = None
         self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
         self._clients: list[_Client] = []
         self._stopping = threading.Event()
+        self._interrupt = threading.Event()  # the app is quitting: waits for the player end at once
         self._last_seen: dict[str, Optional[float]] = {CLIENT_PANEL: None, CLIENT_PLAYER: None}
         self._player_gone_at: Optional[float] = None
         self._player_opened_at: Optional[float] = None
@@ -570,6 +656,13 @@ class Deck:
         self.on_player_status: Optional[Callable[[dict[str, Any], Optional[dict[str, Any]],
                                                   Optional[dict[str, Any]]], Any]] = None
         self.sent = 0
+
+    def _launch(self, args: list[str]) -> Any:
+        """The default launcher: :func:`_default_launcher`, with the browser's stderr in the log folder."""
+        fn = _default_launcher
+        if fn is _REAL_LAUNCHER and self.browser_log is not None:
+            return fn(args, self.browser_log)
+        return fn(args)
 
     # ------------------------------------------------------------ server ----
     def start(self) -> "Deck":
@@ -590,6 +683,7 @@ class Deck:
         srv = self._server
         if srv is None:
             return
+        self.close_player()
         self._stopping.set()
         with self._lock:
             for c in self._clients:
@@ -738,7 +832,7 @@ class Deck:
         with self._cond:
             while not any(c.kind == CLIENT_PLAYER for c in self._clients):
                 remaining = deadline - time.monotonic()
-                if remaining <= 0 or self._stopping.is_set():
+                if remaining <= 0 or self._stopping.is_set() or self._interrupt.is_set():
                     return False
                 self._cond.wait(min(remaining, 0.25))
             return True
@@ -788,9 +882,25 @@ class Deck:
             else:
                 clients = list(self._clients)
             self.sent += 1
+        self._place_window(kind, cmd)
         for c in clients:
             c.q.put(msg)
         return len(clients)
+
+    def _place_window(self, kind: Any, cmd: dict[str, Any]) -> None:
+        """The player window is on screen only while a YouTube song plays (deck/window.py)."""
+        win = self.window
+        if win is None:
+            return
+        try:
+            if kind == "play" and cmd.get("source") == "youtube":
+                win.show()  # always on top at its corner, never activated
+            elif kind == "stop":
+                win.hide_later(int(cmd.get("fadeOutMs") or 0) / 1000.0 + 0.6)
+            elif kind == "hide":
+                win.hide_later(HIDE_AFTER_HIDE_S)
+        except Exception as exc:  # noqa: BLE001 - a window problem must not stop playback
+            log.debug("player window: %s", exc)
 
     def notify_panels(self, what: str = "state") -> int:
         """Ask open Connect pages to refresh their state now."""
@@ -875,9 +985,9 @@ class Deck:
                         after_seq is None or st.get("seq", 0) > after_seq):
                     return dict(st)
                 remaining = deadline - time.monotonic()
-                if remaining <= 0:
+                if remaining <= 0 or self._interrupt.is_set():
                     return None
-                self._cond.wait(remaining)
+                self._cond.wait(min(remaining, 0.25))
 
     # ------------------------------------------------------------- media ----
     def register_media(self, path: str | os.PathLike[str]) -> str:
@@ -901,16 +1011,28 @@ class Deck:
     # ------------------------------------------------------------ windows ----
     def configure_player(self, *, auto_open: Optional[str] = None, browser: Optional[str] = None,
                          position: Optional[tuple[int, int]] = None, profile_dir: Any = None,
-                         clear_position: bool = False) -> None:
+                         clear_position: bool = False, corner: Optional[str] = None,
+                         browser_log: Any = None) -> None:
         """Update the player-window policy (from ``deck.*`` config)."""
         if auto_open is not None:
             self.auto_open = auto_open if auto_open in AUTO_OPEN_MODES else "youtube"
         if browser is not None:
+            if browser != self.browser:
+                self._bad_browsers.clear()
             self.browser = browser
         if position is not None or clear_position:
             self.player_position = position
         if profile_dir is not None:
             self.profile_dir = Path(profile_dir)
+        if corner is not None:
+            from .window import normalize_corner
+            self.player_corner = normalize_corner(corner)
+        if browser_log is not None:
+            self.browser_log = Path(browser_log)
+        win = self.window
+        if win is not None:
+            win.corner = self.player_corner
+            win.position = self.player_position
 
     @property
     def player_opening(self) -> bool:
@@ -920,58 +1042,108 @@ class Deck:
         return (t is not None and time.monotonic() - t <= PLAYER_CONNECT_TIMEOUT + 2.0
                 and not self.page_open)
 
+    def _browser_order(self) -> list[str]:
+        b = (self.browser or "edge").strip().lower()
+        first = "chrome" if b == "chrome" else "edge"
+        order = [first, "chrome" if first == "edge" else "edge"]
+        return [k for k in order if k not in self._bad_browsers]
+
     def open_player(self, *, size: tuple[int, int] = PLAYER_WINDOW_SIZE) -> str:
         """Open the player page in a small Edge/Chrome app window.
 
-        ``--app=<player url> --window-size=420,380`` (+ ``--window-position=x,y``
-        from :attr:`player_position`), a dedicated profile under
-        :attr:`profile_dir` (where autoplay with sound is allowed). Falls back to
-        the default browser. Returns ``"edge"``, ``"chrome"``, ``"default"`` or
-        ``"none"``.
+        ``--app=<player url> --window-size=420,380``, a dedicated profile under :attr:`profile_dir`
+        (where autoplay with sound is allowed) and the no-throttling flags (a hidden player keeps
+        working). With the window manager (:attr:`window`, Windows) the window is found, kept out
+        of the taskbar, made never-activating and hidden until a YouTube song plays; it starts at
+        its corner (or :attr:`player_position`).
+
+        Never while the game is the foreground window: Chromium activates a window when it creates
+        it, and nothing may take the focus from the game (real-client #8 / #13). And never the
+        default browser (a tab took the owner out of the game): no Edge/Chrome, no player.
+        Returns ``"edge"``, ``"chrome"`` or ``"none"``.
         """
         b = (self.browser or "edge").strip().lower()
-        if b in ("none", "off", "false", "no"):
+        if b in ("none", "off", "false", "no") or self._stopping.is_set():
             return "none"
-        how = "none"
-        if b in ("edge", "msedge", "chrome"):
-            kind = "chrome" if b == "chrome" else "edge"
-            exe = find_browser(kind) or find_browser("chrome" if kind == "edge" else "edge")
-            if exe:
-                args = [exe, f"--app={self.player_url}", f"--window-size={size[0]},{size[1]}",
-                        "--autoplay-policy=no-user-gesture-required"]
-                if self.player_position is not None:
-                    args.append(f"--window-position={self.player_position[0]},{self.player_position[1]}")
-                if self.profile_dir is not None:
-                    try:
-                        self.profile_dir.mkdir(parents=True, exist_ok=True)
-                        args += [f"--user-data-dir={self.profile_dir}", "--no-first-run",
-                                 "--no-default-browser-check"]
-                    except OSError as exc:
-                        log.debug("player profile dir unavailable: %s", exc)
+        if b == "default":  # a tab in the default browser took the owner out of the game: Edge / Chrome
+            log.info('deck.browser "default": the player opens in an Edge or Chrome app window instead '
+                     '(a browser tab would take the focus from the game)')
+        try:
+            in_front = bool(self.game_in_front())
+        except Exception:  # noqa: BLE001
+            in_front = False
+        if in_front:
+            log.info("not opening the player window while the game is in front (creating it would take the "
+                     "focus); it opens once you are out of the game")
+            return "none"
+        for kind in self._browser_order():
+            exe = find_browser(kind)
+            if not exe:
+                continue
+            args = [exe, f"--app={self.player_url}", f"--window-size={size[0]},{size[1]}",
+                    "--autoplay-policy=no-user-gesture-required", *NO_THROTTLE_FLAGS, "--hide-crash-restore-bubble"]
+            pos = self._launch_position(size)
+            if pos is not None:
+                args.append(f"--window-position={pos[0]},{pos[1]}")
+            if self.profile_dir is not None:
                 try:
-                    self.launcher(args)
-                    how = "chrome" if "chrome" in Path(exe).name.lower() else "edge"
+                    self.profile_dir.mkdir(parents=True, exist_ok=True)
+                    args += [f"--user-data-dir={self.profile_dir}", "--no-first-run", "--no-default-browser-check"]
                 except OSError as exc:
-                    log.warning("could not start %s: %s", exe, exc)
-        if how == "none":
+                    log.debug("player profile dir unavailable: %s", exc)
             try:
-                how = "default" if self.url_opener(self.player_url) is not False else "none"
-            except Exception as exc:  # webbrowser.Error or a broken opener
-                log.warning("could not open a browser: %s -- open %s yourself", exc, self.player_url)
-                how = "none"
-        if how != "none":
+                proc = self.launcher(args)
+            except OSError as exc:
+                log.warning("could not start %s: %s", exe, exc)
+                self._bad_browsers.add(kind)
+                continue
             with self._lock:
                 self._player_opened_at = time.monotonic()
                 self.player_opened += 1
-            log.info("opened the player window (%s)", how)
-        return how
+                self._player_proc = proc
+                self._player_kind = kind
+            log.info("opened the player window (%s: %s)", kind, exe)
+            self._adopt_later(proc)
+            return kind
+        log.warning("no Edge or Chrome to play YouTube songs in (deck.browser %r); YouTube drops show their card "
+                    "only", self.browser)
+        return "none"
 
-    def ensure_player(self, timeout: float = PLAYER_CONNECT_TIMEOUT, *, force: bool = False) -> bool:
+    def _launch_position(self, size: tuple[int, int]) -> Optional[tuple[int, int]]:
+        """Only an explicit ``deck.playerPosition``: Chromium reads ``--window-position`` in DIPs, while
+        the corner is placed in physical pixels by the window manager once the window exists (a corner
+        computed here would land off-screen on a 300 % display, and stay there if the window were
+        never found)."""
+        return self.player_position
+
+    def _adopt_later(self, proc: Any) -> None:
+        win = self.window
+        if win is None:
+            return
+        pid = getattr(proc, "pid", None)
+        threading.Thread(target=lambda: win.adopt(pid), name="needledropper-player-window", daemon=True).start()
+
+    def _player_exit_code(self) -> Optional[int]:
+        proc = self._player_proc
+        poll = getattr(proc, "poll", None)
+        if not callable(poll):
+            return None
+        try:
+            return poll()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def ensure_player(self, timeout: float = PLAYER_CONNECT_TIMEOUT, *, force: bool = False,
+                      failover: bool = False) -> bool:
         """Make sure a player page is connected, opening the window if the policy allows.
 
         Returns True once a player is connected. Waits briefly for a player that
         is just reloading, reuses a window that is still starting, and otherwise
-        opens one when :attr:`auto_open` is not ``"never"`` (or ``force``).
+        opens one when :attr:`auto_open` is not ``"never"`` (or ``force``). A browser that exits
+        at once with an error is logged (its exit code; its stderr is in logs\\browser.log) and
+        the other one is tried right away (journey review F1); ``failover`` also tries the other
+        one when the page does not connect in time (the Edge "deflector" on the owner's PC starts
+        nothing at all: research 3.6).
         """
         if self.page_open:
             return True
@@ -981,12 +1153,61 @@ class Deck:
             if self.wait_player(min(PLAYER_RECONNECT_GRACE, timeout)):
                 return True
         if self.player_opening:
-            return self.wait_player(timeout)
+            return self._wait_launched(timeout, failover)
         if not force and self.auto_open == "never":
             return False
         if self.open_player() == "none":
             return False
-        return self.wait_player(timeout)
+        return self._wait_launched(timeout, failover)
+
+    def _wait_launched(self, timeout: float, failover: bool) -> bool:
+        deadline = time.monotonic() + max(0.0, timeout)
+        while True:
+            if self.wait_player(min(0.25, max(0.0, deadline - time.monotonic()))):
+                return True
+            if self._stopping.is_set() or self._interrupt.is_set():
+                return False
+            code = self._player_exit_code()
+            timed_out = time.monotonic() >= deadline
+            failed = code is not None and code != 0
+            if not (failed or (timed_out and failover)):
+                if timed_out:
+                    return False
+                continue
+            kind = self._player_kind
+            if failed:
+                log.warning("the player browser (%s) exited at once with code %s; see logs\\browser.log", kind, code)
+            else:
+                log.warning("the player window (%s) did not connect within %.0f s", kind, timeout)
+            if kind:
+                self._bad_browsers.add(kind)
+            with self._lock:
+                self._player_opened_at = None
+                self._player_proc = None
+            if self.open_player() == "none":
+                return False
+            deadline = time.monotonic() + max(0.0, timeout)
+            failover = False  # one more browser at most
+
+    def prepare_player(self) -> bool:
+        """Create the hidden player window now (the app's start), so that no window is ever created
+        while the player is in the game. Blocks until it connects or gives up; call from a thread."""
+        if self.auto_open == "never" or self.page_open or self.player_opening:
+            return self.page_open
+        return self.ensure_player(PLAYER_STARTUP_TIMEOUT, failover=True)
+
+    def interrupt_waits(self) -> None:
+        """The app is quitting: :meth:`wait_player` / :meth:`wait_status` return at once, so a song that
+        is being started does not hold up the shutdown (SHELL-FASTSTOP-BUSY-ENGINE)."""
+        self._interrupt.set()
+        with self._cond:
+            self._cond.notify_all()
+
+    def close_player(self) -> None:
+        """Close the player window (the app is quitting)."""
+        win = self.window
+        if win is not None:
+            win.close()
 
     def open_panel(self) -> bool:
         """Open the Connect page in the default browser."""
@@ -997,8 +1218,61 @@ class Deck:
             return False
 
 
+_IFEO = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options"
+
+
+def edge_redirected() -> bool:
+    """True when Windows runs another program instead of msedge.exe: an Image File Execution Options
+    ``Debugger`` for it (on the key itself, or on one of its filter subkeys), as "Edge deflector" tools
+    set up. On the owner's PC this made ``msedge --app=...`` start nothing at all (research 3.6)."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import winreg
+    except ImportError:  # pragma: no cover
+        return False
+    try:
+        key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, _IFEO + r"\msedge.exe")
+    except OSError:
+        return False
+    try:
+        try:
+            winreg.QueryValueEx(key, "Debugger")
+            return True
+        except OSError:
+            pass
+        i = 0
+        while True:
+            try:
+                name = winreg.EnumKey(key, i)
+            except OSError:
+                return False
+            i += 1
+            try:
+                with winreg.OpenKey(key, name) as sub:
+                    winreg.QueryValueEx(sub, "Debugger")
+                    return True
+            except OSError:
+                continue
+    finally:
+        winreg.CloseKey(key)
+
+
+def _game_in_front() -> bool:
+    try:
+        from ..transport import wincapture
+        return bool(wincapture.game_in_foreground())
+    except Exception:  # noqa: BLE001 - not Windows: never block on this
+        return False
+
+
 def find_browser(kind: str = "edge") -> Optional[str]:
-    """Locate msedge.exe / chrome.exe in the usual install locations."""
+    """Locate msedge.exe / chrome.exe in the usual install locations (Edge: not when Windows
+    redirects it to another program, see :func:`edge_redirected`)."""
+    if kind != "chrome" and edge_redirected():
+        log.info("msedge.exe is redirected to another program on this PC (Image File Execution Options); "
+                 "using Chrome for the player window")
+        return None
     if kind == "chrome":
         rel = ("Google", "Chrome", "Application", "chrome.exe")
         names = ("chrome", "google-chrome", "chromium")

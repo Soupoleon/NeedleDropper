@@ -119,7 +119,7 @@ def test_pcall_only_around_optional_client_apis(fname):
 
 
 def test_only_binding_globals_are_added():
-    base = AddonHarness(map=None, files=["Json.lua", "Base64.lua", "Protocol2.lua", "Core.lua"])
+    base = AddonHarness(files=["Json.lua", "Base64.lua", "Protocol2.lua", "Core.lua"])
     core_globals = base.new_globals()
     h = ModelHarness(profile="model")
     h.call("Soundtracks.Create", "Mine")
@@ -127,7 +127,7 @@ def test_only_binding_globals_are_added():
     h.call("Share.Encode", h.call1("Share.FromSet", "user:my-drops"))
     h.call("Companion.Read")
     h.logout()
-    extra = h.new_globals() - core_globals - {"SHIM_ENCODING_BRIDGE", "C_EncodingUtil", "NeedleDropper_Map"}
+    extra = h.new_globals() - core_globals - {"SHIM_ENCODING_BRIDGE", "C_EncodingUtil"}
     assert extra == {"BINDING_HEADER_NEEDLEDROPPER", "BINDING_NAME_NEEDLEDROPPER_TOGGLE",
                      "BINDING_NAME_NEEDLEDROPPER_ADD_HERE", "BINDING_NAME_NEEDLEDROPPER_STOP"}
 

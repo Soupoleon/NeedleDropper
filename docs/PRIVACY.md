@@ -13,8 +13,8 @@ leaves your PC at all.
 
 | To | When | What |
 |---|---|---|
-| **Spotify** (`accounts.spotify.com`, `api.spotify.com`) | Only if you connect Spotify | Your sign-in (on Spotify's own consent page); commands to play, pause and fade songs on your devices; the list of your devices and what is playing; and searches by artist and title for the songs in your soundtracks that have no Spotify link, made as you approach their place |
-| **YouTube** (Google) | Only when a YouTube song plays | The player window loads YouTube's standard embedded player, which fetches the video from YouTube. As with any embedded video, YouTube sees your IP address and which video plays, and may set cookies, under Google's privacy policy |
+| **Spotify** (`accounts.spotify.com`, `api.spotify.com`) | Only if you connect Spotify | Your sign-in (on Spotify's own consent page); a request for your account's name, plan and country (for the Premium check, and to search the songs available where you live); commands to play, pause and fade songs on your devices; the list of your devices and what is playing; and searches by artist and title for the songs in your soundtracks that have no Spotify link, made as you approach their place |
+| **YouTube** (Google) | Only when a YouTube song is about to play (as you approach its place, the player window loads the video, paused) and while it plays | The player window loads YouTube's standard embedded player, which fetches the video from YouTube. As with any embedded video, YouTube sees your IP address and which video plays, and may set cookies, under Google's privacy policy |
 | **GitHub** | Only if the update check is on (it is off until an update address is set, `updates.releasesUrl` in `config.json`): once a day while the app runs | A request for the latest NeedleDropper release, to tell you when an update is out. It carries nothing about you, your game or your soundtracks |
 
 Images shown on the Connect page or in the player window come from Spotify's and YouTube's servers in
@@ -32,10 +32,12 @@ Explorer window to open it):
 | File | Contents |
 |---|---|
 | `config.json` | Your app settings, including your Spotify **Client ID**. A Client ID is not a secret: it only names your developer app |
-| `spotify_token.bin` | Your Spotify login token, **encrypted with Windows DPAPI**: only your Windows user account on this PC can decrypt it. **Disconnect** on the Connect page deletes it |
+| `spotify_token.bin` | Your Spotify login token, **encrypted with Windows DPAPI**: only your Windows user account on this PC can decrypt it. **Sign out of Spotify** on the Connect page deletes it |
 | `logs\needledropper.log` | A log of what the app did (songs played, errors), up to 5 files of 1 MB. It never contains tokens or passwords; file paths in it can show your Windows user name |
+| `logs\browser.log` | What the YouTube player window's browser (Edge or Chrome) itself printed, for troubleshooting |
 | `cache\` | Which Spotify song was found for which artist and title, so each is looked up once |
-| Backups | Copies of the addon's saved data (the last 10 versions), made after the game writes it, so a broken or lost file can be restored |
+| `backups\` | Copies of the addon's saved data (`NeedleDropper.lua`, the last 10 versions of each file), made after the game writes it, so a broken or lost file can be restored |
+| `addon-install.json` | Only if you used **Install addon**: which files it copied, so an update can tidy up after itself |
 | `deck-browser\` | The browser profile used by the YouTube player window (YouTube's cookies live here) |
 | `update-check.json` | When the update check last ran and what it found (only if it is on) |
 | `packs\`, `media\` | Only if you used NeedleDropper 1.1: your old packs and audio files. The 1.2 app no longer uses them |
@@ -52,7 +54,7 @@ account's list of programs to start at sign-in. Unticking it removes the entry.
 | File | Contents |
 |---|---|
 | `WTF\Account\<account>\SavedVariables\NeedleDropper.lua` and the per-character file of the same name | The addon's own data, like every addon's: settings, the soundtracks you made, which ones are on, the places you have heard and your journal. The game writes it when you log out or reload. The app reads it for its backups and to look songs up ahead of time; it never changes it |
-| `Interface\AddOns\NeedleDropper_Companion\` | A tiny data addon the app writes: its version, whether Spotify is connected, the Spotify songs it found for your drops, and (once, after an update from 1.1) your old packs as share codes. The game reads it at login |
+| `Interface\AddOns\NeedleDropper_Companion\` | A tiny data addon the app writes: its version, whether Spotify is connected, the Spotify songs it found for your drops, and (only if you run `packs convert-legacy` after an update from 1.1) your old packs as share codes. The game reads it at login |
 | `Interface\AddOns\NeedleDropper_Local\media\` | Your own audio files, if you put any there |
 
 ## The beacon strip

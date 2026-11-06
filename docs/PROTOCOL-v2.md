@@ -554,6 +554,10 @@ budgets 141 → 131 (setId) → 113 (label) → 86 (query) → 59 (dropId) → 5
 
 ## 9. Integration checklist (v1.2)
 
+Status: done in the 1.2.0 integration (the TOC, Director, SelfTest, Core settings and the companion
+transports follow it; `tests/test_integration_static.py` and `tests/test_addon_e2e_durotar.py` check
+it). Kept as the record of what the cutover needed.
+
 **Addon** (CONTRACTS-v1.2 §2.1 TOC order: `… Protocol2.lua, Core.lua, … Companion.lua, Emit.lua, Location.lua,
 Discovery.lua, Audio.lua, Beacon.lua, ChatLink.lua, Toast.lua, Director.lua, …`; `Protocol.lua` deleted):
 
@@ -564,8 +568,9 @@ Discovery.lua, Audio.lua, Beacon.lua, ChatLink.lua, Toast.lua, Director.lua, …
   `local P = ns.Protocol2` (it uses `EV`, `FLAG`, `HasFlag`, `EV_NAME`). `SelfTest.lua`: the same `P` change
   (it uses `EV.PING` and `PadLine`).
 * `Core.lua` settings: `beaconCellPx` default **3**, range **2..4** (tip: "Physical pixels per beacon cell";
-  drop "Match the companion's setting"); new `beaconCorner` (options TOPLEFT, TOPRIGHT, BOTTOMLEFT, BOTTOMRIGHT;
-  default TOPLEFT; `advanced = true`, which Options.lua skips). Schema 1 → 2 moves a stored 4 to 3. There is no
+  drop "Match the companion's setting"); new `beaconCorner` (options `topleft`, `topright`, `bottomleft`,
+  `bottomright`, lowercase because `ns.CoerceSetting` lowercases input; default `topleft`; `Beacon.Corner()`
+  upper-cases it; `advanced = true`, which Options.lua skips). Schema 1 → 2 moves a stored 4 to 3. There is no
   `beaconCellsPerRow` any more.
 * `/needle selftest beacon` should print `Beacon.Status()` (gap, rows, cell px, size) and its `warnings`.
 

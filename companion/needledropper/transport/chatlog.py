@@ -97,7 +97,7 @@ DROP2_MARKER = protocol2.CHAT_PREFIX.encode("ascii")  # b"NDROP2"
 MATCH_STRICT = "strict"
 MATCH_ANYWHERE = "anywhere"
 #: A system message in the chat log: the client's timestamp, whitespace, then the record.
-STRICT_LINE_RE = re.compile(r"^\d{1,2}/\d{1,2}(?:/\d{2,4})? \d{1,2}:\d{2}:\d{2}(?:\.\d{1,3})?\s+NDROP1 ")
+STRICT_LINE_RE = re.compile(r"^\d{1,2}/\d{1,2}(?:/\d{2,4})? \d{1,2}:\d{2}:\d{2}(?:\.\d{1,3})?\s+NDROP1 ", re.ASCII)
 _RECORD_START = protocol.CHAT_PREFIX + " "  # "NDROP1 "
 
 
@@ -230,6 +230,9 @@ class ChatLogTransport(Transport):
         self._fh: Optional[io.RawIOBase] = None
         self._ident: Optional[tuple[int, int]] = None
         self._offset = 0
+        #: Where to continue after an error closed the file (CHAT-REPLAY-ON-ERROR): (identity, offset,
+        #: partial line). A later open of the *same* file resumes there instead of replaying it from 0.
+        self._resume: Optional[tuple[tuple[int, int], int, bytes]] = None
         self._partial = b""
         self._last_size: Optional[int] = None
         self._missing_reported = False
@@ -298,6 +301,11 @@ class ChatLogTransport(Transport):
         assert self.path is not None
         self._existed_at_start = self.path.exists()
         if self._existed_at_start:
+            try:  # remember where the log ends now, even if the first open fails (sharing violation, AV)
+                st = os.stat(self.path)
+                self._resume = (_identity(st), st.st_size, b"")
+            except OSError:
+                pass
             self._open(from_start=False)
 
     def poll(self) -> int:
@@ -313,7 +321,7 @@ class ChatLogTransport(Transport):
             except OSError as e:
                 self._last_error = f"{e.__class__.__name__}: {e}"
                 self._say(f"chatlog: read error ({self._last_error}); reopening")
-                self._close()
+                self._close(keep_position=True)
         for ev in emitted:
             try:
                 self.on_event(ev, self.name)
@@ -379,17 +387,32 @@ class ChatLogTransport(Transport):
             raise
         self._fh = fh
         self._ident = _identity(st)
-        self._offset = 0 if from_start else st.st_size
-        self._partial = b""
-        self._last_size = None if from_start else st.st_size
+        resume, self._resume = self._resume, None
+        if resume is not None and resume[0] == self._ident and st.st_size >= resume[1]:
+            # the same file we were reading before an error: carry on where we were (never replay it)
+            self._offset, self._partial, self._last_size = resume[1], resume[2], resume[1]
+            where = f"at byte {resume[1]} (where reading stopped)"
+        else:
+            self._offset = 0 if from_start else st.st_size
+            self._partial = b""
+            self._last_size = None if from_start else st.st_size
+            if resume is not None and resume[0] == self._ident:
+                where = "from the start (it was truncated in the meantime)"
+            else:
+                where = "from the start" if from_start else f"at the end ({st.st_size} bytes; history skipped)"
         self._missing_reported = False
         self._last_error = None
         self._opened_at_wall = self.wall()
-        where = "from the start" if from_start else f"at the end ({st.st_size} bytes; history skipped)"
         self._say(f"chatlog: opened {self.path} {where}")
         return True
 
-    def _close(self) -> None:
+    def _close(self, *, keep_position: bool = False) -> None:
+        """Close the log. ``keep_position`` (after a read error) remembers the file and offset so the
+        next open of the same file resumes there; otherwise (rotation, truncation, stop) it is forgotten."""
+        if keep_position and self._ident is not None:
+            self._resume = (self._ident, self._offset, self._partial)
+        elif not keep_position:
+            self._resume = None
         if self._fh is not None:
             try:
                 self._fh.close()
@@ -469,7 +492,11 @@ class ChatLogTransport(Transport):
                        "  If your own records are ignored like this (an unusual chat-log timestamp format), "
                        "set \"transport\": {\"chatlog\": {\"match\": \"anywhere\"}} in config.json.")
             return
-        ev = parse_line(text, match=self.match)
+        try:
+            ev = parse_line(text, match=self.match)
+        except (ValueError, UnicodeError) as exc:  # CHAT-UNICODE-RAISE: one bad line never drops the chunk
+            log.debug("chatlog: unparsable line (%s)", exc)
+            ev = None
         if ev is None:
             self._bad_lines += 1
             what = "bad format or checksum" if not v2 else "bad Base64, length or checksum"

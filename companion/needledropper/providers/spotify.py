@@ -27,7 +27,6 @@ import logging
 import math
 import os
 import re
-import tempfile
 import threading
 import time
 import unicodedata
@@ -36,10 +35,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
+from ..atomicio import atomic_write_bytes
 from ..models import TEST_DROP, Drop
 from .base import NowPlaying, PlayHandle, Provider, ProviderError, ProviderUnavailable
-from .spotify_auth import (API_BASE, HttpFunc, SpotifyAuthError, TokenManager, TokenStore, _app_dir, _json,
-                           urllib_http)
+from .spotify_auth import (API_BASE, SCOPE_PRIVATE, HttpFunc, SpotifyAuthError, TokenManager, TokenStore, _app_dir,
+                           _json, missing_scopes, urllib_http)
 
 log = logging.getLogger("needledropper.spotify")
 
@@ -50,6 +50,16 @@ __all__ = [
 
 PREMIUM_MESSAGE = ("Spotify Premium is required for playback control "
                    "(or your account is not allowlisted in your Spotify app)")
+#: 403 "User not registered in the Developer Dashboard": a development-mode app's allowlist.
+ALLOWLIST_MESSAGE = ("Spotify refused this account for your Spotify app: add its e-mail address under User "
+                     "Management in the Spotify developer dashboard (the app's owner needs Premium)")
+#: 403 "Insufficient client scope": signed in with an older NeedleDropper that asked for fewer permissions.
+SCOPE_MESSAGE = ("Spotify asks for one more permission (search with your country's catalogue, the Premium "
+                 "check): open the Connect page and sign in to Spotify again")
+#: The desktop app accepted play but never started the song (seen on a real PC on 2026-11-05).
+STUCK_MESSAGE = "Spotify isn't starting songs — restart the Spotify app"
+#: ``ProviderError.notice`` for the engine / tray when Spotify accepted a song but did not start it.
+NOTICE_STUCK = "spotifyStuck"
 NOT_CONFIGURED_MESSAGE = ("Spotify is not set up: no spotify.clientId in the config. "
                           "Run 'needledropper setup'.")
 NOT_LOGGED_IN_MESSAGE = "Not logged in to Spotify. Run 'needledropper spotify-login'."
@@ -57,7 +67,8 @@ NO_DEVICE_MESSAGE = ("No Spotify device is available. Open the Spotify app on th
                      "account) and try again, or set spotify.deviceName to choose a device.")
 
 POLL_INTERVAL_S = 2.0        # poll() hits GET /v1/me/player at most this often
-MAX_POLL_FAILURES = 3        # consecutive failed polls -> "error"
+MAX_POLL_FAILURES = 3        # consecutive failed polls -> logged as an outage (poll() keeps "playing")
+MAX_POLL_BACKOFF_S = 30.0    # a 429 Retry-After delays the next poll at most this long
 WAKE_TIMEOUT_S = 10.0        # after os.startfile("spotify:"), poll the device list this long
 WAKE_POLL_S = 1.0
 DEVICE_CACHE_TTL_S = 60.0    # device found by prepare() is reused this long if the list omits it
@@ -70,6 +81,8 @@ END_LEAD_MS = 2500           # at a natural track end, report "ended" this early
 NEAR_END_MS = 4000           # item changed this close to a natural end = autoplay, not the user
 NATURAL_END_SLACK_MS = 1000
 VERIFY_DELAYS_S = (0.5, 1.0)  # waits before each "is our track playing?" check
+VERIFY_RESEND_DELAYS_S = (0.5, 1.0, 1.0)  # after sending play again: ~4 s in all for the song to progress
+RECOVER_DELAYS_S = (0.5, 1.0, 1.0)  # after "transfer playback + play again" (the stuck desktop app)
 SEARCH_LIMIT = 10            # Development-mode maximum
 
 _PLAYER_REASONS_RESTRICTION_EXEMPT = {"PREMIUM_REQUIRED"}
@@ -95,6 +108,17 @@ class SpotifyApiError(ProviderError):
             return True
         return "restriction violated" in (self.api_message or "").lower()
 
+    @property
+    def is_scope_error(self) -> bool:
+        """403 "Insufficient client scope": the sign-in lacks a permission (e.g. ``user-read-private``)."""
+        return self.status == 403 and "insufficient client scope" in (self.api_message or "").lower()
+
+    @property
+    def is_allowlist_error(self) -> bool:
+        """403 from a development-mode app for an account missing from its User Management list."""
+        msg = (self.api_message or "").lower()
+        return self.status == 403 and ("not registered" in msg or "developer dashboard" in msg)
+
     @classmethod
     def from_response(cls, method: str, path: str, status: int, payload: Any,
                       retry_after: Optional[float] = None) -> "SpotifyApiError":
@@ -111,6 +135,24 @@ class SpotifyApiError(ProviderError):
             detail += f" [{reason}]"
         return cls(f"Spotify {method} {path} failed: HTTP {status} {detail}", status=status, reason=reason,
                    api_message=api_message, retry_after=retry_after)
+
+
+class SpotifyScopeError(SpotifyApiError):
+    """403 "Insufficient client scope": not a Premium or allowlist problem, and playback still works."""
+
+
+class SpotifyStuckError(ProviderError):
+    """Spotify accepted the play command but did not start (or progress) the song.
+
+    ``notice`` tells the engine to show "Spotify isn't starting songs -- restart the Spotify
+    app"; ``cleanup`` is a handle the engine stops when the drop ends, so a late start is
+    paused and the player's own music is resumed once the fallback provider is done."""
+
+    def __init__(self, message: str, *, cleanup: Optional[PlayHandle] = None, loaded: bool = True) -> None:
+        super().__init__(message)
+        self.notice = NOTICE_STUCK
+        self.cleanup = cleanup
+        self.loaded = loaded  # Spotify loaded the song (False: nothing loaded -- no pause is sent)
 
 
 @dataclass
@@ -193,6 +235,23 @@ def _item_matches(state: Optional[dict], uri: str) -> bool:
     if isinstance(linked, dict) and linked.get("uri") == uri:
         return True
     return bool(item.get("id")) and item.get("id") == _track_id(uri)
+
+
+def looks_stuck(state: Optional[dict]) -> bool:
+    """The stuck desktop app (real-client findings #4 and #10, 2026-11-05): a player state in which
+    Spotify allows neither pausing nor resuming -- every action disallowed, ``item`` null. A working
+    player is either playing (it may pause) or paused (it may resume)."""
+    actions = state.get("actions") if isinstance(state, dict) else None
+    disallows = actions.get("disallows") if isinstance(actions, dict) else None
+    return isinstance(disallows, dict) and bool(disallows.get("pausing")) and bool(disallows.get("resuming"))
+
+
+def _progress(state: Optional[dict]) -> int:
+    """``progress_ms`` of a player state (0 when missing or not a number)."""
+    try:
+        return int((state or {}).get("progress_ms") or 0) if isinstance(state, dict) else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 # ------------------------------------------------------- track matching ----
@@ -376,19 +435,9 @@ class _ResolveCache:
             return
         with self._lock:
             self._reload()
-            self._data[drop_id] = entry
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(prefix="resolved.", suffix=".tmp", dir=str(self.path.parent))
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                    json.dump(self._data, fh, indent=2, sort_keys=True, ensure_ascii=False)
-                os.replace(tmp, self.path)
-            except BaseException:
-                try:
-                    os.unlink(tmp)
-                except OSError:
-                    pass
-                raise
+            self._data[drop_id] = entry  # kept in memory even when the write below fails
+            text = json.dumps(self._data, indent=2, sort_keys=True, ensure_ascii=False)
+            atomic_write_bytes(self.path, text.encode("utf-8"), prefix="resolved.")
             self._stamp = self._file_stamp()
 
 
@@ -456,6 +505,7 @@ class _Session:
     failures: int = 0
     outcome: Optional[str] = None  # "end" | "user" | "error"
     stopped: bool = False
+    parked: bool = False  # accepted but never started: SpotifyStuckError's cleanup handle (see _park)
     fade_cancel: threading.Event = field(default_factory=threading.Event)
     fade_thread: Optional[threading.Thread] = None
     lock: threading.RLock = field(default_factory=threading.RLock)
@@ -469,6 +519,34 @@ class _Session:
     def near_natural_end(self, now: float) -> bool:
         return (self.natural_end and self.end_ms is not None
                 and self.estimate_pos(now) >= self.end_ms - NEAR_END_MS)
+
+
+SW_SHOWMINNOACTIVE = 7  # ShowWindow: minimized, the active window stays active
+
+
+def _default_startfile() -> Optional[Callable[[str], Any]]:
+    """``os.startfile`` asking for a minimized, non-activating window (``show_cmd`` is Python 3.10+;
+    the Spotify app may still decide to come forward, so the wake is skipped while the game is in
+    front: see :func:`_default_game_in_front`)."""
+    start = getattr(os, "startfile", None)
+    if start is None:
+        return None
+
+    def startfile(target: str) -> Any:
+        try:
+            return start(target, show_cmd=SW_SHOWMINNOACTIVE)
+        except TypeError:  # an os.startfile without show_cmd
+            return start(target)
+    return startfile
+
+
+def _default_game_in_front() -> bool:
+    """True when a World of Warcraft window is the foreground window (Windows; False elsewhere)."""
+    try:
+        from ..transport import wincapture
+        return bool(wincapture.game_in_foreground())
+    except Exception:  # noqa: BLE001 - not Windows, no ctypes: never block on this
+        return False
 
 
 # =============================================================== provider ===
@@ -491,7 +569,8 @@ class SpotifyProvider(Provider):
                  sleep: Callable[[float], None] = time.sleep,
                  clock: Callable[[], float] = time.monotonic,
                  now: Callable[[], float] = time.time,
-                 token_store: Optional[TokenStore] = None) -> None:
+                 token_store: Optional[TokenStore] = None,
+                 game_in_front: Optional[Callable[[], bool]] = None) -> None:
         cfg = dict(config_section or {})
         self.config = cfg
         self.paths = paths
@@ -501,7 +580,8 @@ class SpotifyProvider(Provider):
         self._restore_previous = bool(cfg.get("restorePrevious", True))
         self._fixed_volume = _clamp_volume(cfg.get("volume"))
         self._http: HttpFunc = http or urllib_http
-        self._startfile = startfile if startfile is not None else getattr(os, "startfile", None)
+        self._startfile = startfile if startfile is not None else _default_startfile()
+        self._game_in_front = game_in_front if game_in_front is not None else _default_game_in_front
         self._sleep = sleep
         self._clock = clock
         app_dir = _app_dir(paths)
@@ -511,10 +591,13 @@ class SpotifyProvider(Provider):
         self._cache = _ResolveCache(Path(cache_path) if cache_path else app_dir / "cache" / "resolved.json")
         self._lock = threading.RLock()
         self._unavailable: Optional[str] = None
+        self._scope_problem: Optional[str] = None  # set by a 403 "Insufficient client scope"
         self._device_cache: Optional[tuple[dict, float]] = None
         self._no_match: set[tuple[str, str]] = set()
         self._sessions: list[_Session] = []
         self._wake_thread: Optional[threading.Thread] = None
+        self._stuck: Optional[str] = None  # session health memory (real-client #8 / #10): why, or None
+        self._interrupted = threading.Event()  # the app is quitting: waits end at once (interrupt())
 
     # ------------------------------------------------------------ status --
 
@@ -558,6 +641,110 @@ class SpotifyProvider(Provider):
             if not self._unavailable:
                 log.warning("Spotify disabled for this session: %s", message)
             self._unavailable = message
+
+    # ------------------------------------------------------ session health --
+
+    def interrupt(self) -> None:
+        """The app is quitting (Windows logs off, the console closes): end the waits of a song that is
+        being started -- the start checks and the device wake -- so the engine can stop playback
+        within the few seconds Windows gives (SHELL-FASTSTOP-BUSY-ENGINE)."""
+        self._interrupted.set()
+
+    def _wait(self, seconds: float) -> None:
+        """``sleep`` that :meth:`interrupt` cuts short (then raises: the start is abandoned)."""
+        if self._interrupted.is_set():
+            raise ProviderError("NeedleDropper is shutting down")
+        if self._sleep is time.sleep:
+            if self._interrupted.wait(seconds):
+                raise ProviderError("NeedleDropper is shutting down")
+        else:
+            self._sleep(seconds)
+
+    def stuck(self) -> bool:
+        """Spotify accepted a song and did not start it, or its player shows the stuck signature
+        (:func:`looks_stuck`), this session. The engine then plays YouTube instead of trying
+        Spotify again (real-client findings #8 and #10); :meth:`check_health` (on each ARM),
+        a verified start or :meth:`reset_session` clears it."""
+        with self._lock:
+            return self._stuck is not None
+
+    def stuck_reason(self) -> Optional[str]:
+        with self._lock:
+            return self._stuck
+
+    def _mark_stuck(self, reason: str) -> None:
+        with self._lock:
+            first = self._stuck is None
+            self._stuck = reason
+        if first:
+            log.warning("Spotify: %s -- YouTube plays instead until Spotify works again (%s)", STUCK_MESSAGE, reason)
+
+    def clear_stuck(self, why: str = "") -> None:
+        with self._lock:
+            was = self._stuck
+            self._stuck = None
+        if was is not None:
+            log.info("Spotify works again%s; trying it first from now on", f" ({why})" if why else "")
+
+    def check_health(self) -> Optional[bool]:
+        """One cheap read of ``GET /v1/me/player`` (on ARM, before any song is sent): False when it
+        shows the stuck signature (Spotify is then marked stuck without being sent a song), True when
+        Spotify visibly plays something (a stuck verdict is cleared), None when it cannot tell
+        (nothing active, no sign-in, the read failed). Never raises."""
+        if not self.available():
+            return None
+        try:
+            state = self._get_player()
+        except Exception as exc:  # noqa: BLE001 - a probe
+            log.debug("Spotify health read failed: %s", exc)
+            return None
+        if looks_stuck(state):
+            self._log_disallows(state)
+            self._mark_stuck("its player allows neither play nor pause")
+            return False
+        item = state.get("item") if isinstance(state, dict) else None
+        if isinstance(item, dict) and state.get("is_playing") and _progress(state) > 0:
+            self.clear_stuck("it is playing something")
+            return True
+        return None
+
+    # ------------------------------------------------------------- scopes --
+
+    def missing_scopes(self) -> list[str]:
+        """Permissions this version needs that the current sign-in lacks (sign in again to grant them)."""
+        try:
+            tokens = self._store.load()
+        except Exception:  # noqa: BLE001 - informational
+            tokens = None
+        missing = missing_scopes(tokens)
+        with self._lock:
+            problem = self._scope_problem
+        if problem and SCOPE_PRIVATE not in missing:
+            missing.append(SCOPE_PRIVATE)
+        return missing
+
+    def _market(self) -> dict[str, str]:
+        """``market=from_token`` (the player's own catalogue, relinked tracks) when the sign-in may use it."""
+        return {} if SCOPE_PRIVATE in self.missing_scopes() else {"market": "from_token"}
+
+    def _note_scope_problem(self, err: SpotifyApiError) -> None:
+        with self._lock:
+            first = self._scope_problem is None
+            self._scope_problem = err.api_message or "Insufficient client scope"
+        if first:
+            log.warning("Spotify: %s (%s). Searching without the player's market until then.", SCOPE_MESSAGE, err)
+
+    def _call_market(self, path: str, params: dict[str, Any]) -> "_Resp":
+        """GET with ``market=from_token``; on 403 "Insufficient client scope" (an older sign-in without
+        ``user-read-private``) once more without the market, which needs no permission."""
+        market = self._market()
+        try:
+            return self._call("GET", path, params={**params, **market})
+        except SpotifyScopeError as exc:
+            self._note_scope_problem(exc)
+            if not market:
+                raise
+            return self._call("GET", path, params=params)
 
     # -------------------------------------------------------------- HTTP --
 
@@ -632,10 +819,15 @@ class SpotifyProvider(Provider):
             if status == 401:
                 raise SpotifyApiError("Spotify rejected the access token even after refreshing it. "
                                       "Run 'needledropper spotify-login'.", status=401)
+            if err.is_scope_error:
+                # Not Premium, not the allowlist: the sign-in lacks a permission. Playback keeps
+                # working; the caller retries without what needs it (see _call_market).
+                raise SpotifyScopeError(str(err), status=403, reason=err.reason, api_message=err.api_message)
             if status == 403 and not tolerant and not err.is_restriction:
                 log.warning("%s", err)
-                self._mark_unavailable(PREMIUM_MESSAGE)
-                raise ProviderUnavailable(PREMIUM_MESSAGE) from err
+                message = ALLOWLIST_MESSAGE if err.is_allowlist_error else PREMIUM_MESSAGE
+                self._mark_unavailable(message)
+                raise ProviderUnavailable(message) from err
             raise err
 
     def _get_player(self) -> Optional[dict]:
@@ -650,7 +842,7 @@ class SpotifyProvider(Provider):
         return [d for d in devices or [] if isinstance(d, dict)]
 
     def _get_track(self, uri: str) -> dict:
-        r = self._call("GET", f"/tracks/{_track_id(uri)}", params={"market": "from_token"})
+        r = self._call_market(f"/tracks/{_track_id(uri)}", {})
         if not isinstance(r.data, dict):
             raise ProviderError(f"Spotify returned no data for {uri}")
         return r.data
@@ -672,7 +864,19 @@ class SpotifyProvider(Provider):
             self._device_cache = None
 
     def _wake_device(self) -> Optional[dict]:
-        """Launch/focus the Spotify app (``spotify:``) and poll the device list for up to 10 s."""
+        """Launch the Spotify app (``spotify:``, minimized) and poll the device list for up to 10 s.
+
+        Never while the game is the foreground window: launching Spotify can bring its window in
+        front of the game, and nothing may take the focus from the game (real-client findings #8
+        and #13). The drop then plays on the next provider."""
+        try:
+            in_front = bool(self._game_in_front())
+        except Exception:  # noqa: BLE001 - never let the check break playback
+            in_front = False
+        if in_front:
+            log.info("No Spotify device found; not starting the Spotify app while the game is in front "
+                     "(it could take the focus). Open Spotify yourself to play Spotify songs.")
+            return None
         if self._startfile is not None:
             try:
                 log.info("No Spotify device found; starting the Spotify app")
@@ -683,7 +887,7 @@ class SpotifyProvider(Provider):
             log.info("Cannot launch the Spotify app on this OS; waiting for a device to appear")
         deadline = self._clock() + WAKE_TIMEOUT_S
         while self._clock() < deadline:
-            self._sleep(WAKE_POLL_S)
+            self._wait(WAKE_POLL_S)
             try:
                 device = pick_device(self._get_devices(), self._device_name)
             except ProviderUnavailable:
@@ -859,8 +1063,7 @@ class SpotifyProvider(Provider):
 
         queries = [f'track:"{q(title)}" artist:"{q(artist)}"', f"{q(title)} {q(artist)}"]
         for query in queries:
-            r = self._call("GET", "/search", params={"q": query, "type": "track", "limit": SEARCH_LIMIT,
-                                                     "market": "from_token"})
+            r = self._call_market("/search", {"q": query, "type": "track", "limit": SEARCH_LIMIT})
             tracks = (r.data or {}).get("tracks") if isinstance(r.data, dict) else None
             items = (tracks or {}).get("items") if isinstance(tracks, dict) else None
             best = choose_best_track(items or [], title, artist)
@@ -880,6 +1083,8 @@ class SpotifyProvider(Provider):
         try:
             if not self.can_play(drop):
                 return
+            if self.stuck():
+                return  # nothing is sent to a stuck Spotify (real-client #10); check_health re-checks it
             self._token()
             self._resolved(drop)
             device = pick_device(self._get_devices(), self._device_name)
@@ -934,6 +1139,7 @@ class SpotifyProvider(Provider):
         target, fade = self._plan_volume(s, device, drop, fade_in_ms)
         low = int(round(target * FADE_FLOOR)) if fade and target is not None else None
         preset = False
+        started = False  # Spotify accepted the play command: from then on it may start late
         try:
             if fade and low is not None:
                 preset = self._set_volume(s, low)
@@ -944,6 +1150,7 @@ class SpotifyProvider(Provider):
                 preset = self._set_volume(s, target)
 
             used = self._start_playback(device, uri, start_ms)
+            started = True
             if used.get("id") != device.get("id"):
                 self._rebind_device(s, used)
                 target, fade = self._plan_volume(s, used, drop, fade_in_ms)
@@ -956,9 +1163,27 @@ class SpotifyProvider(Provider):
                     self._set_volume(s, target)
 
             state = self._verify_started(s, uri, start_ms)
+        except SpotifyStuckError as exc:
+            self._mark_stuck(str(exc))
+            # Paused now only if our song loaded (a client that loaded nothing gets no more
+            # commands: real-client #10); the snapshot is restored when the drop ends.
+            exc.cleanup = self._park(s, drop, uri, pause=exc.loaded)
+            raise
+        except ProviderError as exc:
+            if not started:
+                self._restore_volume(s)
+                raise
+            # Accepted, then a later call failed (the resend, a verify read, a refusal): the song
+            # may still start late, under the next provider's song -- park it like a stuck one
+            # (SPOT-VERIFY-RESEND-UNMANAGED).
+            log.warning("Spotify accepted %s but the start could not be confirmed (%s)", uri, exc)
+            exc.cleanup = self._park(s, drop, uri)
+            raise
         except BaseException:
             self._restore_volume(s)
             raise
+        if state is not None:
+            self.clear_stuck("it started a song")
 
         self._finish_session(s, drop, state)
         np = self._now_playing(drop, uri, state)
@@ -1042,12 +1267,53 @@ class SpotifyProvider(Provider):
         return retry
 
     def _verify_started(self, s: _Session, uri: str, start_ms: int) -> Optional[dict]:
-        """Confirm GET /v1/me/player shows our track; resend play once. Returns the state seen."""
+        """Confirm GET /v1/me/player shows our track **and that it progresses**; returns the state seen.
+
+        A Spotify desktop app can accept ``PUT play`` (204) and then load nothing (``item: null``,
+        every action disallowed), or load the track and leave ``progress_ms`` where it was (seen on
+        a real PC on 2026-11-05). So "started" means: our track, ``is_playing`` not false, and the
+        position past ``start_ms`` (or moving between two reads). Steps: ~1.5 s of reads; play
+        again and ~2.5 s more (about 4 s in all); then the recovery the real client needed --
+        ``PUT /me/player {device_ids: [ours], play: true}`` and play again -- and ~2.5 s more.
+        Still nothing: :class:`SpotifyStuckError` (the engine plays the next provider). A player
+        state that cannot be read at all is assumed to be fine (None), as before.
+
+        Fast path (real-client #10): when the first reads show the stuck signature
+        (:func:`looks_stuck`: neither pausing nor resuming allowed), no play is sent again and no
+        transfer is tried -- on the owner's PC that sequence froze the Spotify app. A failed
+        resend or recovery command is logged and the reads go on, so the outcome is still a
+        start, or a :class:`SpotifyStuckError` that parks the song.
+        """
         saw_state = False
         last_state: Optional[dict] = None
-        for attempt in range(2):
-            for delay in VERIFY_DELAYS_S:
-                self._sleep(delay)
+        phases = ((VERIFY_DELAYS_S, None), (VERIFY_RESEND_DELAYS_S, "resend"), (RECOVER_DELAYS_S, "recover"))
+        for delays, action in phases:
+            if action is not None and looks_stuck(last_state) and not _item_matches(last_state, uri):
+                break  # the stuck desktop app: leave it alone (below)
+            if action == "resend":
+                log.info("Spotify has not started %s yet; sending play again", uri)
+                try:
+                    self._play_command(s.device_id, uri, start_ms)
+                except ProviderUnavailable:
+                    raise
+                except ProviderError as exc:
+                    log.info("Spotify: sending play again failed (%s); still watching for the start", exc)
+            elif action == "recover":
+                if not saw_state:
+                    break  # nothing readable to recover from: assume it started (below)
+                self._log_disallows(last_state)
+                log.warning("Spotify accepted %s but did not start it; transferring playback to %r and trying "
+                            "again", uri, s.device_name)
+                self._transfer_playback(s.device_id)
+                try:
+                    self._play_command(s.device_id, uri, start_ms)
+                except ProviderUnavailable:
+                    raise
+                except ProviderError as exc:
+                    log.info("Spotify: play after the transfer failed (%s); still watching for the start", exc)
+            prev: Optional[int] = None
+            for delay in delays:
+                self._wait(delay)
                 try:
                     state = self._get_player()
                 except ProviderUnavailable:
@@ -1057,17 +1323,87 @@ class SpotifyProvider(Provider):
                     continue
                 saw_state = True
                 last_state = state
-                if _item_matches(state, uri):
+                if not _item_matches(state, uri):
+                    prev = None
+                    continue
+                progress = _progress(state)
+                if state.get("is_playing", True) is not False and (
+                        progress > start_ms or (prev is not None and progress > prev)):
                     return state
-            if attempt == 0:
-                log.info("Spotify has not switched to %s yet; sending play again", uri)
-                self._play_command(s.device_id, uri, start_ms)
+                prev = progress
         if not saw_state:
             log.info("Could not confirm Spotify playback (player state unreadable); assuming it started")
             return None
+        self._log_disallows(last_state)
+        if _item_matches(last_state, uri):
+            raise SpotifyStuckError(f"{STUCK_MESSAGE} (it loaded {uri} but did not start playing it)")
         other = ((last_state or {}).get("item") or {}).get("uri") if isinstance(last_state, dict) else None
-        raise ProviderError(f"Spotify accepted the play command but is playing {other or 'nothing'} "
-                            f"instead of {uri}")
+        raise SpotifyStuckError(f"Spotify accepted the play command but is playing {other or 'nothing'} "
+                                f"instead of {uri}. {STUCK_MESSAGE}", loaded=bool(other))
+
+    def _transfer_playback(self, device_id: str) -> None:
+        """``PUT /me/player {device_ids: [id], play: true}``: make our device the active one (best effort)."""
+        try:
+            self._call("PUT", "/me/player", body={"device_ids": [device_id], "play": True}, tolerant=True)
+        except ProviderUnavailable:
+            raise
+        except ProviderError as exc:
+            log.info("Spotify transfer of playback failed: %s", exc)
+
+    def _log_disallows(self, state: Optional[dict]) -> None:
+        """Log which player actions Spotify disallows right now (``actions.disallows``): with a stuck
+        desktop app every action is disallowed."""
+        actions = state.get("actions") if isinstance(state, dict) else None
+        disallows = actions.get("disallows") if isinstance(actions, dict) else None
+        if not isinstance(disallows, dict):
+            return
+        names = sorted(str(k) for k, v in disallows.items() if v)
+        if names:
+            log.info("Spotify player state: item=%s is_playing=%s progress_ms=%s; disallowed actions: %s",
+                     ((state.get("item") or {}).get("uri") if isinstance(state.get("item"), dict) else None),
+                     state.get("is_playing"), state.get("progress_ms"), ", ".join(names))
+
+    def _park(self, s: _Session, drop: Drop, uri: str, *, pause: bool = True) -> PlayHandle:
+        """A song Spotify accepted but did not start: pause our device (a late start must not play over
+        the fallback provider), put the volume back, and hand the engine a handle that finishes the job
+        when the drop ends (pause again if it started after all, resume the player's own music).
+        ``pause=False``: Spotify loaded nothing, so no pause is sent to it now (real-client #10)."""
+        log.warning("Spotify: %s", STUCK_MESSAGE)
+        if pause:
+            try:
+                self._call("PUT", "/me/player/pause", params={"device_id": s.device_id}, tolerant=True)
+            except ProviderUnavailable:
+                pass
+            except ProviderError as exc:
+                log.info("Spotify pause failed: %s", exc)
+        self._restore_volume(s)
+        with s.lock:
+            s.outcome = "error"
+            s.parked = True
+        with self._lock:
+            self._sessions.append(s)
+        return PlayHandle(provider=self.name, drop=drop,
+                          data={"session": s, "uri": uri, "deviceId": s.device_id, "parked": True})
+
+    def _finish_parked(self, s: _Session) -> None:
+        """End of the drop for a song that never started (see :meth:`_park`)."""
+        state: Optional[dict] = None
+        try:
+            state = self._get_player()
+        except ProviderError as exc:
+            log.info("Spotify: could not read playback state (%s)", exc)
+        if isinstance(state, dict) and state.get("is_playing"):
+            if not _item_matches(state, s.uri):
+                log.info("Spotify: something else plays now; leaving it as it is")
+                return
+            dev = state.get("device") if isinstance(state.get("device"), dict) else {}
+            try:
+                self._call("PUT", "/me/player/pause", params={"device_id": str(dev.get("id") or s.device_id)},
+                           tolerant=True)
+            except ProviderError as exc:
+                log.info("Spotify pause failed: %s", exc)
+        self._restore_volume(s)
+        self._restore_snapshot(s)
 
     def _finish_session(self, s: _Session, drop: Drop, state: Optional[dict]) -> None:
         item = (state or {}).get("item") if isinstance(state, dict) else None
@@ -1156,19 +1492,25 @@ class SpotifyProvider(Provider):
             s.last_poll = now
         try:
             state = self._get_player()
-        except ProviderUnavailable as exc:
-            log.warning("Spotify poll: %s", exc)
-            with s.lock:
-                s.outcome = "error"
-            return "error"
-        except ProviderError as exc:
+        except ProviderError as exc:  # ProviderUnavailable included
+            # The API is unreachable / refusing: Spotify itself may well still be playing our track, and
+            # a stop could not be confirmed either. Reporting "error" would make the engine start the
+            # next provider over it (double audio, Spotify left unmanaged), so keep "playing" on the
+            # estimated position and end at the planned end point.
             with s.lock:
                 s.failures += 1
-                failed = s.failures >= MAX_POLL_FAILURES
-                if failed:
-                    s.outcome = "error"
-            log.info("Spotify poll failed (%s)%s", exc, "; giving up" if failed else "")
-            return "error" if failed else "playing"
+                n = s.failures
+                wait = getattr(exc, "retry_after", None)
+                if isinstance(wait, (int, float)) and wait > POLL_INTERVAL_S:
+                    s.last_poll = now + min(float(wait), MAX_POLL_BACKOFF_S) - POLL_INTERVAL_S
+            if n == 1 or n == MAX_POLL_FAILURES or n % 10 == 0:
+                log.warning("Spotify poll failed (%s)%s", exc,
+                            "; still assuming the song plays" if n >= MAX_POLL_FAILURES else "")
+            if s.end_ms is not None:
+                lead = END_LEAD_MS if s.natural_end else 0
+                if s.estimate_pos(now) >= s.end_ms - lead:
+                    return "ended"
+            return "playing"
         verdict = self._assess(s, state, now)
         with s.lock:
             s.failures = 0
@@ -1199,6 +1541,9 @@ class SpotifyProvider(Provider):
             if s in self._sessions:
                 self._sessions.remove(s)
         self._cancel_fade(s)
+        if s.parked:
+            self._finish_parked(s)
+            return
 
         now = self._clock()
         state: Optional[dict] = None
@@ -1336,8 +1681,11 @@ class SpotifyProvider(Provider):
         """Connection state for the control panel (no tokens or secrets).
 
         ``badge`` is ``"not-set-up"`` (no Client ID or no login), ``"connected"``,
-        ``"premium"`` (Spotify refused playback control: Premium required or the
-        account is not allowlisted) or ``"error"`` (with ``message``).
+        ``"premium"`` (Spotify refused playback control: Premium required, or the
+        account is not allowlisted), ``"allowlist"`` (the account is not on the app's
+        User Management list) or ``"error"`` (with ``message``). Also: ``missingScopes``
+        (sign in again to grant them; playback still works), ``saveError`` (the sign-in
+        works but is only kept in memory).
         """
         with self._lock:
             unavailable = self._unavailable
@@ -1348,6 +1696,9 @@ class SpotifyProvider(Provider):
             badge, message = "not-set-up", "Paste your Spotify app's Client ID and connect."
         elif unavailable == PREMIUM_MESSAGE:
             badge, message = "premium", unavailable
+            logged_in = self._store.has_refresh_token()
+        elif unavailable == ALLOWLIST_MESSAGE:
+            badge, message = "allowlist", unavailable
             logged_in = self._store.has_refresh_token()
         elif unavailable:
             badge, message = "error", unavailable
@@ -1364,16 +1715,21 @@ class SpotifyProvider(Provider):
                                                "Click Connect Spotify again.")
                 else:
                     badge, message = "error", str(exc)
+        missing = self.missing_scopes() if logged_in else []
         return {"badge": badge, "message": message, "configured": configured, "loggedIn": logged_in,
-                "deviceName": self._device_name}
+                "deviceName": self._device_name, "missingScopes": missing,
+                "scopeMessage": SCOPE_MESSAGE if missing else None, "saveError": self._store.save_error,
+                "stuck": self.stuck()}
 
     def reset_session(self) -> None:
-        """Forget session-wide verdicts (Premium refusal, revoked login, device and
-        no-match caches), e.g. after the user connected again in the panel."""
+        """Forget session-wide verdicts (Premium refusal, revoked login, missing permission, device
+        and no-match caches), e.g. after the user connected again in the panel."""
         with self._lock:
             self._unavailable = None
+            self._scope_problem = None
             self._device_cache = None
             self._no_match.clear()
+            self._stuck = None
 
 
 def _retry_after(headers: dict[str, str]) -> float:

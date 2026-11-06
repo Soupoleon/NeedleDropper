@@ -113,6 +113,35 @@ def package_installed(name: str = PACKAGE) -> bool:
     return True
 
 
+TEMP_PLACE_MESSAGE = ("NeedleDropper.exe runs from a temporary folder (inside the zip?). Extract the zip to a "
+                      "permanent folder such as Documents\\NeedleDropper and start it from there; Windows cleans "
+                      "temporary folders, and Start with Windows would stop working.")
+
+
+def temporary_location(path: Optional[PathArg] = None) -> bool:
+    """True when ``path`` (default: the running frozen exe) lives in a temporary folder: under
+    ``%TEMP%`` / ``%TMP%``, or in the folder Explorer unpacks a zip into when a program is
+    double-clicked inside it (``...\\Temp1_<name>.zip\\``). Journey review F10: Start with Windows
+    pointed at such a folder stops working once Windows cleans it."""
+    if path is None:
+        if not is_frozen():
+            return False
+        path = sys.executable or ""
+    if not path:
+        return False
+    full = os.path.normcase(os.path.abspath(_text(path)))
+    parts = [p.lower() for p in Path(full).parts]
+    if any(p.startswith("temp") and p.endswith(".zip") for p in parts):
+        return True
+    for env in ("TEMP", "TMP"):
+        base = os.environ.get(env)
+        if base:
+            root = os.path.normcase(os.path.abspath(base))
+            if full == root or full.startswith(root.rstrip("\\/") + os.sep):
+                return True
+    return False
+
+
 def launcher_script() -> Optional[Path]:
     """``companion/launcher.py`` of a source checkout, or None (installed / frozen layouts)."""
     path = Path(__file__).resolve().parent.parent / "launcher.py"
@@ -278,6 +307,8 @@ def enable(exe_path: Optional[PathArg] = None, args: Sequence[Any] = (), *, winr
     reg = _registry(winreg)
     if reg is None:
         raise AutostartError(f"Start with Windows requires Windows (this is {sys.platform})")
+    if exe_path is None and temporary_location():
+        raise AutostartError(TEMP_PLACE_MESSAGE)
     command = _command_for(exe_path, args)
     _write(reg, value_name, command)
     _reset_task_manager_switch(reg, value_name)
@@ -342,6 +373,8 @@ def ensure(exe_path: Optional[PathArg] = None, args: Sequence[Any] = (), *, winr
     reg = _registry(winreg)
     if reg is None:
         return ENSURE_UNAVAILABLE
+    if exe_path is None and temporary_location():
+        raise AutostartError(TEMP_PLACE_MESSAGE)  # never repoint the Run value at a temporary copy
     current = get_command(winreg=reg, value_name=value_name)
     desired = _command_for(exe_path, args)
     if current == desired:
@@ -378,6 +411,6 @@ def refresh(exe_path: Optional[PathArg] = None, args: Sequence[Any] = (), *, win
 __all__ = [
     "RUN_KEY", "STARTUP_APPROVED_KEY", "VALUE_NAME", "PACKAGE", "MAX_COMMAND_LENGTH", "AutostartError",
     "ENSURE_CREATED", "ENSURE_UPDATED", "ENSURE_OK", "ENSURE_UNAVAILABLE",
-    "is_frozen", "pythonw_for", "package_installed", "launcher_script", "default_command", "command_line",
+    "is_frozen", "temporary_location", "TEMP_PLACE_MESSAGE", "pythonw_for", "package_installed", "launcher_script", "default_command", "command_line",
     "get_command", "is_approved", "is_enabled", "enable", "disable", "set_enabled", "refresh", "ensure",
 ]

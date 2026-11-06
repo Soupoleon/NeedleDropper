@@ -20,7 +20,9 @@ TOTAL_CELLS = len(HEADER) + PAYLOAD_CELLS  # 31
 
 CHAT_PREFIX = "NDROP1"
 PAD_PREFIX = "NDPAD"
-CHAT_LINE_RE = re.compile(r"NDROP1 (\d+) (\d+) (\d+) (\d+) (\d+) (\S+) ([0-9a-f]{4})")
+#: ASCII only (CHAT-UNICODE-RAISE): ``\d`` / ``\S`` would also match other scripts' digits and letters,
+#: and the record body is then encoded as ASCII for its checksum.
+CHAT_LINE_RE = re.compile(r"NDROP1 ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([0-9]+) ([!-~]+) ([0-9a-f]{4})")
 _ID_BAD = re.compile(r"[^A-Za-z0-9:_.\-]")
 
 
@@ -129,6 +131,8 @@ def parse_chat_line(line: str) -> Optional[Event]:
         return None
     seq, t, n, h, fl, did, crc = m.groups()
     body = f"{CHAT_PREFIX} {seq} {t} {n} {h} {fl} {did}"
+    if not body.isascii():  # never true with the ASCII pattern; kept so this can never raise
+        return None
     if fletcher16(body.encode("ascii")) != int(crc, 16):
         return None
     try:

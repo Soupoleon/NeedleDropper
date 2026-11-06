@@ -1,14 +1,18 @@
 """YouTube videos played in the companion's player window (docs/SPEC.md 5.4, SPEC-v1.1 C.3).
 
-YouTube's rules require the player to stay visible while it plays, so this is
-the one drop that may open a desktop window: when a YouTube drop starts and no
-player window is connected, the deck opens the small Edge/Chrome player
-window (``deck.autoOpen`` = ``"youtube"`` or ``"always"``) and this provider
-waits up to 8 s for it to connect. With ``"never"``, or if the window does not
-connect in time, :meth:`play` raises ProviderError so the engine tries the next
-provider. Embedding errors (100/101/150/153) are reported by the page; they make
-this provider fail too -- immediately if the page reports within
-``start_timeout``, otherwise via :meth:`poll`.
+YouTube's rules require the player to stay visible while it plays. The window is made once,
+hidden, when the app starts (deck.prepare_player; real-client findings #8 / #13: Chromium
+activates a window when it creates it, so none is created while the player is in the game),
+shown always on top at its corner -- never taking the focus -- while a YouTube song plays, and
+hidden again afterwards (deck/window.py).
+
+On ARM :meth:`prepare` cues the song in that window (``cueVideoById``: loaded, paused, silent),
+so FIRE only has to start it. When no window is connected at FIRE, the deck may open one (not
+while the game is in front) and this provider waits up to 8 s for it. With ``deck.autoOpen`` =
+``"never"``, or if the window does not connect in time, :meth:`play` raises ProviderError so the
+engine tries the next provider. Embedding errors (100/101/150/153) are reported by the page;
+they make this provider fail too -- immediately if the page reports within ``start_timeout``,
+otherwise via :meth:`poll`.
 """
 from __future__ import annotations
 
@@ -91,8 +95,31 @@ class YouTubeProvider(Provider):
             return
         if getattr(deck, "auto_open", "youtube") == "never" and not getattr(deck, "player_opening", False):
             raise ProviderError("the player window is closed and opening it automatically is off "
-                                "(control panel > Advanced > Player window)")
+                                "(deck.autoOpen is \"never\")")
+        front = getattr(deck, "game_in_front", None)
+        try:
+            in_front = bool(front()) if callable(front) else False
+        except Exception:  # noqa: BLE001
+            in_front = False
+        if in_front and not getattr(deck, "player_opening", False):
+            raise ProviderError("there is no player window, and none is made while the game is in front (it would "
+                                "take the focus); it is made again once you are out of the game")
         raise ProviderError(f"the YouTube player window did not connect within {self.connect_timeout:g} s")
+
+    def prepare(self, drop: Drop) -> None:
+        """ARM pre-warm: make sure the player window is there (never created while the game is in
+        front: the deck refuses) and cue the video in it, so FIRE only starts it. Never raises."""
+        if not (self.enabled and drop.youtube and self.deck is not None):
+            return
+        try:
+            if not self._player_open():
+                ensure = getattr(self.deck, "ensure_player", None)
+                if ensure is None or not self._can_open_player() or not ensure(self.connect_timeout):
+                    return
+            self.deck.send({"cmd": "cue", "videoId": drop.youtube, "dropId": drop.id,
+                            "startMs": int(drop.startMs or 0)})
+        except Exception as exc:  # noqa: BLE001 - best effort by contract
+            log.debug("YouTube prewarm for %s failed: %s", drop.id, exc)
 
     def play(self, drop: Drop, *, fade_in_ms: int = 0) -> PlayHandle:
         if not drop.youtube:

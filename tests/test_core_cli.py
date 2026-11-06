@@ -1,4 +1,5 @@
-"""cli.py commands that run without the game: zones, validate, build-map, install-addon, test-drop, run."""
+"""cli.py commands that run without the game: zones, validate, install-addon, test-drop, run (and the
+retired v1.1 build-map / resolve)."""
 from __future__ import annotations
 
 import json
@@ -62,38 +63,18 @@ def test_validate_errors_exit_1(home, tmp_path, capsys):
     assert 'pack "Bad" drops[0]' in out and 'missing "artist"' in out and "FAILED" in out
 
 
-def test_build_map_out_dir_no_registry(home, tmp_path, capsys):
+def test_build_map_and_resolve_are_retired_and_write_nothing(home, tmp_path, capsys):
+    """v1.2: the addon ships its soundtracks (Sets/*.lua) and every beacon frame carries its song, so
+    there is no Map.lua / Map.json to build any more (DESIGN-v1.2 1.3). The old commands explain that."""
     pack = write_pack(tmp_path / "p.json", GOOD)
     write_config(home, packs=[str(pack)])
     out_dir = tmp_path / "out"
-    assert cli.main(["build-map", "--out", str(out_dir), "--no-registry"]) == 0
-    js = json.loads((out_dir / "Map.json").read_text(encoding="utf-8"))
-    lua = (out_dir / "Map.lua").read_text(encoding="utf-8")
-    assert js["packs"] == ["CLI Pack"] and len(js["drops"]) == 3
-    assert [d["id"] for d in js["drops"]] == ["area:87", "zone:1411", "zone:1429"]
-    assert "NeedleDropper_Map = {" in lua and f"hash = {js['hash']}," in lua
-    assert not (home / "maps").exists()
+    assert cli.main(["build-map", "--out", str(out_dir), "--no-registry"]) == 2  # old options still parse
     out = capsys.readouterr().out
-    assert f"map hash {js['hash']}" in out
-
-
-def test_build_map_registry_copy(home, tmp_path):
-    pack = write_pack(tmp_path / "p.json", GOOD)
-    write_config(home, packs=[str(pack)])
-    out_dir = tmp_path / "out"
-    assert cli.main(["build-map", "--out", str(out_dir)]) == 0
-    h = json.loads((out_dir / "Map.json").read_text(encoding="utf-8"))["hash"]
-    assert (home / "maps" / f"{h}.json").is_file()
-
-
-def test_build_map_refuses_bad_packs_and_missing_addon(home, tmp_path, capsys):
-    bad = write_pack(tmp_path / "bad.json", [{"zone": "Nowhere", "title": "t", "artist": "a"}])
-    write_config(home, packs=[str(bad)], wowRoot=str(tmp_path / "WoW"))
-    assert cli.main(["build-map", "--out", str(tmp_path / "o")]) == 1
-    assert "the map was not written" in capsys.readouterr().out
-    assert not (tmp_path / "o" / "Map.lua").exists()
-    assert cli.main(["build-map"]) == 1
-    assert "install-addon" in capsys.readouterr().out
+    assert "removed in NeedleDropper 1.2" in out and "/needle" in out and "packs" in out
+    assert cli.main(["resolve"]) == 2
+    assert "removed in NeedleDropper 1.2" in capsys.readouterr().out
+    assert not out_dir.exists() and not (home / "maps").exists()
 
 
 def make_fake_addon(root: Path) -> Path:
@@ -101,8 +82,8 @@ def make_fake_addon(root: Path) -> Path:
     (src / "media").mkdir(parents=True)
     (src / "NeedleDropper.toc").write_text("## Interface: 16001\n", encoding="utf-8")
     (src / "Core.lua").write_text("local ADDON, ns = ...\n", encoding="utf-8")
-    (src / "Map.lua").write_text("NeedleDropper_Map = { placeholder = true }\n", encoding="utf-8")
-    (src / "Map.json").write_text('{"hash": 1, "drops": []}', encoding="utf-8")
+    (src / "Sets").mkdir()
+    (src / "Sets" / "AzerothMixtape.lua").write_text("local ADDON, ns = ...\n", encoding="utf-8")
     (src / "media" / "silence.mp3").write_bytes(b"\xff\xfb")
     (src / "__pycache__").mkdir()
     (src / "__pycache__" / "junk.pyc").write_bytes(b"x")
@@ -122,19 +103,24 @@ def test_install_addon(home, tmp_path, monkeypatch, capsys):
     local_media.mkdir(parents=True)
     (local_media / "mine.mp3").write_bytes(b"user file")
 
-    assert cli.main(["install-addon"]) == 0
+    # a v1.1 install by this app left the retired map files behind
     dest = addons / "NeedleDropper"
-    assert (dest / "NeedleDropper.toc").is_file() and (dest / "media" / "silence.mp3").is_file()
-    assert not (dest / "__pycache__").exists()
-    js = json.loads((dest / "Map.json").read_text(encoding="utf-8"))
-    assert len(js["drops"]) == 3  # regenerated from packs, not the placeholder
-    assert (local_media / "mine.mp3").read_bytes() == b"user file"  # never touched
+    dest.mkdir(parents=True)
+    (dest / "Map.lua").write_text("NeedleDropper_Map = {}", encoding="utf-8")
+    (dest / "Map.json").write_text('{"hash": 1, "drops": []}', encoding="utf-8")
 
-    # reinstall keeps the generated map even with --no-map
+    assert cli.main(["install-addon", "--force"]) == 0  # --force: the old folder has no receipt of ours
+    assert (dest / "NeedleDropper.toc").is_file() and (dest / "media" / "silence.mp3").is_file()
+    assert (dest / "Sets" / "AzerothMixtape.lua").is_file()             # the bundled soundtracks
+    assert not (dest / "__pycache__").exists()
+    assert not (dest / "Map.lua").exists() and not (dest / "Map.json").exists()  # retired with v1.2
+    assert (local_media / "mine.mp3").read_bytes() == b"user file"  # never touched
+    assert (addons / "NeedleDropper_Companion" / "NeedleDropper_Companion.toc").is_file()  # the data addon
+
+    # a reinstall (now recorded as ours) updates the files without --force
     (src / "Core.lua").write_text("local ADDON, ns = ...\n-- v2\n", encoding="utf-8")
-    assert cli.main(["install-addon", "--no-map"]) == 0
+    assert cli.main(["install-addon"]) == 0
     assert "v2" in (dest / "Core.lua").read_text(encoding="utf-8")
-    assert json.loads((dest / "Map.json").read_text(encoding="utf-8")) == js
 
 
 def test_install_addon_refuses_while_game_runs(home, tmp_path, monkeypatch, capsys):
@@ -145,7 +131,7 @@ def test_install_addon_refuses_while_game_runs(home, tmp_path, monkeypatch, caps
     (wow / "_forever_").mkdir(parents=True)
     write_config(home, packs=[str(write_pack(tmp_path / "p.json", GOOD))], wowRoot=str(wow))
     assert cli.main(["install-addon"]) == 2
-    assert "WoW is running" in capsys.readouterr().out
+    assert "World of Warcraft is running" in capsys.readouterr().out
     assert not (wow / "_forever_" / "Interface" / "AddOns" / "NeedleDropper").exists()
     assert cli.main(["install-addon", "--force"]) == 0
     assert (wow / "_forever_" / "Interface" / "AddOns" / "NeedleDropper" / "NeedleDropper.toc").is_file()
@@ -182,11 +168,11 @@ def test_run_starts_and_stops_cleanly(home, tmp_path, monkeypatch, capsys):
     assert cli.main(["run", "--seconds", "0.3"]) == 0
     out = capsys.readouterr().out
     assert "NeedleDropper companion" in out and "Unknown provider 'bogus'" in out
-    assert "local (plays in an open player window)" in out and "Control panel: http://127.0.0.1:" in out
-    assert "Player:     never opens by itself" in out  # deck.autoOpen false migrated to "never"
+    assert "local (plays in an open player window)" in out and "Connect page: http://127.0.0.1:" in out
+    assert "Player:       never opens by itself" in out  # deck.autoOpen false migrated to "never"
     assert "Bye." in out
-    assert opened == []  # an explicit `run` does not open the panel unless --panel
-    assert (home / "needledropper.log").is_file()
+    assert opened == []  # an explicit `run` does not open the Connect page unless --panel
+    assert (home / "logs" / "needledropper.log").is_file()  # v1.2: the rotating log under logs/
     import logging
     assert logging.getLogger("needledropper").handlers == []  # nothing leaks out of the command
 
@@ -225,7 +211,7 @@ def test_build_providers_and_transports_report_missing(tmp_path, monkeypatch):
 
 
 def test_no_command_means_the_default_start(capsys):
-    """Double-clicking the exe = no command = run + control panel (cmd_default)."""
+    """Double-clicking the exe = no command = the companion in the tray (cmd_default)."""
     args = cli.parse_args([])
     assert args.func is cli.cmd_default and args.command is None
     assert (args.panel, args.no_panel, args.open, args.seconds) == (False, False, False, 0.0)
@@ -234,7 +220,7 @@ def test_no_command_means_the_default_start(capsys):
         cli.main(["--help"])
     assert ei.value.code == 0
     out = capsys.readouterr().out
-    assert "build-map" in out and "control panel" in out
+    assert "build-map" not in out and "tray" in out  # v1.2: the retired commands are hidden
 
 
 def test_build_providers_skips_switched_off_services(tmp_path):

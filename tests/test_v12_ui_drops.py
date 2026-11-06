@@ -58,8 +58,10 @@ def test_empty_pane_names_the_place_when_nothing_plays_here():
     assert h.selected() is None
     empty = h.drops().FormEmpty
     assert h.shown(empty)
-    assert h.text(empty) == ("No needle drop for Razor Hill yet. Press Add drop here, then paste a Spotify "
-                             "or YouTube link.")
+    # A link alone makes a draft that never plays on arrival, so the hint asks for the names first
+    # (UI review UI-LINK-ONLY-DRAFT / journey F5).
+    assert h.text(empty) == ("No needle drop for Razor Hill yet. Press Add drop here, then type the artist and "
+                             "title (and paste a Spotify or YouTube link if you have one).")
     assert not h.shown(h.form().scroll)
 
 
@@ -358,8 +360,10 @@ def test_more_section_start_length_volume_tags_note_and_off():
     assert h.text(form.ErrorText).startswith("Use minutes:seconds")
     h.escape() if h.focused() is not None else None
     h.set_slider(form.Volume, 60)
+    assert h.text(form.Volume.RightText) == "60%"            # the label follows at once ...
+    assert drop(h, "user:my-drops", "area:362").get("volume") is None
+    h.advance(0.5)                                           # ... the drop is saved once the slider settles
     assert drop(h, "user:my-drops", "area:362")["volume"] == 60
-    assert h.text(form.Volume.RightText) == "60%"
     h.click(form.Fitting)
     assert drop(h, "user:my-drops", "area:362")["tags"] == ["fitting"]
     h.type(form.Tags, "night, chill , night")
@@ -433,9 +437,10 @@ def test_place_scope_zone_and_landmark():
     assert h.text(form.PlaceNote) == "Landmark saved by name: works on English clients only."
     zones = [i for i in h.dropdown_items(form.Zone)]
     titles = [i["text"] for i in zones if i["kind"] == "title"]
-    assert titles == ["Eastern Kingdoms", "Kalimdor"]
+    assert titles == ["Eastern Kingdoms", "Kalimdor", "Azeroth"]    # Azeroth: zones with no continent
     radios = [i["text"] for i in zones if i["kind"] == "radio"]
     assert "Elwynn Forest" in radios and "Westfall" in radios and "Durotar" in radios
+    assert "Zephras Isle" in radios                          # parent 947 itself (UI review F9)
     assert [i["text"] for i in zones if i["kind"] == "radio" and i["selected"]] == ["Durotar"]
     h.dropdown_pick(form.Zone, "Westfall")
     assert h.selected() == ("user:my-drops", "sub:1436:tiragarde-keep")

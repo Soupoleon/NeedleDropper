@@ -1,7 +1,8 @@
 local ADDON, ns = ...
 -- Location: where is the player? Normalized zone uiMapID, subzone text, instance info and
--- the drops that match right now. Re-reads 0.5 s after any zone event (debounced) and
--- retries while the map API still returns nil right after login.
+-- the drops that match right now (from ns.Map, the merged active soundtracks). Re-reads 0.5 s
+-- after any zone event (debounced) and retries while the map API still returns nil right after
+-- login. CurrentAreaID gives Add drop here the areaID of the landmark the player stands in.
 
 local L = {}
 ns.Location = L
@@ -93,16 +94,25 @@ function L.Snapshot()
   return snap
 end
 
-local function scheduleRetry(reason, since)
-  C_Timer.After(RETRY_DELAY, function() L.Refresh(reason, since) end)
+-- `place` (optional): the zone / instance a retry's `since` was read in. The carried arrival
+-- time only describes that place; a retry that finds the player somewhere else uses the real
+-- arrival time instead (baseline ND-DIR-09).
+local function scheduleRetry(reason, since, place)
+  C_Timer.After(RETRY_DELAY, function() L.Refresh(reason, since, place) end)
+end
+
+local function samePlace(snap, place)
+  return snap.zoneMapID == place.zoneMapID and snap.inInstance == place.inInstance
+     and snap.instanceID == place.instanceID
 end
 
 -- Reads the location now and fires ND_LOCATION(state, changes) when something changed.
-function L.Refresh(reason, since)
+function L.Refresh(reason, since, place)
   local now = GetTime()
+  local snap = L.Snapshot()
+  if since and place and not samePlace(snap, place) then since = nil end
   since = since or pendingSince or now
   pendingSince = nil
-  local snap = L.Snapshot()
   local st = L.state
 
   -- The map API can return nil right after login / loading screens: keep the old
@@ -120,7 +130,8 @@ function L.Refresh(reason, since)
   if snap.subzone == "" and not snap.inInstance and L.loginAt and now - L.loginAt < 10
      and subTries < SUBZONE_RETRIES then
     subTries = subTries + 1
-    scheduleRetry("subzone-retry", since)
+    scheduleRetry("subzone-retry", since,
+      { zoneMapID = snap.zoneMapID, inInstance = snap.inInstance, instanceID = snap.instanceID })
   end
 
   local first = not st.ready
@@ -196,6 +207,70 @@ function L.Candidates()
   return out
 end
 
+-- ---------------------------------------------------------- current area ----
+
+local function lowerAscii(s)
+  return (string.gsub(s, "[A-Z]", function(c) return string.char(string.byte(c) + 32) end))
+end
+
+-- Best-effort areaID of the landmark the player stands in (DESIGN-v1.2 4.4, Add drop here):
+--   1. the explored areas at the player's position (C_MapExplorationInfo.GetExploredAreaIDsAtPosition
+--      with C_Map.GetPlayerMapPosition, on the zone map and the raw map) whose name
+--      (C_Map.GetAreaInfo) is the subzone text;
+--   2. else an areaID some soundtrack already uses for a landmark of that name in this zone
+--      (ns.Map, then the built-in sets), so a place in a known landmark gets the same id.
+-- Everything is pcall-guarded; nil when unknown (the drop is then saved by name).
+function L.CurrentAreaID(mapID, subzone, rawMapID)
+  if type(subzone) ~= "string" or subzone == "" then return nil end
+  local want = lowerAscii(subzone)
+  local function named(areaID)
+    local name = ns.AreaName and ns.AreaName(areaID)
+    return name ~= nil and lowerAscii(name) == want
+  end
+  local api = C_MapExplorationInfo
+  if api and api.GetExploredAreaIDsAtPosition and C_Map and C_Map.GetPlayerMapPosition then
+    local maps = { mapID }
+    if rawMapID and rawMapID ~= mapID then maps[#maps + 1] = rawMapID end
+    for m = 1, #maps do
+      if maps[m] then
+        local okPos, pos = pcall(C_Map.GetPlayerMapPosition, maps[m], "player")
+        if okPos and pos ~= nil and not ns.IsSecret(pos) then
+          local okIds, ids = pcall(api.GetExploredAreaIDsAtPosition, maps[m], pos)
+          if okIds and type(ids) == "table" and not ns.IsSecret(ids) then
+            for i = 1, #ids do
+              local a = ns.SafeNumber(ids[i])
+              if a and named(a) then return a end
+            end
+          end
+        end
+      end
+    end
+  end
+  local function fromDrops(drops)
+    if type(drops) ~= "table" then return nil end
+    for i = 1, #drops do
+      local d = drops[i]
+      if type(d) == "table" and d.kind == "subzone" and type(d.areaID) == "number"
+         and (d.mapID == nil or d.mapID == mapID) then
+        if named(d.areaID) or (type(d.subzone) == "string" and lowerAscii(d.subzone) == want) then return d.areaID end
+      end
+    end
+    return nil
+  end
+  local found = fromDrops(ns.Map and ns.Map.drops)
+  if found then return found end
+  local Sets = ns.Sets
+  if Sets and Sets.Ids and Sets.Internal then
+    local ids = Sets.Ids()
+    for i = 1, #ids do
+      local set = Sets.Internal(ids[i])
+      found = fromDrops(set and set.drops)
+      if found then return found end
+    end
+  end
+  return nil
+end
+
 -- Lines for /needle where (pack authoring helper).
 function L.Describe()
   local snap = L.Snapshot()
@@ -248,7 +323,7 @@ function L.Describe()
       local d = cands[i]
       local state = ""
       if ns.Director and ns.Director.IsDone and ns.Director.IsDone(d) then state = " (heard)" end
-      parts[#parts + 1] = string.format("%s #%d \"%s\"%s", d.id, d.n, d.label, state)
+      parts[#parts + 1] = string.format("%s \"%s\"%s", d.id, ns.EscapeText and ns.EscapeText(d.label or "") or (d.label or ""), state)
     end
     lines[#lines + 1] = "matching drops: " .. table.concat(parts, ", ")
   end

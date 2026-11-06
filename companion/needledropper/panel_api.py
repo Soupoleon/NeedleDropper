@@ -72,6 +72,7 @@ LINK_FRESH_S = 20.0
 TEST_DEDUPE_S = 30.0
 HOUSEKEEPING_S = 5.0
 SPOTIFY_WATCH_S = 30.0
+PLAYER_RETRY_S = 300.0  # no player window: try to make one again this often (housekeeping)
 SPOTIFY_ACCOUNT_RECHECK_S = 3600.0
 UPDATE_TIMEOUT_S = 10.0
 UPDATE_MAX_BYTES = 512 * 1024
@@ -229,6 +230,7 @@ def _event_type_name(event: Any) -> str:
 #: thread-name prefix -> (component key, label shown to the player)
 THREAD_COMPONENTS: tuple[tuple[str, str, str], ...] = (
     ("needledropper-engine", "engine", "Playback engine"),
+    ("needledropper-prewarm", "engine", "Playback engine"),  # the engine's ARM pre-warm worker
     ("needledropper-pixel", "pixel", "Pixel link"),
     ("needledropper-chatlog", "chatlog", "Chat-log link"),
     ("needledropper-deck", "deck", "Setup page server"),
@@ -528,6 +530,8 @@ def _notice_kind(value: Any) -> Optional[str]:
     if key in ("spotifyexpired", "spotifyauthexpired", "authexpired", "loginexpired", "spotifyloginexpired",
                "signinexpired", "spotifysigninexpired", "spotifyrevoked", "spotifyauth"):
         return tray.NOTE_SPOTIFY_EXPIRED
+    if key in ("spotifystuck", "spotifynotstarting", "stuck"):
+        return tray.NOTE_SPOTIFY_STUCK
     return None
 
 
@@ -633,9 +637,13 @@ class Companion:
         self._restarted: set[str] = set()
         self._game_cache: Optional[tuple[float, bool, str]] = None
         self._game_was_running = False
+        self._player_thread: Optional[threading.Thread] = None
+        self._next_player_try = 0.0
+        self._data_needs_restart = False  # NeedleDropper_Companion made while the game ran (F6)
         self._wow_det: Optional[tuple[float, Any]] = None
         self._last_install: Optional[dict[str, Any]] = None
         self._game_status_sent: Optional[dict[str, Any]] = None
+        self._sv_stamp: Optional[tuple] = None  # SavedVariables files last seen (see _watch_savedvars)
         self.updates: Optional[UpdateChecker] = None
         self._hk_thread: Optional[threading.Thread] = None
         self._hk_stop = threading.Event()
@@ -679,17 +687,81 @@ class Companion:
         self._hk_thread = threading.Thread(target=self.guard.wrap(self._housekeeping, "needledropper-housekeeping"),
                                            name="needledropper-housekeeping", daemon=True)
         self._hk_thread.start()
-        if (self.cfg.get("deck") or {}).get("autoOpen") == "always" and not self.deck.page_open:
-            self.deck.open_player()
+        self._prepare_player()
         return self
 
-    def stop(self) -> None:
-        """Stop the background thread, transports, engine and login; close providers. The deck is left to its owner."""
+    def _watch_player(self, now: float) -> None:
+        """No player window (it did not start, or was closed): try again, at most every few minutes,
+        and never while the game is in front (deck.open_player refuses then)."""
+        if getattr(self.deck, "page_open", True) or now < self._next_player_try:
+            return
+        self._next_player_try = now + PLAYER_RETRY_S
+        self._prepare_player()
+
+    def _youtube_enabled(self) -> bool:
+        return any(getattr(p, "name", None) == "youtube" for p in self.providers or [])
+
+    def _prepare_player(self) -> None:
+        """Create the hidden YouTube player window now, while the game is (normally) not in front:
+        Chromium activates a window when it creates it, so none may be created during play
+        (real-client #8 / #13). The housekeeping loop tries again while there is none."""
+        prepare = getattr(self.deck, "prepare_player", None)
+        if not callable(prepare) or not self._youtube_enabled():
+            return
+        if getattr(self.deck, "auto_open", "youtube") == "never":
+            return
+        if getattr(self.deck, "page_open", False) or getattr(self.deck, "player_opening", False):
+            return
+        t = self._player_thread
+        if t is not None and t.is_alive():
+            return
+
+        def run() -> None:
+            try:
+                prepare()
+            except Exception as exc:  # noqa: BLE001 - the drop then shows its card only
+                log.info("could not prepare the player window: %s", exc)
+
+        self._player_thread = threading.Thread(target=run, name="needledropper-player-start", daemon=True)
+        self._player_thread.start()
+
+    def stop(self, *, fast: bool = False) -> None:
+        """Stop the background thread, transports, engine and login; close providers. The deck is left to its owner.
+
+        ``fast`` (Windows is logging off / shutting down, or the console window is closing: a few
+        seconds at most, CLI-CONSOLE-CLOSE-NO-CLEANUP): the engine goes first -- its stop fades the
+        playing drop for at most 1 s, pauses Spotify and restores its volume and the player's own
+        music -- and every join is short.
+        """
         self._hk_stop.set()
         self._hk_wake.set()
+        if fast:
+            # A song being started may sit in Spotify's start checks or the wait for the player window
+            # for seconds: cut those waits short first, so the engine can stop playback (pause Spotify,
+            # give its volume and the player's own music back) inside Windows' few seconds.
+            for p in list(self.providers or []):
+                interrupt = getattr(p, "interrupt", None)
+                if callable(interrupt):
+                    try:
+                        interrupt()
+                    except Exception:  # noqa: BLE001 - shutting down anyway
+                        pass
+            waits = getattr(self.deck, "interrupt_waits", None)
+            if callable(waits):
+                try:
+                    waits()
+                except Exception:  # noqa: BLE001
+                    pass
+            with self._lock:
+                engine, self.engine = self.engine, None
+            if engine is not None:
+                try:
+                    engine.stop(timeout=3.0)
+                except Exception:  # noqa: BLE001 - shutting down anyway
+                    log.debug("engine stop failed", exc_info=True)
         hk = self._hk_thread
         if hk is not None and hk is not threading.current_thread():
-            hk.join(5.0)
+            hk.join(1.0 if fast else 5.0)
         self._hk_thread = None
         login = self._login
         if login is not None and not login.done:
@@ -778,7 +850,9 @@ class Companion:
             configure(auto_open=str(d.get("autoOpen") or "youtube"), browser=str(d.get("browser") or "edge"),
                       position=parse_position(d.get("playerPosition")),
                       clear_position=parse_position(d.get("playerPosition")) is None,
-                      profile_dir=self.paths.app_dir / "deck-browser")
+                      profile_dir=self.paths.app_dir / "deck-browser",
+                      corner=str(d.get("playerCorner") or "topright"),
+                      browser_log=self.paths.logs_dir / "browser.log")
 
     def _make_update_checker(self) -> UpdateChecker:
         up = self.cfg.get("updates") or {}
@@ -1142,9 +1216,14 @@ class Companion:
         if session is not self._login:
             return
         if session.state == "connected":
+            prof = getattr(session, "profile", None) or {}
+            status = prof.get("status")
+            if status is None:
+                status = 403 if (session.warning and not getattr(session, "save_error", None)) else 200
             with self._lock:
-                self._account = {"name": session.account, "status": 403 if session.warning else 200,
-                                 "at": self._clock()}
+                self._account = {"name": session.account, "status": status, "at": self._clock(),
+                                 "product": prof.get("product"), "country": prof.get("country"),
+                                 "problem": prof.get("problem")}
                 self._spotify_was_connected = True
             sp = next((p for p in self.providers if getattr(p, "name", None) == "spotify"), None)
             reset = getattr(sp, "reset_session", None)
@@ -1207,25 +1286,42 @@ class Companion:
             badge, message = "error", "Your Spotify sign-in has expired. Sign in again."
         if login and login.get("state") in ("error", "timeout") and badge != "connected":
             badge, message = "error", login.get("message")
-        if account and account.get("status") == 403 and not warning:
+        problem = (account or {}).get("problem")
+        if account and account.get("status") == 403 and problem != "scope" and not warning:
             warning = ("Spotify refused this account for your app. Development apps work only for their owner "
                        "(who needs Premium) and the accounts added under User Management in the dashboard.")
+        save_error = st.get("saveError") or (login or {}).get("saveError")
+        if save_error and not warning:
+            warning = (f"Signed in, but Windows refused to save the sign-in ({save_error}). NeedleDropper keeps it "
+                       "while it runs and keeps trying to save it; if you quit first, sign in again.")
         state = "waiting" if (login and login.get("state") == "waiting") else badge
+        # /me's "product" needs user-read-private (real-client finding #3); without it a 200 from /me is the
+        # best hint (development apps only run for a Premium owner).
+        product = (account or {}).get("product") or (login or {}).get("product")
+        country = (account or {}).get("country") or (login or {}).get("country")
         if badge == "premium":
             premium = "required"
+        elif product == "premium":
+            premium = "ok"
+        elif product:
+            premium = "required"  # "free" / "open": Spotify refuses playback control
         elif badge == "connected" and account and account.get("status") == 200:
             premium = "ok"
         else:
             premium = "unknown"
+        missing = list(st.get("missingScopes") or [])
+        reconnect = bool(missing) and badge == "connected" and state != "waiting"
         return {"enabled": "spotify" in (self.cfg.get("providers") or []) and provider_enabled(self.cfg, "spotify"),
                 "clientId": sp_cfg.get("clientId") or "", "redirectUri": redirect_uri_for(port),
                 "dashboardUrl": DASHBOARD_URL, "state": state, "message": message, "connected": badge == "connected",
                 "account": (account or {}).get("name") or (login or {}).get("account"), "premium": premium,
+                "product": product, "country": country, "missingScopes": missing, "reconnect": reconnect,
+                "reconnectMessage": st.get("scopeMessage") if reconnect else None, "saveError": save_error,
                 "warning": warning, "deviceName": sp_cfg.get("deviceName") or "", "login": login}
 
     def _check_spotify_account(self) -> None:
         """Ask Spotify who is signed in (``GET /v1/me``); a revoked sign-in is reported as expired."""
-        from .providers.spotify_auth import SpotifyAuthError, TokenManager, TokenStore, fetch_account
+        from .providers.spotify_auth import SpotifyAuthError, TokenManager, TokenStore, fetch_profile
 
         cid = str((self.cfg.get("spotify") or {}).get("clientId") or "").strip()
         if not cid:
@@ -1246,11 +1342,15 @@ class Companion:
         except OSError as exc:
             log.debug("Spotify account check: %s", exc)
             return
-        status, who = fetch_account(token, self.spotify_http)
-        if status is None:
+        prof = fetch_profile(token, self.spotify_http)
+        if prof["status"] is None:
             return
         with self._lock:
-            self._account = {"name": who, "status": status, "at": self._clock()}
+            self._account = {"name": prof["name"], "status": prof["status"], "at": self._clock(),
+                             "product": prof["product"], "country": prof["country"], "problem": prof["problem"]}
+        if prof["product"]:
+            log.info("Spotify account: %s (%s%s)", prof["name"] or "?", prof["product"],
+                     f", {prof['country']}" if prof["country"] else "")
         self._nudge("spotify")
 
     def _watch_spotify(self, now: float) -> None:
@@ -1292,7 +1392,28 @@ class Companion:
             with self._lock:
                 self._account = {"name": None, "status": "expired", "at": self._clock()}
             self._spotify_expired()
+        elif kind == tray.NOTE_SPOTIFY_STUCK:
+            self._spotify_stuck(info)
+        elif str(info.get("kind") or "") == "searchFailed" and info.get("unavailable"):
+            # Spotify itself became unusable during a search (sign-in revoked, Premium refused, ...):
+            # check its state now instead of at the next 30 s tick; that check says what to tell.
+            self._next_spotify_watch = 0.0
+            self._hk_wake.set()
         self._nudge("playing")
+
+    def _spotify_stuck(self, info: dict[str, Any]) -> None:
+        """Spotify accepted a song but never started it (real-client finding #4): the engine already
+        played the next provider; tell the player how to fix Spotify."""
+        from .providers.spotify import STUCK_MESSAGE
+
+        song = _song(info.get("artist"), info.get("title"))
+        what = f" It accepted {song} but did not start it." if song else ""
+        # Real-client #10: say once what happens now -- YouTube plays until Spotify works again.
+        self.notifier.notify(tray.NOTE_SPOTIFY_STUCK, f"{STUCK_MESSAGE}.{what} YouTube plays NeedleDropper's songs "
+                             "until Spotify works again.", title="Spotify isn't starting songs",
+                             level="warning", action=self.open_logs)
+        self._push_game_status()  # the game keeps YouTube ids in its frames (fit rule step 7)
+        self._nudge("spotify")
 
     def _song_not_found(self, info: dict[str, Any]) -> None:
         key = str(info.get("key") or "")
@@ -1382,13 +1503,65 @@ class Companion:
                 return
             now = self._clock()
             for step in (self._do_restarts, lambda: self._watch_spotify(now), self._watch_game,
-                         self._push_game_status, self._maybe_check_updates):
+                         self._push_game_status, self._watch_savedvars, self._maybe_check_updates,
+                         lambda: self._watch_player(now)):
                 if self._hk_stop.is_set():
                     return
                 try:
                     step()
                 except Exception:  # noqa: BLE001 - one failing check must not stop the others
                     log.exception("background check failed")
+
+    def _savedvars_stamp(self) -> Optional[tuple]:
+        """``(path, mtime_ns, size)`` of every NeedleDropper SavedVariables file (None: no game folder)."""
+        from . import savedvars
+
+        root = self.paths.flavor_root
+        if not root.is_dir():
+            return None
+        out = []
+        for f in savedvars.find_files(root):
+            try:
+                st = os.stat(f.path)
+            except OSError:
+                continue
+            out.append((str(f.path), st.st_mtime_ns, st.st_size))
+        return tuple(sorted(out))
+
+    def _watch_savedvars(self) -> None:
+        """When the game writes ``NeedleDropper.lua`` (logout, /reload): keep a rolling backup of it
+        (10 copies in ``<app dir>\\backups``) and search Spotify ahead of time for the player's own
+        search-only drops (DESIGN-v1.2 2.1). The game folder is only read; checked every few seconds
+        by file time and size (no change: nothing is read)."""
+        from . import savedvars
+
+        stamp = self._savedvars_stamp()
+        if stamp is None or stamp == self._sv_stamp:
+            return
+        first = self._sv_stamp is None
+        self._sv_stamp = stamp
+        if not stamp:
+            return
+        if self.game_running() and not first:
+            # the client writes the files at logout / reload; give it a moment to finish
+            time.sleep(0.5)
+        try:
+            made = savedvars.backup_savedvariables(self.paths.flavor_root, self.paths.app_dir / "backups")
+            if made:
+                log.info("backed up the game's NeedleDropper settings (%d file(s)) to %s", len(made),
+                         self.paths.app_dir / "backups")
+        except (OSError, ValueError) as exc:
+            log.info("could not back up the game's NeedleDropper settings: %s", exc)
+        eng = self.engine
+        prewarm = getattr(eng, "prewarm_songs", None) if eng is not None else None
+        if callable(prewarm):
+            try:
+                songs = savedvars.search_only_songs(self.paths.flavor_root)
+                queued = prewarm(songs) if songs else 0
+                if queued:
+                    log.info("searching Spotify ahead of time for %d song(s) of your own soundtracks", queued)
+            except Exception as exc:  # noqa: BLE001 - a convenience; never let it stop the checks
+                log.info("could not read the game's soundtracks for the Spotify pre-search: %s", exc)
 
     def _maybe_check_updates(self) -> None:
         checker = self.updates
@@ -1405,9 +1578,14 @@ class Companion:
         self._nudge("update")
 
     def _game_status(self) -> dict[str, Any]:
-        badge = self._spotify_status().get("badge")
-        spotify = {"connected": "connected", "premium": "premium-required", "error": "error"}.get(str(badge),
-                                                                                                  "not-connected")
+        st = self._spotify_status()
+        badge = st.get("badge")
+        spotify = {"connected": "connected", "premium": "premium-required", "allowlist": "error",
+                   "error": "error"}.get(str(badge), "not-connected")
+        if spotify == "connected" and st.get("stuck"):
+            # Signed in, but it accepts songs and never starts them this session: "error" makes the
+            # game keep the YouTube id when a frame can carry only one (DESIGN 2.3 fit rule step 7).
+            spotify = "error"
         running = {getattr(t, "name", ""): t for t in self.transports}
         return {"spotify": spotify,
                 "youtube": any(getattr(p, "name", None) == "youtube" for p in self.providers),
@@ -1431,9 +1609,15 @@ class Companion:
         self._game_status_sent = status
 
     def _watch_game(self) -> None:
-        """When the game starts, refresh the data addon's "written" time (the in-game "app seen" line)."""
+        """When the game starts, refresh the data addon's "written" time (the in-game "app seen" line);
+        when it closes (quit or crash), stop the drop it was playing: no HELLO or CANCEL will ever end
+        it otherwise (ENG-HELLO-SEQ-ROLLBACK)."""
         running = self.game_running()
         was, self._game_was_running = self._game_was_running, running
+        if not running:
+            self._data_needs_restart = False  # the next game start loads NeedleDropper_Companion
+        if was and not running:
+            self._game_closed()
         if not running or was or not self.paths.addons_dir.is_dir():
             return
         from . import gamedata
@@ -1444,6 +1628,16 @@ class Companion:
                 touch(self.paths.addons_dir)
             except (TypeError, ValueError, OSError) as exc:
                 log.info("could not refresh the game's companion data: %s", exc)
+
+    def _game_closed(self) -> None:
+        eng = self.engine
+        stop = getattr(eng, "stop_playback", None)
+        if callable(stop) and getattr(eng, "is_playing", False):
+            log.info("World of Warcraft closed: stopping the drop that was playing")
+            try:
+                stop()
+            except Exception as exc:  # noqa: BLE001 - housekeeping must go on
+                log.info("could not stop the drop: %s", exc)
 
     def _flush_game_data(self) -> None:
         from . import gamedata
@@ -1456,15 +1650,26 @@ class Companion:
                 log.info("could not write the game's companion data: %s", exc)
 
     def _ensure_companion_data(self) -> None:
-        """Create ``NeedleDropper_Companion`` before the game starts (the client only sees folders that exist at launch)."""
+        """Create ``NeedleDropper_Companion`` before the game starts (the client only sees folders that exist at launch).
+
+        Created while the game already runs, the game cannot see it until it is restarted: the
+        Connect page says so (journey review F6) until the game is seen closed."""
         from . import gamedata
 
         if not self.paths.addons_dir.is_dir():
             return
         try:
+            existed = bool(gamedata.is_companion_addon_installed(self.paths.addons_dir))
+        except Exception:  # noqa: BLE001
+            existed = True
+        try:
             gamedata.ensure_companion_addon(self.paths.addons_dir)
         except (gamedata.GameDataError, OSError) as exc:
             log.info("could not create the NeedleDropper_Companion data addon: %s", exc)
+            return
+        if not existed and self.game_running():
+            self._data_needs_restart = True
+            log.info("created NeedleDropper_Companion while World of Warcraft runs: the game sees it after a restart")
 
     # ------------------------------------------------------- operations --
     def open_setup(self) -> bool:
@@ -1598,6 +1803,7 @@ class Companion:
                 "legacy": st.legacy, "updateAvailable": bool(update), "action": action,
                 "canInstall": action is not None, "pageUrl": (self.cfg.get("links") or {}).get("addonPage"),
                 "addonDir": str(self.paths.addon_dir), "sourceFound": source_found, "companionData": data_addon,
+                "dataNeedsRestart": bool(self._data_needs_restart and data_addon),
                 "lastInstall": dict(self._last_install) if self._last_install else None}
 
     # ------------------------------------------------------------ state --
@@ -1648,7 +1854,7 @@ class Companion:
                     "firstRun": should_open_panel({**cfg, "deck": {"panelOnStart": "first-run"}}),
                     "paused": self._paused, "panelUrl": deck.panel_url, "logDir": str(paths.logs_dir),
                     "logFile": str(paths.log_file), "configFile": str(self.config_location),
-                    "status": self.status_line()},
+                    "tempLocation": autostart.temporary_location(), "status": self.status_line()},
             "wow": {"root": str(paths.wow_root), "flavorDir": flavor, "folder": str(paths.flavor_root),
                     "found": score > 0, "exe": score == 2, "source": self._wow_source(),
                     "addonsDir": str(paths.addons_dir), "running": self.game_running()},

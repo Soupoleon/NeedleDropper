@@ -18,7 +18,8 @@ local ADDON, ns = ...
 --     cleared in them, and LOCAL_PLAYBACK unless DROP_ACTIVE is set.
 --
 -- Clearance guard: the gap between the screen top and the player / target frame art is
--- measured on PLAYER_ENTERING_WORLD, UI_SCALE_CHANGED, DISPLAY_SIZE_CHANGED and Edit Mode exit.
+-- measured on PLAYER_ENTERING_WORLD, UI_SCALE_CHANGED, DISPLAY_SIZE_CHANGED, Edit Mode exit and
+-- PLAYER_TARGET_CHANGED (the target frame is hidden until something is targeted).
 -- B.Choose draws the frame fitted to the 9 px cap at the configured cell size when it fits the
 -- gap, else the same frame with 2 px cells, else a frame fitted to what fits at 2 px (at least
 -- one row), and records a warning for /needle selftest beacon when the strip overlaps the art.
@@ -399,7 +400,7 @@ function B.Pump()
   local nextEv = table.remove(B.fifo, 1)
   if nextEv then
     pauseSteady(now)
-    B.transient = { ev = nextEv, holdUntil = now + TRANSIENT_HOLD[nextEv.type] }
+    B.transient = { ev = nextEv, holdUntil = now + (nextEv.holdFor or TRANSIENT_HOLD[nextEv.type] or SHORT_HOLD) }
     draw(nextEv, "transient")
     schedule(B.transient.holdUntil)
     return
@@ -437,6 +438,11 @@ end
 -- every event but PING also sets the steady state.
 function B.Show(ev)
   if type(ev) ~= "table" then return end
+  -- A self-test sample (B.ShowSample) gives way to any real event at once.
+  if B.transient and B.transient.ev.sample then B.transient = nil end
+  for i = #B.fifo, 1, -1 do
+    if B.fifo[i].sample then table.remove(B.fifo, i) end
+  end
   local t = ev.type
   if TRANSIENT_HOLD[t] then
     local q = B.fifo
@@ -453,6 +459,20 @@ function B.Show(ev)
     B.steady = { ev = ev }
   end
   B.Pump()
+end
+
+-- /needle selftest beacon (DESIGN-v1.2 6.4 step 2): draws event `ev` -- never emitted, never part
+-- of the steady state -- for `seconds` once what is on screen now has had its hold, so the app's
+-- diag can decode the largest strip on the real screen. Any real event replaces it at once.
+function B.ShowSample(ev, seconds)
+  if type(ev) ~= "table" or not TRANSIENT_HOLD[ev.type] then return false end
+  ev.sample = true
+  ev.holdFor = (type(seconds) == "number" and seconds > 0) and seconds or SONG_HOLD
+  local q = B.fifo
+  q[#q + 1] = ev
+  if #q > FIFO_MAX then trimFifo(q) end
+  B.Pump()
+  return true
 end
 
 -- Re-measures the clearance and redraws what is on screen at the current scale, screen
@@ -537,6 +557,22 @@ end
 if type(EventRegistry) == "table" and type(EventRegistry.RegisterCallback) == "function" then
   pcall(EventRegistry.RegisterCallback, EventRegistry, "EditMode.Exit", function() relayoutSoon() end, B)
 end
+
+-- TargetFrame is hidden until something is targeted, so the measurements above usually skip it:
+-- measure again (next frame, after TargetFrame has shown itself) when the target changes, and
+-- redraw only when the gap really changed -- the event fires constantly in combat.
+local remeasurePending = false
+local function remeasureTarget()
+  remeasurePending = false
+  local before = B.gap
+  local ok, after = pcall(B.MeasureClearance)
+  if ok and after ~= before then B.Layout() end
+end
+ns.On("PLAYER_TARGET_CHANGED", function()
+  if remeasurePending then return end
+  remeasurePending = true
+  C_Timer.After(0, remeasureTarget)
+end)
 
 ns.On("ND_SETTING", function(_, key)
   if key == "beacon" then

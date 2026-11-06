@@ -1,5 +1,8 @@
 # NeedleDropper — Spec addendum v1.1 (public release)
 
+> **Historical** (v1.1). Superseded for 1.2 by [DESIGN-v1.2.md](DESIGN-v1.2.md): the browser
+> control panel, Rebuild map and companion-side playback of local files described below are gone.
+
 Extends and **overrides** `docs/SPEC.md` where they conflict. Decisions made by the project owner on 2026-11-05.
 
 ## A. Decisions

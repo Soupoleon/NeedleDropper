@@ -17,7 +17,7 @@ if str(ROOT / "companion") not in sys.path:
 
 from needledropper.models import Drop  # noqa: E402
 from needledropper.providers.spotify import SpotifyProvider  # noqa: E402
-from needledropper.providers.spotify_auth import TokenStore  # noqa: E402
+from needledropper.providers.spotify_auth import SCOPES, TokenStore  # noqa: E402
 
 
 @dataclass
@@ -167,10 +167,16 @@ def make_drop(**kw: Any) -> Drop:
     return Drop(**base)
 
 
+#: The scopes a v1.2 sign-in carries (the v1.1 set plus user-read-private, real-client finding #3).
+#: Tests of an older sign-in pass ``scope=V11_SCOPE`` explicitly.
+CURRENT_SCOPE = " ".join(SCOPES)
+V11_SCOPE = "user-modify-playback-state user-read-playback-state"
+
+
 def save_tokens(app_dir: Path, **over: Any) -> TokenStore:
     store = TokenStore(app_dir)
     tokens = {"access_token": "AT1", "refresh_token": "RT1", "expires_at": time.time() + 3600,
-              "scope": "user-modify-playback-state user-read-playback-state", "client_id": "cid"}
+              "scope": CURRENT_SCOPE, "client_id": "cid"}
     tokens.update(over)
     store.save(tokens)
     return store

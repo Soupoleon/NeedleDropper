@@ -116,6 +116,7 @@ if IS_WINDOWS:
     _GetDC = _proto(_user32, "GetDC", wt.HDC, wt.HWND)
     _ReleaseDC = _proto(_user32, "ReleaseDC", ctypes.c_int, wt.HWND, wt.HDC)
     _PrintWindow = _proto(_user32, "PrintWindow", wt.BOOL, wt.HWND, wt.HDC, wt.UINT)
+    _GetForegroundWindow = _proto(_user32, "GetForegroundWindow", wt.HWND)
     _SetProcessDPIAware = _proto(_user32, "SetProcessDPIAware", wt.BOOL)
     try:
         _SetProcessDpiAwarenessContext = _proto(_user32, "SetProcessDpiAwarenessContext", wt.BOOL,
@@ -263,7 +264,28 @@ def is_cloaked(hwnd: Optional[int]) -> bool:
     return hr == 0 and cloaked.value != 0
 
 
-def _score(info_title: str, cls: str, exe: Optional[str], game_exe: Optional[str], title: str) -> int:
+#: A window whose score reaches this matched the configured ``_forever_\\Wow.exe`` path itself (or the
+#: same flavor folder + exe name under another install root): the strongest evidence there is.
+EXE_MATCH_SCORE = 60
+
+
+def _looks_like_game(cls: str, exe: Optional[str]) -> bool:
+    """WoW's own top-level window class, or a process image named like the game (Wow*.exe)."""
+    return cls == GAME_WINDOW_CLASS or bool(exe and Path(exe).name.lower().startswith("wow"))
+
+
+def _score(info_title: str, cls: str, exe: Optional[str], game_exe: Optional[str], title: str, *,
+           strict: bool = False) -> int:
+    """How well a window matches the game (0 = not at all; higher is better).
+
+    ``strict`` (what the pixel transport uses) never accepts a window on its title alone
+    (PIX-WINDOW-LATCH, real-client finding #2): an Explorer window on the install folder is
+    titled exactly "World of Warcraft", a browser tab can start with it, and the game's
+    launcher shows a short-lived window of that name. A strict match needs the configured
+    exe path (score >= :data:`EXE_MATCH_SCORE`) or the game's window class / a ``Wow*.exe``
+    image -- and when the exe path is known, a ``Wow*.exe`` image from somewhere else counts
+    only with the game's window class too.
+    """
     score = 0
     if exe and game_exe:
         if _norm(exe) == game_exe:
@@ -272,7 +294,7 @@ def _score(info_title: str, cls: str, exe: Optional[str], game_exe: Optional[str
             exe_p, want = Path(exe), Path(game_exe)
             if (exe_p.name.lower() == want.name.lower()
                     and exe_p.parent.name.lower() == want.parent.name.lower()):
-                score += 60  # same flavor dir + exe name, different install root
+                score += EXE_MATCH_SCORE  # same flavor dir + exe name, different install root
     if title:
         if info_title == title:
             score += 30
@@ -282,13 +304,18 @@ def _score(info_title: str, cls: str, exe: Optional[str], game_exe: Optional[str
         score += 5
     if score and exe and Path(exe).name.lower().startswith("wow"):
         score += 2
+    if strict and score and score < EXE_MATCH_SCORE:
+        if not _looks_like_game(cls, exe):
+            return 0  # a title-only match: an Explorer / browser / launcher window, never the game
+        if game_exe and exe is not None and cls != GAME_WINDOW_CLASS:
+            return 0  # the exe path is known and this is not it (nor the game's window class)
     return score
 
 
 def list_game_windows(game_exe: Optional[Union[str, os.PathLike]] = None,
-                      title: str = "World of Warcraft") -> list[WindowInfo]:
+                      title: str = "World of Warcraft", *, strict: bool = False) -> list[WindowInfo]:
     """All visible, uncloaked, unowned top-level windows matching the exe path or the
-    title, best match first."""
+    title, best match first. ``strict`` drops title-only matches (see :func:`_score`)."""
     _require_windows("list_game_windows")
     want = _norm(game_exe) if game_exe else None
     found: list[WindowInfo] = []
@@ -306,7 +333,7 @@ def list_game_windows(game_exe: Optional[Union[str, os.PathLike]] = None,
             # (titled like it, or any window when we know the exact exe path).
             exe = _process_image(pid.value) if (want or (title and title.lower() in text.lower())) else None
             cls = _class_name(hwnd)
-            s = _score(text, cls, exe, want, title)
+            s = _score(text, cls, exe, want, title, strict=strict)
             if s > 0:
                 found.append(WindowInfo(int(hwnd), text, cls, int(pid.value), exe, s))
         except Exception:  # never let an exception escape into the Win32 callback
@@ -328,16 +355,54 @@ def _area(hwnd: int) -> int:
 
 
 def find_game_window(game_exe: Optional[Union[str, os.PathLike]] = None,
-                     title: str = "World of Warcraft") -> Optional[int]:
+                     title: str = "World of Warcraft", *, strict: bool = False) -> Optional[int]:
     """Return the HWND of the WoW: Forever window, or None.
 
     Preference: the window whose process image path equals ``game_exe`` (the
     ``_forever_\\Wow.exe``), then a ``Wow.exe`` in a folder of the same name
     under another install root, then a window titled exactly ``title``. Only
-    visible, unowned top-level windows are considered.
+    visible, unowned top-level windows are considered; ``strict`` never accepts a
+    title-only match (see :func:`_score`).
     """
-    wins = list_game_windows(game_exe, title)
+    wins = list_game_windows(game_exe, title, strict=strict)
     return wins[0].hwnd if wins else None
+
+
+def window_matches(hwnd: int, game_exe: Optional[Union[str, os.PathLike]] = None,
+                   title: str = "World of Warcraft") -> int:
+    """The strict score of one window right now (0: gone, hidden, cloaked, or no longer the game --
+    e.g. its handle was reused by another program). Never raises."""
+    if not IS_WINDOWS or not hwnd:
+        return 0
+    try:
+        if not _IsWindow(hwnd) or not _IsWindowVisible(hwnd) or is_cloaked(hwnd):
+            return 0
+        pid = wt.DWORD(0)
+        _GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        want = _norm(game_exe) if game_exe else None
+        return _score(_window_text(hwnd), _class_name(hwnd), _process_image(pid.value), want, title, strict=True)
+    except Exception:  # noqa: BLE001 - a predicate
+        return 0
+
+
+def foreground_window() -> Optional[int]:
+    """The foreground window's handle (None when there is none or not on Windows). Never raises."""
+    if not IS_WINDOWS:
+        return None
+    try:
+        hwnd = _GetForegroundWindow()
+    except Exception:  # noqa: BLE001 - a probe
+        return None
+    return int(hwnd) if hwnd else None
+
+
+def game_in_foreground(game_exe: Optional[Union[str, os.PathLike]] = None,
+                       title: str = "World of Warcraft") -> bool:
+    """True when the foreground window is the game's (the strict match of :func:`window_matches`:
+    its exe path, or the game's window class / a ``Wow*.exe`` image). Used to keep anything that
+    could take the focus -- launching the Spotify app -- away while the player is in the game."""
+    hwnd = foreground_window()
+    return bool(hwnd) and window_matches(hwnd, game_exe, title) > 0
 
 
 def describe_window(hwnd: int) -> Optional[WindowInfo]:
@@ -595,5 +660,6 @@ def capture_window_region(hwnd: int, w: int, h: int) -> Frame:
 __all__ = [
     "IS_WINDOWS", "Frame", "WindowInfo", "WindowCapturer", "set_dpi_awareness", "find_game_window",
     "list_game_windows", "describe_window", "is_window", "is_minimized", "is_cloaked", "client_rect",
-    "client_origin", "capture_screen_region", "capture_window_region",
+    "client_origin", "capture_screen_region", "capture_window_region", "foreground_window", "game_in_foreground",
+    "window_matches",
 ]

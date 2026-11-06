@@ -41,7 +41,12 @@ FONTS = {"GameFontNormal", "GameFontHighlight", "GameFontDisable", "GameFontNorm
 # pcall only around optional / uncertain APIs (task rules; DESIGN §4.9 for the two click-only calls).
 PCALL_TARGETS = {"Settings.OpenToCategory", "ReloadUI", "C_Map.GetPlayerMapPosition",
                  "C_MapExplorationInfo.GetExploredAreaIDsAtPosition", "C_Map.GetAreaInfo",
-                 "C_UIFileAsset.IsKnownFile"}
+                 "C_UIFileAsset.IsKnownFile",
+                 # Forever's gamepad UI opt-in (UI/Window.lua, real-client finding 7): optional APIs
+                 # that may be missing or refuse in combat.
+                 "InputUtil.IsGamepadUIEnabled", "InCombatLockdown", "C_RestrictedActions.IsAddOnRestrictionActive",
+                 "GamepadMode.FrameControlsManager.FrameShown", "GamepadMode.FrameControlsManager.FrameHidden",
+                 "SmartNavigation.RefreshButtonGroups"}
 
 
 def _source(name):

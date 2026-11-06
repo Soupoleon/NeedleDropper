@@ -306,12 +306,12 @@ def test_add_here_in_a_new_landmark_makes_a_suppressed_draft():
     h.call("Soundtracks.UpdateDrop", MY, "area:88", {"artist": "Toto", "title": "Africa"})
     mark = h.mark()
     h.advance(20)
-    assert not [e for e in h.events_since(mark) if e["type"] in (ARM, FIRE) and e["id"] == "area:88"]
+    assert not [e for e in h.events_since(mark) if e["type"] in (ARM, FIRE) and e.get("dropId") == "area:88"]
     # ...but it plays on the next visit
     h.set_location(1429, "")
     h.set_location(1429, "Lion's Pride Inn")
     h.advance(10)
-    assert [e for e in h.events_since(mark) if e["type"] == FIRE and e["id"] == "area:88"]
+    assert [e for e in h.events_since(mark) if e["type"] == FIRE and e.get("dropId") == "area:88"]
 
 
 def test_add_here_uses_director_suppress_here_when_it_exists():

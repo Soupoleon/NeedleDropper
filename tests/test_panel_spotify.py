@@ -163,7 +163,9 @@ def test_provider_status_dict_and_reset(tmp_path):
     save_tokens(tmp_path, client_id=CID)
     sp = SpotifyProvider({"clientId": CID, "deviceName": "PC"}, paths, http=FakeHTTP())
     st = sp.status_dict()
-    assert st == {"badge": "connected", "message": None, "configured": True, "loggedIn": True, "deviceName": "PC"}
+    assert st == {"badge": "connected", "message": None, "configured": True, "loggedIn": True, "deviceName": "PC",
+                  "missingScopes": [], "scopeMessage": None, "saveError": None,
+                  "stuck": False}                    # the session health verdict (SPOT-NO-SESSION-HEALTH)
     assert "AT1" not in json.dumps(st) and "RT1" not in json.dumps(st)
     sp._mark_unavailable(PREMIUM_MESSAGE)
     assert sp.status_dict()["badge"] == "premium" and not sp.available()

@@ -692,7 +692,16 @@ class Win32CaptureBackend:
         return wincapture.set_dpi_awareness()
 
     def find_window(self) -> Optional[int]:
-        return wincapture.find_game_window(self.game_exe, self.title)
+        # strict: never a window that only has the game's title (PIX-WINDOW-LATCH)
+        return wincapture.find_game_window(self.game_exe, self.title, strict=True)
+
+    def list_windows(self) -> list[tuple[int, int]]:
+        """``(hwnd, score)`` of every window that could be the game, best first (strict matching)."""
+        return [(w.hwnd, w.score) for w in wincapture.list_game_windows(self.game_exe, self.title, strict=True)]
+
+    def window_score(self, hwnd: int) -> int:
+        """The window's strict score now; 0 when it is gone or no longer the game's (handle reused)."""
+        return wincapture.window_matches(hwnd, self.game_exe, self.title)
 
     def window_alive(self, hwnd: int) -> bool:
         return wincapture.is_window(hwnd)
@@ -765,9 +774,21 @@ class PixelTransport(Transport):
     Minimizing the game pauses capture but keeps the baseline, so an event that
     happened while minimized is still delivered when the window is restored.
 
-    Capture method "auto" starts with a screen BitBlt; after 20 consecutive
-    frames without a visible header (while the window exists and is not
-    minimized) it tries PrintWindow, and flips back the same way.
+    Capture method "auto" starts with a screen BitBlt (cheap, and what the player
+    sees); after :attr:`SWITCH_TO_PRINT_AFTER` consecutive frames without a visible
+    header (about 1.5 s: e.g. character select, or something covering the corner)
+    it tries PrintWindow. While on PrintWindow it probes one BitBlt every
+    :attr:`PROBE_EVERY` frames and switches back as soon as the strip shows on
+    screen again; PrintWindow that also sees nothing for :attr:`SWITCH_AFTER`
+    frames (or fails) flips back to the screen too.
+
+    **The window** (PIX-WINDOW-LATCH, real-client finding #2): the backend's search
+    never accepts a window by its title alone. The cached window is re-validated
+    every :attr:`REVALIDATE_INTERVAL` seconds (a handle that now belongs to another
+    program counts as lost), and until a beacon header has been seen on it the
+    search runs again every :attr:`REFIND_INTERVAL` seconds and moves to a better
+    match (the configured ``_forever_\\Wow.exe``) when one appears -- so a
+    short-lived window at game start is never kept for the session.
 
     For tests and tools, :meth:`step` runs one capture/decode iteration
     synchronously and :meth:`feed` applies the acceptance rules to an already
@@ -775,9 +796,12 @@ class PixelTransport(Transport):
     """
 
     name = "pixel"
-    REFIND_INTERVAL = 5.0  # seconds between window searches while it is missing
+    REFIND_INTERVAL = 5.0  # seconds between window searches while it is missing (or no header seen yet)
+    REVALIDATE_INTERVAL = 5.0  # seconds between checks that the cached window is still the game's
     HEALTH_INTERVAL = 5.0  # seconds between diag health summaries
-    SWITCH_AFTER = 20  # header-less frames before "auto" tries the other capture method
+    SWITCH_TO_PRINT_AFTER = 6  # header-less screen frames (~1.5 s at 4 Hz) before "auto" tries PrintWindow
+    SWITCH_AFTER = 20  # header-less PrintWindow frames before "auto" goes back to the screen
+    PROBE_EVERY = 8  # on PrintWindow, one screen BitBlt every this many frames (back as soon as it sees the strip)
     LOST_AFTER = 8  # unreadable frames before diag reports the beacon as gone
     MAX_REGION_W = 2048
 
@@ -819,14 +843,20 @@ class PixelTransport(Transport):
         self._dpi: Optional[str] = None
         # window
         self._hwnd: Optional[int] = None
+        self._hwnd_score: Optional[int] = None  # the backend's match score (None: it cannot tell)
+        self._header_on_window = False  # a beacon header was seen on the current window
         self._window_desc = ""
         self._next_find = float("-inf")
+        self._next_validate = float("-inf")
         self._minimized = False
         self._ever_found = False
+        self._window_switches = 0
         # capture
         self._method = "printwindow" if method == "printwindow" else "screen"
         self._no_header_streak = 0
         self._switches_without_header = 0
+        self._since_probe = 0
+        self._print_failed = False  # PrintWindow raised: wait the long streak before trying it again
         self._needed_w = 0
         self._needed_h = 0
         # acceptance state
@@ -951,27 +981,39 @@ class PixelTransport(Transport):
         method = self._method if corner == "TOPLEFT" else "screen"
         x = cx if corner in ("TOPLEFT", "BOTTOMLEFT") else cx + cw - w
         y = cy if corner in ("TOPLEFT", "TOPRIGHT") else cy + ch - h
-        try:
-            if method == "screen":
-                frame = self.backend.capture_screen(x, y, w, h)
-            else:
-                frame = self.backend.capture_window(hwnd, w, h)
-        except Exception as e:
-            self._capture_errors += 1
-            self._note_error(f"{method} capture failed: {e}")
-            if self.method_cfg == "auto" and method == "printwindow":
-                self._switch_method("screen", f"PrintWindow failed ({e})")
-            else:
-                self._count_headerless()
-            return "capture-error"
+        decoded = None
+        if method == "printwindow" and self.method_cfg == "auto":
+            decoded = self._probe_screen(x, y, w, h, corner)
+            if decoded is not None:
+                method = "screen"
+        if decoded is None:
+            try:
+                if method == "screen":
+                    frame = self.backend.capture_screen(x, y, w, h)
+                else:
+                    frame = self.backend.capture_window(hwnd, w, h)
+            except Exception as e:
+                self._capture_errors += 1
+                self._note_error(f"{method} capture failed: {e}")
+                if self.method_cfg == "auto" and method == "printwindow":
+                    self._print_failed = True
+                    self._switch_method("screen", f"PrintWindow failed ({e})")
+                else:
+                    self._count_headerless()
+                return "capture-error"
+            if method == "printwindow":
+                self._print_failed = False
+            buf, fw, fh, stride = frame
+            decoded = self._decode(buf, fw, fh, stride, corner)
 
-        buf, fw, fh, stride = frame
-        version, event, report = self._decode(buf, fw, fh, stride, corner)
+        version, event, report = decoded
         self._last_report = report
         self._note_frame(now)
         if report.header is not None:
             self._no_header_streak = 0
             self._switches_without_header = 0
+            if not self._header_on_window:
+                self._header_on_window = True  # this is the game's window: stop looking for a better one
         else:
             self._count_headerless()
         self._maybe_widen(report, w, h, cw, ch)
@@ -1078,6 +1120,65 @@ class PixelTransport(Transport):
             self._candidate_count = 0
 
     # --------------------------------------------------------------- window --
+    def _window_score(self, hwnd: int) -> Optional[int]:
+        """The backend's current score for ``hwnd`` (0 = not the game's any more), None if it cannot tell."""
+        fn = getattr(self.backend, "window_score", None)
+        if not callable(fn):
+            return None
+        try:
+            return int(fn(hwnd) or 0)
+        except Exception:
+            return None
+
+    def _candidates(self) -> Optional[list[tuple[int, int]]]:
+        """``(hwnd, score)`` best first from the backend, or None when it only offers ``find_window``."""
+        fn = getattr(self.backend, "list_windows", None)
+        if not callable(fn):
+            return None
+        out = []
+        for item in fn() or []:
+            try:
+                h, s = item
+                out.append((int(h), int(s)))
+            except (TypeError, ValueError):
+                continue
+        out.sort(key=lambda c: -c[1])
+        return out
+
+    def _adopt(self, hwnd: int, score: Optional[int], now: float, *, replacing: Optional[int] = None) -> int:
+        self._hwnd = int(hwnd)
+        self._hwnd_score = score
+        self._header_on_window = False
+        self._ever_found = True
+        self._next_validate = now + self.REVALIDATE_INTERVAL
+        try:
+            self._window_desc = self.backend.describe(self._hwnd)
+        except Exception:
+            self._window_desc = f"hwnd 0x{self._hwnd:x}"
+        self.reset_baseline()
+        self._no_header_streak = 0
+        self._strip = None
+        self._beacon_visible = False
+        if replacing is not None:
+            self._window_switches += 1
+            self._say(f"pixel: switching to a better match for the WoW window: {self._window_desc} "
+                      f"(the previous window showed no beacon)")
+        else:
+            self._say(f"pixel: found WoW window {self._window_desc}")
+        return self._hwnd
+
+    def _lose_window(self, now: float, why: str) -> None:
+        self._hwnd = None
+        self._hwnd_score = None
+        self._header_on_window = False
+        self._minimized = False
+        self._strip = None
+        self._beacon_visible = False
+        self.reset_baseline()
+        self._say(f"pixel: WoW window lost ({why}) - will look for it every {self.REFIND_INTERVAL:g} s; "
+                  "next beacon frame becomes a new baseline")
+        self._next_find = now
+
     def _ensure_window(self, now: float) -> Optional[int]:
         hwnd = self._hwnd
         if hwnd is not None:
@@ -1085,49 +1186,91 @@ class PixelTransport(Transport):
                 alive = bool(self.backend.window_alive(hwnd))
             except Exception:
                 alive = False
+            why = "game closed?"
+            if alive and now >= self._next_validate:
+                # Re-validate (PIX-WINDOW-LATCH): the handle may now belong to another program, or the
+                # window stopped looking like the game (hidden, cloaked, another exe).
+                self._next_validate = now + self.REVALIDATE_INTERVAL
+                score = self._window_score(hwnd)
+                if score == 0:
+                    alive, why = False, "it is not the game's window any more"
+                elif score is not None:
+                    self._hwnd_score = score
             if alive:
+                if not self._header_on_window and now >= self._next_find:
+                    # No beacon seen on this window yet: a better match (the configured _forever_\Wow.exe)
+                    # may have appeared since -- e.g. we found a short-lived window at game start.
+                    self._next_find = now + self.REFIND_INTERVAL
+                    try:
+                        cands = self._candidates()
+                    except Exception as e:
+                        self._note_error(f"window search failed: {e}")
+                        cands = None
+                    if cands:
+                        best_h, best_s = cands[0]
+                        mine = self._hwnd_score if self._hwnd_score is not None else -1
+                        if best_h != hwnd and best_s > mine:
+                            return self._adopt(best_h, best_s, now, replacing=hwnd)
                 return hwnd
-            self._hwnd = None
-            self._minimized = False
-            self._strip = None
-            self._beacon_visible = False
-            self.reset_baseline()
-            self._say("pixel: WoW window lost (game closed?) - will look for it every "
-                      f"{self.REFIND_INTERVAL:g} s; next beacon frame becomes a new baseline")
-            self._next_find = now
+            self._lose_window(now, why)
         if now < self._next_find:
             return None
         self._next_find = now + self.REFIND_INTERVAL
         try:
-            hwnd = self.backend.find_window()
+            cands = self._candidates()
+            if cands is None:
+                found = self.backend.find_window()
+                best = (int(found), None) if found else None
+            else:
+                best = cands[0] if cands else None
         except Exception as e:
             self._note_error(f"window search failed: {e}")
             return None
-        if not hwnd:
+        if not best:
             return None
-        self._hwnd = int(hwnd)
-        self._ever_found = True
-        try:
-            self._window_desc = self.backend.describe(self._hwnd)
-        except Exception:
-            self._window_desc = f"hwnd 0x{self._hwnd:x}"
-        self.reset_baseline()
-        self._no_header_streak = 0
-        self._say(f"pixel: found WoW window {self._window_desc}")
-        return self._hwnd
+        return self._adopt(best[0], best[1], now)
 
     # --------------------------------------------------------------- method --
     def _count_headerless(self) -> None:
         self._no_header_streak += 1
-        if self.method_cfg == "auto" and self._no_header_streak >= self.SWITCH_AFTER:
-            other = "printwindow" if self._method == "screen" else "screen"
-            self._switch_method(other, f"no beacon header in {self.SWITCH_AFTER} frames via {self._method}")
+        if self.method_cfg != "auto":
+            return
+        if self._method == "screen":
+            # Faster to PrintWindow (the real client needed it at character select) -- but only the first
+            # time: once PrintWindow has also shown nothing (loading screen, Alt+Z, beacon off) or failed,
+            # the long streak applies, so a strip-less game is not captured the expensive way most of the
+            # time. Any frame with a header resets this (and the probe brings the screen back).
+            fast = self._switches_without_header == 0 and not self._print_failed
+            limit = self.SWITCH_TO_PRINT_AFTER if fast else self.SWITCH_AFTER
+            if self._no_header_streak >= limit:
+                self._switch_method("printwindow", f"no beacon header in {limit} frames via the screen")
+        elif self._no_header_streak >= self.SWITCH_AFTER:
+            self._switch_method("screen", f"no beacon header in {self.SWITCH_AFTER} frames via printwindow")
+
+    def _probe_screen(self, x: int, y: int, w: int, h: int, corner: str) -> Optional[tuple]:
+        """On PrintWindow ("auto"): every :attr:`PROBE_EVERY` frames one screen BitBlt; when it shows a
+        beacon header the screen is used again (this frame's decode is returned), else None."""
+        self._since_probe += 1
+        if self._since_probe < self.PROBE_EVERY:
+            return None
+        self._since_probe = 0
+        try:
+            buf, fw, fh, stride = self.backend.capture_screen(x, y, w, h)
+            decoded = self._decode(buf, fw, fh, stride, corner)
+        except Exception as e:  # a failed probe changes nothing
+            log.debug("pixel: screen probe failed: %s", e)
+            return None
+        if decoded[2].header is None:
+            return None
+        self._switch_method("screen", "the beacon is visible on screen again")
+        return decoded
 
     def _switch_method(self, new: str, why: str) -> None:
         if new == self._method:
             return
         self._method = new
         self._no_header_streak = 0
+        self._since_probe = 0
         self._switches_without_header += 1
         # Once both methods have come up empty, keep cycling quietly (the health
         # summary still says no beacon is visible).
@@ -1226,6 +1369,8 @@ class PixelTransport(Transport):
                 "window": self._hwnd is not None,
                 "hwnd": self._hwnd,
                 "windowInfo": self._window_desc or None,
+                "windowScore": self._hwnd_score,
+                "windowSwitches": self._window_switches,
                 "minimized": self._minimized,
                 "method": self._method,
                 "configuredMethod": self.method_cfg,

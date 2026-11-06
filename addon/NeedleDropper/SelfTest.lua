@@ -1,16 +1,26 @@
 local ADDON, ns = ...
--- SelfTest (/needle selftest [beacon|chatlog|discovery|music]): checks, on the user's real
--- client, the assumptions the design relies on but that could not be verified offline.
+-- SelfTest (/needle selftest [beacon|chatlog|discovery|music|share]): checks, on the user's real
+-- client, the assumptions the design relies on but that could not be verified offline
+-- (DESIGN-v1.2 6.4). Also the Settings panel's "Send a test signal" (S.Signal).
 
 local S = {}
 ns.SelfTest = S
 
-local P = ns.Protocol
+local P = ns.Protocol2
+local L = ns.L or setmetatable({}, { __index = function(_, k) return k end })
+
 local DISCOVERY_WINDOW = 120
 local MUSIC_SECONDS = 8
+local BEACON_SECONDS = 10
+local SIGNAL_SECONDS = 5
 local PAD_STEP_BYTES = 8192
 local PAD_MAX_BYTES = 65536
 local PAD_LINE = 900
+
+-- A share code written by Python's zlib (tests/vectors/share/minimal.json, the DESIGN-v1.2 5.4
+-- reference encoder): /needle selftest share decodes it with the client's own DecompressString.
+S.GOLDEN_CODE = "!NeedleDropper:1!eNo9jjEOwjAMRa9SeWEpEiAWujIhYGFFDFZrikUSR04oElXvjgOI0e/Z338EfOSbKDQANXSUWuWYWcIPqMQEzXkE1MwpGz3IszoJqtnM2ZGh3cy5ak8Uq614Dr2plwQzy/VqM11quIp6LMeBqHNUUiPpPGJ7t13uzNgde3Q2BvQl9PgHSgOnT6WF/cS+FLLQgfRLl9Mb5x9AMA==!"
+S.GOLDEN_PACK = { id = "minimal", name = "Minimal", zone = 1429, artist = "Low Roar", title = "I'll Keep Coming" }
 
 S.discoveryUntil = 0
 S.padTicker = nil
@@ -19,14 +29,80 @@ local function discoveryActive()
   return GetTime() < S.discoveryUntil
 end
 
--- beacon: show the strip, emit PING.
+local function px(v)
+  if type(v) ~= "number" then return "?" end
+  return string.format("%.1f", v)
+end
+
+-- Settings panel "Send a test signal" (DESIGN-v1.2 4.7): PING with the TEST flag; the strip is
+-- shown for a few seconds even when the beacon is off.
+function S.Signal()
+  local forced = not (ns.settings and ns.settings.beacon)
+  if ns.Beacon and ns.Beacon.ForceShow then ns.Beacon.ForceShow(SIGNAL_SECONDS) end
+  local ev = ns.Emit(P.EV.PING, nil, P.FLAG.TEST)
+  ns.Print(L["test signal sent (seq %d)%s. Your NeedleDropper app shows a notification within 2 seconds if it can see the game."],
+    ev and ev.seq or 0, forced and L[" (the beacon is off: shown for a few seconds anyway)"] or "")
+  return ev
+end
+ns.SendTestSignal = S.Signal
+
+-- The strip /needle selftest beacon shows for 10 s (DESIGN-v1.2 6.4 step 2): the largest song frame
+-- this cell size allows, with nothing an app could play. It is a FIRE of the test drop with the
+-- TEST and LOCAL_PLAYBACK flags (the app shows and logs a LOCAL_PLAYBACK song, never plays it) and
+-- text only -- no Spotify or YouTube id -- whose title is trimmed until the whole frame fits the
+-- 9 px rows unfitted (so the fit rule removes nothing). Never emitted: no ns.Events entry, no chat
+-- line, no seq of its own.
+local SAMPLE_TITLE = "Beacon self-test: the largest strip a song frame can draw on this screen, never played"
+
+function S.SampleEvent(seq, px)
+  local ev = { type = P.EV.FIRE, seq = seq or 0, flags = P.FLAG.TEST + P.FLAG.LOCAL_PLAYBACK, dropId = "test",
+               placeKey = P.PlaceKey("test"), artist = "NeedleDropper", title = SAMPLE_TITLE,
+               lengthMs = BEACON_SECONDS * 1000, label = "Beacon self-test" }
+  local cap = P.Capacity(P.RowsCap(px or 3))
+  while #P.EncodeFrame(ev) > cap and #ev.title > 1 do ev.title = string.sub(ev.title, 1, -2) end
+  return ev
+end
+
+-- beacon: send a PING with the TEST flag (the app's "heard World of Warcraft"), then show the
+-- largest song strip for 10 s, and report the geometry (DESIGN-v1.2 2.3 runtime guard): the
+-- measured gap above the player frame, the cell size, the rows a song strip may use and the
+-- largest strip's size.
 function S.Beacon()
+  local B = ns.Beacon
+  if ns.Director and ns.Director.active then
+    -- The app would let the self-test strip replace the song it is playing.
+    ns.Print("a drop is playing; /needle stop it first, then run the beacon test again.")
+    return nil
+  end
   local forced = not ns.settings.beacon
-  ns.Beacon.ForceShow(60)
-  local ev = ns.Emit(P.EV.PING, nil, 0)
-  ns.Print("beacon self-test: sent PING seq %d in the %d px strip at the top-left corner%s.", ev.seq,
-    ns.settings.beaconCellPx, forced and " (beacon is off in settings - shown for 60 s for this test)" or "")
-  ns.Print("the companion's |cffffffffdiag|r should show PING seq %d.", ev.seq)
+  if B.Layout then B.Layout() end            -- measure the clearance now
+  B.ForceShow(BEACON_SECONDS + 2)
+  local ev = ns.Emit(P.EV.PING, nil, P.FLAG.TEST)
+  local sample = S.SampleEvent(ev.seq, B.SettingCellPx and B.SettingCellPx() or ns.settings.beaconCellPx)
+  if B.ShowSample then B.ShowSample(sample, BEACON_SECONDS) end
+  local st = B.Status()
+  ns.Print("beacon self-test: sent PING seq %d (test signal) in the %s corner%s.", ev.seq, string.lower(st.corner or "TOPLEFT"),
+    forced and (" (the beacon is off in settings - shown for " .. BEACON_SECONDS .. " s for this test)") or "")
+  if st.gap then
+    local from = st.measuredFrom and #st.measuredFrom > 0 and table.concat(st.measuredFrom, ", ") or "?"
+    ns.Print("gap above your player frame: %s px (measured from %s).", px(st.gap), from)
+  else
+    ns.Print("gap above your player frame: not measured (no player or target frame art near the corner).")
+  end
+  ns.Print("cells: %d px drawn (setting %d px); a song strip may use %d row%s; this strip: %s px (%d row%s).",
+    st.cellPx or 0, st.settingCellPx or 0, st.maxRows or 0, (st.maxRows or 0) == 1 and "" or "s",
+    tostring(st.size), st.rows or 0, (st.rows or 0) == 1 and "" or "s")
+  local ok, worst = pcall(B.Choose, sample, st.settingCellPx, B.gap, B.Corner and B.Corner() or "TOPLEFT")
+  if ok and type(worst) == "table" and worst.grid then
+    ns.Print("largest song strip (shown for %d s after the PING): %dx%d px (%d row%s x %d columns of %d px, %d bytes).",
+      BEACON_SECONDS, worst.grid.widthPx, worst.grid.heightPx, worst.grid.rows, worst.grid.rows == 1 and "" or "s",
+      worst.grid.cols, worst.px, #worst.bytes)
+  end
+  local warnings = st.warnings or {}
+  for i = 1, #warnings do ns.Print("|cffff6060warning:|r %s", warnings[i]) end
+  if #warnings == 0 then ns.Print("the strip clears your player frame.") end
+  ns.Print("the NeedleDropper app's |cffffffffdiag|r should show PING seq %d, then the test strip (FIRE seq %d, test, plays nothing).",
+    ev.seq, ev.seq)
   return ev
 end
 
@@ -100,17 +176,71 @@ function S.Music()
   return true
 end
 
-local TESTS = { beacon = S.Beacon, chatlog = S.Chatlog, discovery = S.Discovery, music = S.Music }
+-- share: the client's zlib (C_EncodingUtil, DESIGN-v1.2 5.3 and 6.4 step 1). Returns ok (bool).
+--   1. CompressString's first byte (a zlib stream starts with 0x78);
+--   2. a code written by Python decodes to the expected soundtrack;
+--   3. a code written here decodes back to the same soundtrack.
+function S.Share()
+  local Share = ns.Share
+  if not (Share and Share.Decode and Share.Encode) then
+    ns.Print("share self-test: share codes are not available.")
+    return false
+  end
+  local allOk = true
+  local util = C_EncodingUtil
+  local method = Enum and Enum.CompressionMethod and Enum.CompressionMethod.Zlib
+  local level = Enum and Enum.CompressionLevel and Enum.CompressionLevel.OptimizeForSize
+  if util and util.CompressString and method then
+    local ok, z = pcall(util.CompressString, "NeedleDropper share self-test", method, level)
+    if ok and type(z) == "string" and #z > 0 then
+      local b = string.byte(z, 1)
+      ns.Print("share self-test: CompressString's first byte is 0x%02X (%s).", b, b == 0x78 and "OK, zlib" or "expected 0x78")
+      if b ~= 0x78 then allOk = false end
+    else
+      ns.Print("share self-test: CompressString failed (%s).", ok and "no output" or tostring(z))
+      allOk = false
+    end
+  else
+    ns.Print("share self-test: this client has no C_EncodingUtil.CompressString with zlib.")
+    allOk = false
+  end
+  local g = S.GOLDEN_PACK
+  local pack, why = Share.Decode(S.GOLDEN_CODE)
+  local d = pack and pack.drops and pack.drops[1]
+  if pack and pack.id == g.id and pack.name == g.name and #pack.drops == 1 and d.zone == g.zone
+     and d.artist == g.artist and d.title == g.title then
+    ns.Print("share self-test: a code made by the NeedleDropper app's encoder decodes: OK.")
+  else
+    ns.Print("share self-test: the reference code did not decode (%s).", tostring(pack and "wrong content" or why))
+    allOk = false
+  end
+  if pack then
+    local code, err = Share.Encode(pack)
+    local back = code and Share.Decode(code)
+    local bd = back and back.drops and back.drops[1]
+    if back and back.id == pack.id and #back.drops == #pack.drops and bd and bd.artist == g.artist then
+      ns.Print("share self-test: export and import round trip: OK (%d characters).", #code)
+    else
+      ns.Print("share self-test: the round trip failed (%s).", tostring(err or "the new code did not decode"))
+      allOk = false
+    end
+  end
+  ns.Print(allOk and "share self-test passed: share codes work on this client." or
+    "share self-test FAILED: please report the lines above.")
+  return allOk
+end
+
+local TESTS = { beacon = S.Beacon, chatlog = S.Chatlog, discovery = S.Discovery, music = S.Music, share = S.Share }
 
 function S.Run(which)
   which = which or ""
   if which == "" then
-    ns.Print("self-tests: /needle selftest beacon | chatlog | discovery | music. Running 'beacon':")
+    ns.Print("self-tests: /needle selftest beacon | chatlog | discovery | music | share. Running 'beacon':")
     which = "beacon"
   end
   local fn = TESTS[which]
   if not fn then
-    ns.Print("unknown self-test '%s' (beacon, chatlog, discovery, music).", which)
+    ns.Print("unknown self-test '%s' (beacon, chatlog, discovery, music, share).", ns.EscapeText and ns.EscapeText(which) or which)
     return
   end
   return fn()
@@ -119,8 +249,8 @@ end
 -- ---------------------------------------------------- discovery printers ----
 
 local function describeMap()
-  local L = ns.Location
-  local snap = L.Snapshot()
+  local Loc = ns.Location
+  local snap = Loc.Snapshot()
   return string.format("best map %s -> zone %s, subzone '%s'%s", tostring(snap.rawMapID),
     tostring(snap.zoneMapID or "none"), snap.subzone,
     snap.inInstance and (" (instance " .. tostring(snap.instanceID) .. ")") or "")

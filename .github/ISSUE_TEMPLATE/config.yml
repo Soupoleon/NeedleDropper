@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Beta testing guide
+    url: https://github.com/Soupoleon/NeedleDropper/blob/main/docs/BETA-TESTING.md
+    about: Downloading and installing the beta, the quick in-game test, and what to put in a report.
+  - name: Troubleshooting
+    url: https://github.com/Soupoleon/NeedleDropper/blob/main/docs/TROUBLESHOOTING.md
+    about: When the link to the app, a song, Spotify or YouTube doesn't work, plus every /needle command and setting.
+  - name: Install guide
+    url: https://github.com/Soupoleon/NeedleDropper/blob/main/docs/INSTALL.md
+    about: Installing, updating and uninstalling the addon and the app.
+  - name: Privacy
+    url: https://github.com/Soupoleon/NeedleDropper/blob/main/docs/PRIVACY.md
+    about: What NeedleDropper stores on your PC, and the little that leaves it.

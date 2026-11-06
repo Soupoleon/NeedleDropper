@@ -27,3 +27,6 @@ companion/dist/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Claude Code session data (worktrees of parallel sessions)
+.claude/

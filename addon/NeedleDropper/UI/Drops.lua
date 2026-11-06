@@ -299,7 +299,7 @@ function Dt.BuildRows()
       if not W.IsBuiltinRef(ref) then
         local set = model.Get(ref)
         for _, d in ipairs(set and set.drops or {}) do
-          if W.IsDraft(d) and not seen[ref .. "\n" .. d.id] then
+          if type(d) == "table" and type(d.id) == "string" and W.IsDraft(d) and not seen[ref .. "\n" .. d.id] then
             seen[ref .. "\n" .. d.id] = true
             rows[#rows + 1] = makeRow(ref, d, nil)
           end
@@ -310,9 +310,11 @@ function Dt.BuildRows()
     local set = model.Get(view)
     local active = isActive(view)
     for _, d in ipairs(set and set.drops or {}) do
-      local e = merged[d.id]
-      local winning = (active and e and not W.IsDraft(d)) and e.setRef or nil
-      rows[#rows + 1] = makeRow(view, d, winning)
+      if type(d) == "table" and type(d.id) == "string" then   -- damaged saved data: never a row
+        local e = merged[d.id]
+        local winning = (active and e and not W.IsDraft(d)) and e.setRef or nil
+        rows[#rows + 1] = makeRow(view, d, winning)
+      end
     end
   end
   local needle = string.lower(trim(state.search))
@@ -472,6 +474,7 @@ end
 function Dt.ClearFormFocus()
   local f = form.focused
   if f and f.HasFocus and f:HasFocus() then f:ClearFocus() end
+  if Dt.FlushVolume then Dt.FlushVolume() end       -- a volume drag still waiting to be saved
 end
 
 function Dt.Select(ref, id, opts)
@@ -531,18 +534,101 @@ local function notice(text)
   Dt.RefreshForm()
 end
 
+-- An edit to the drop of the place where the player stands must not make that drop fire in the
+-- middle of the edit (with a half-typed song, then marked heard), nor a drop the edit reveals
+-- (turning off or deleting a landmark's song hands the place to the zone's). Like Add drop here
+-- (DESIGN-v1.2 4.2), such an edit lets the place go for this visit: it plays on the next arrival,
+-- and Test plays it now. `ids`: the drop ids the edit touches; `all`: also hold every other drop
+-- of this place (edits that can reveal another drop).
+local function holdHere(ids, all)
+  local D = ns.Director
+  if not (D and D.SuppressHere) then return end
+  local here = hereIds()
+  local touched = false
+  for _, id in pairs(ids) do
+    if here[id] then
+      touched = true
+      D.SuppressHere(id)
+    end
+  end
+  if touched and all then
+    for id in pairs(here) do D.SuppressHere(id) end
+  end
+end
+Dt.HoldHere = holdHere
+
 function Dt.Update(fields)
   local sel = state.selected
   if not sel then return false end
+  local reveals = type(fields) == "table" and fields.disabled == true
+  holdHere({ sel.id }, reveals)
   local ok, res = S().UpdateDrop(sel.ref, sel.id, fields)
   if not ok then
     notice(res or L["That change could not be saved."])
     return false
   end
-  if type(res) == "string" and res ~= "" then sel.id = res end
+  if type(res) == "string" and res ~= "" then
+    if res ~= sel.id then holdHere({ res }, false) end    -- moved here ("Use my location")
+    sel.id = res
+  end
   state.error = nil
   W.RefreshAll()
   return true
+end
+
+-- Volume. MinimalSliderTemplate obeys its 5 % step while dragging (obeyStepOnDrag,
+-- MinimalSlider.xml L6 on forever), so one drag from 100 % to 0 % reports 20 values. The % label
+-- follows each one; the drop is saved once, when the player lets go: at OnInteractEnd, or
+-- VOLUME_SETTLE seconds after the last change while the thumb is not held (stepper clicks, the
+-- gamepad, a release over the slider). One drag = one edit and one undo step.
+local VOLUME_SETTLE = 0.4
+local volumeTimer
+
+local function flushVolume()
+  if volumeTimer then
+    volumeTimer:Cancel()
+    volumeTimer = nil
+  end
+  local p = state.pendingVolume
+  state.pendingVolume = nil
+  if not p or W.IsBuiltinRef(p.ref) then return end
+  local drop = S().GetDrop(p.ref, p.id)
+  if not drop or p.value == (type(drop.volume) == "number" and drop.volume or 100) then return end
+  holdHere({ p.id }, false)
+  local ok, res = S().UpdateDrop(p.ref, p.id, { volume = p.value })
+  if not ok then
+    notice(res or L["That change could not be saved."])
+    return
+  end
+  W.RefreshAll()
+end
+Dt.FlushVolume = flushVolume
+
+local function thumbHeld()
+  local s = form.Volume and form.Volume.Slider
+  if not (s and type(s.IsDraggingThumb) == "function") then return false end
+  return s:IsDraggingThumb() == true      -- Slider API (SimpleSliderAPIDocumentation.lua L118)
+end
+
+local function scheduleVolume()
+  if volumeTimer then volumeTimer:Cancel() end
+  volumeTimer = C_Timer.NewTimer(VOLUME_SETTLE, function()
+    volumeTimer = nil
+    if thumbHeld() then
+      scheduleVolume()
+    else
+      flushVolume()
+    end
+  end)
+end
+
+function Dt.VolumeChanged(value)
+  local sel = state.selected
+  if not (sel and Dt.SelectedDrop() and editable()) then return end
+  local p = state.pendingVolume
+  if p and (p.ref ~= sel.ref or p.id ~= sel.id) then flushVolume() end
+  state.pendingVolume = { ref = sel.ref, id = sel.id, value = math.floor(value + 0.5) }
+  scheduleVolume()
 end
 
 -- The drop as the form shows it right now, typed but uncommitted text included (Test plays
@@ -604,6 +690,7 @@ end
 function Dt.ChangeSongHere(data)
   data = data or (state.selected and { ref = state.selected.ref, id = state.selected.id })
   if not data then return end
+  holdHere({ data.id }, false)
   local ref, id = S().OverrideHere(data.id)
   if not ref then
     notice(id or L["That change could not be saved."])
@@ -614,8 +701,7 @@ function Dt.ChangeSongHere(data)
   state.error = nil
   W.RefreshAll()
   -- The fields are editable now; typing replaces the artist straight away.
-  if form.Artist and form.Artist:IsVisible() then
-    form.Artist:SetFocus()
+  if form.Artist and form.Artist:IsVisible() and W.FocusBox(form.Artist) then
     form.Artist:HighlightText()
   end
 end
@@ -627,6 +713,7 @@ function Dt.TurnOffHere(data)
   local drop = model.GetDrop(data.ref, data.id)
   if not drop then return end
   if W.IsBuiltinRef(data.ref) or drop.basedOn then
+    holdHere({ data.id }, true)
     local ref, id = model.TurnOffHere(data.id)
     if not ref then
       notice(id or L["That change could not be saved."])
@@ -660,6 +747,7 @@ function Dt.Revert(data)
   local model = S()
   local drop = model.GetDrop(data.ref, data.id)
   local base = drop and drop.basedOn
+  holdHere({ data.id }, true)
   local ok, err = model.Revert(data.id)
   if not ok then
     notice(err or L["That change could not be saved."])
@@ -692,14 +780,29 @@ function Dt.ShowUndo(text)
   end)
 end
 
+-- The bar's Undo brings back exactly the drop it names, even after other edits (the model's
+-- UndoRemove); the shared session stack (Undo()) is only the fallback for a model without it.
 function Dt.Undo()
-  local ok = S().Undo()
-  hideUndo()
-  if ok and state.lastDeleted then
-    local d = state.lastDeleted
-    if S().GetDrop(d.ref, d.id) then state.selected = { ref = d.ref, id = d.id } end
+  local model = S()
+  local d = state.lastDeleted
+  local ok, err
+  if d and d.token ~= nil and model.UndoRemove then
+    if d.id then holdHere({ d.id }, false) end
+    local why
+    ok, err, why = model.UndoRemove(d.token)
+    if not ok and why == "gone" and d.drop then
+      ok, err = model.AddDrop(d.ref, d.drop)        -- the step fell out of the undo stack
+    end
+  elseif d then
+    ok = model.Undo()
   end
+  hideUndo()
   state.lastDeleted = nil
+  if ok and d and model.GetDrop(d.ref, d.id) then
+    state.selected = { ref = d.ref, id = d.id }
+  elseif not ok and err then
+    state.error = err
+  end
   W.RefreshAll()
 end
 
@@ -711,12 +814,16 @@ function Dt.Delete(data)
   if not drop then return end
   Dt.ClearFormFocus()
   local place = W.PlaceShort(drop)
+  local kept = {}
+  for k, v in pairs(drop) do kept[k] = v end
+  holdHere({ data.id }, true)
   local ok, err = S().RemoveDrop(data.ref, data.id)
   if not ok then
     notice(err or L["That drop could not be deleted."])
     return
   end
-  state.lastDeleted = { ref = data.ref, id = data.id }
+  local token = S().LastUndoToken and S().LastUndoToken() or nil
+  state.lastDeleted = { ref = data.ref, id = data.id, token = token, drop = kept }
   if isSelectedRow(data) then state.selected = nil end
   Dt.ShowUndo(W.Format(L["Deleted %s."], place))
   W.RefreshAll()
@@ -736,6 +843,7 @@ function Dt.CopyTo(data, targetRef, move)
   local model = S()
   local drop = model.GetDrop(data.ref, data.id)
   if not drop then return end
+  holdHere({ data.id }, move)
   local id, err = model.AddDrop(targetRef, copyDrop(drop))
   if not id then
     state.selected = { ref = data.ref, id = data.id }
@@ -746,6 +854,56 @@ function Dt.CopyTo(data, targetRef, move)
   if showing() ~= "mix" and showing() ~= targetRef then setShowing(targetRef) end
   state.selected = { ref = targetRef, id = id }
   W.RefreshAll()
+end
+
+-- Soundtracks of your own a drop can be copied or moved to (every one but its own).
+local function copyTargets(data)
+  local out = {}
+  for _, info in ipairs(S().List()) do
+    if not info.builtin and info.ref ~= data.ref then out[#out + 1] = info end
+  end
+  return out
+end
+
+-- "Copy to" / "Move to" entries for `data` (a row, or the selected drop): the context menu has
+-- them as submenus; the form's More... section has the same menu as a dropdown, because a
+-- right-click is out of reach with Forever's gamepad UI (SmartNavigation binds only Click and
+-- Close, Blizzard_GamepadSmartNavigation/SmartNavigation.lua L233-L234 on forever).
+function Dt.AddCopyMoveItems(root, data, flat)
+  local targets = copyTargets(data)
+  if #targets == 0 then return false end
+  if flat then
+    -- One level, every entry saying what it does: "Copy to Road Trip", "Move to Road Trip".
+    for _, info in ipairs(targets) do
+      root:CreateButton(W.Format(L["Copy to %s"], esc(info.name)), function() Dt.CopyTo(data, info.ref, false) end)
+    end
+    if not data.builtin then
+      root:CreateDivider()
+      for _, info in ipairs(targets) do
+        root:CreateButton(W.Format(L["Move to %s"], esc(info.name)), function() Dt.CopyTo(data, info.ref, true) end)
+      end
+    end
+    return true
+  end
+  local copyTo = root:CreateButton(L["Copy to"])
+  for _, info in ipairs(targets) do
+    copyTo:CreateButton(esc(info.name), function() Dt.CopyTo(data, info.ref, false) end)
+  end
+  if not data.builtin then
+    local moveTo = root:CreateButton(L["Move to"])
+    for _, info in ipairs(targets) do
+      moveTo:CreateButton(esc(info.name), function() Dt.CopyTo(data, info.ref, true) end)
+    end
+  end
+  return true
+end
+
+-- The selected drop as a row (for the form's Copy / Move dropdown).
+function Dt.SelectedRow()
+  local sel = state.selected
+  local d = Dt.SelectedDrop()
+  if not (sel and d) then return nil end
+  return { ref = sel.ref, id = sel.id, drop = d, builtin = W.IsBuiltinRef(sel.ref), disabled = d.disabled == true }
 end
 
 function Dt.OpenContextMenu(row, data)
@@ -767,22 +925,7 @@ function Dt.OpenContextMenu(row, data)
     else
       root:CreateButton(L["Turn off here"], function() Dt.TurnOffHere(data) end)
     end
-    local targets = {}
-    for _, info in ipairs(model.List()) do
-      if not info.builtin and info.ref ~= data.ref then targets[#targets + 1] = info end
-    end
-    if #targets > 0 then
-      local copyTo = root:CreateButton(L["Copy to"])
-      for _, info in ipairs(targets) do
-        copyTo:CreateButton(esc(info.name), function() Dt.CopyTo(data, info.ref, false) end)
-      end
-      if not data.builtin then
-        local moveTo = root:CreateButton(L["Move to"])
-        for _, info in ipairs(targets) do
-          moveTo:CreateButton(esc(info.name), function() Dt.CopyTo(data, info.ref, true) end)
-        end
-      end
-    end
+    Dt.AddCopyMoveItems(root, data, false)
     if not data.builtin and data.drop.basedOn then
       local baseRef = W.RefForSetId(data.drop.basedOn)
       root:CreateButton(W.Format(L["Revert to %s"], esc(baseRef and W.SetName(baseRef) or data.drop.basedOn)),
@@ -799,6 +942,16 @@ end
 local function parseAddText(text)
   text = trim(text)
   if text == "" then return nil end
+  -- The model's parser knows every separator (" - ", en and em dash) and says what is wrong
+  -- with a link ("That's an album or playlist link: ...").
+  local model = S()
+  if model and model.ParseSongText then
+    local fields, err = model.ParseSongText(text)
+    if fields and next(fields) ~= nil then return fields end
+    if not fields then
+      return nil, err or L["Use /needle add Artist - Title, or paste a Spotify or YouTube song link."]
+    end
+  end
   local P2 = ns.Protocol2
   local sp = P2 and P2.SpotifyIdFromLink(text)
   if sp then return { spotify = sp } end
@@ -958,7 +1111,7 @@ function W.AddHere(text)
     state.error = nil
     W.RefreshAll()
     if drop and W.IsDraft(drop) and not W.IsBuiltinRef(resultRef) and form.Artist and form.Artist:IsVisible() then
-      form.Artist:SetFocus()
+      W.FocusBox(form.Artist)
     end
   end
   return true, resultRef, resultId
@@ -968,8 +1121,35 @@ end
 
 local FIELD = {}
 
-FIELD.artist = function(text) return { artist = trim(text) } end
-FIELD.title = function(text) return { title = trim(text) } end
+-- A Spotify or YouTube link pasted into Artist or Title (Add drop here puts the cursor in
+-- Artist) goes into its own field instead of being saved as the name. Only text that names the
+-- service counts: a bare 11-character word like "Evanescence" is an artist, not a video id.
+local function linkFields(text)
+  local P2 = ns.Protocol2
+  local l = string.lower(text)
+  if not P2 or not (string.find(l, "spotify", 1, true) or string.find(l, "youtu", 1, true)) then return nil end
+  local sp = P2.SpotifyIdFromLink(text)
+  if sp then return { spotify = sp } end
+  local yt = P2.YouTubeIdFromLink(text)
+  if yt then
+    local fields = { youtube = yt }
+    local start = Dt.YouTubeStart(text)
+    if start and start > 0 then fields.startMs = start * 1000 end
+    return fields
+  end
+  return nil
+end
+
+FIELD.artist = function(text)
+  local link = linkFields(trim(text))
+  if link then return link, nil, true end
+  return { artist = trim(text) }
+end
+FIELD.title = function(text)
+  local link = linkFields(trim(text))
+  if link then return link, nil, true end
+  return { title = trim(text) }
+end
 
 FIELD.spotify = function(text)
   text = trim(text)
@@ -1075,7 +1255,7 @@ function Dt.CommitField(box)
     box:SetText(box.ndValue or "")
     return
   end
-  local fields, problem = FIELD[box.ndKey](text, drop, box)
+  local fields, problem, moved = FIELD[box.ndKey](text, drop, box)
   if not fields then
     box.ndProblem = problem
     if box.ndKey == "spotify" or box.ndKey == "youtube" or box.ndKey == "file" then
@@ -1086,6 +1266,13 @@ function Dt.CommitField(box)
     return
   end
   box.ndProblem = nil
+  if moved then
+    -- A link typed or pasted into Artist / Title: it goes to its own field, and the box gets its
+    -- last saved text back, ready for the name.
+    box:SetText(box.ndValue or "")
+    if sameFields(drop, fields) then Dt.RefreshForm() else Dt.Update(fields) end
+    return
+  end
   if sameFields(drop, fields) then
     box.ndValue = text
     Dt.RefreshForm()
@@ -1243,6 +1430,13 @@ local function zonesByContinent()
     table.sort(zones, function(a, b) return (a.name or "") < (b.name or "") end)
     if #zones > 0 then zoneCache[#zoneCache + 1] = { name = c.name, zones = zones } end
   end
+  -- Zones whose parent is Azeroth itself, not a continent: Zephras Isle (2521, the Skyborne
+  -- starting zone in UiMap 1.60.1.70790) would otherwise be missing from the list.
+  local loose = C_Map.GetMapChildrenInfo(AZEROTH, types.Zone or 3) or {}
+  if #loose > 0 then
+    table.sort(loose, function(a, b) return (a.name or "") < (b.name or "") end)
+    zoneCache[#zoneCache + 1] = { name = W.ZoneName(AZEROTH) or L["Azeroth"], zones = loose }
+  end
   return zoneCache
 end
 
@@ -1287,7 +1481,7 @@ function Dt.RefreshForm()
     form.bar:Hide()
     local place = state.emptyPlace
     if place then
-      ui.formEmpty:SetText(W.Format(L["No needle drop for %s yet. Press Add drop here, then paste a Spotify or YouTube link."], place))
+      ui.formEmpty:SetText(W.Format(L["No needle drop for %s yet. Press Add drop here, then type the artist and title (and paste a Spotify or YouTube link if you have one)."], place))
     else
       ui.formEmpty:SetText(L["Pick a drop on the left, or press Add drop here."])
     end
@@ -1329,6 +1523,9 @@ function Dt.RefreshForm()
   elseif playing and playing.setRef ~= sel.ref and not W.IsDraft(drop) then
     banner = W.Format(L["%s is higher in the list and plays here instead."], esc(W.SetName(playing.setRef)))
     buttons.show = playing.setRef
+  elseif W.IsDraft(drop) then
+    -- A link alone is not a finished drop: drafts never play on arrival (DESIGN 4.2 rule 4).
+    banner = L["Type the artist and title to finish this drop: until then it doesn't play when you arrive (Test still plays it)."]
   end
   form.bannerLine.ndVisible = banner ~= nil
   form.BannerText:SetText(banner or "")
@@ -1396,9 +1593,16 @@ function Dt.RefreshForm()
     form[key].ndVisible = more
   end
   if songless and state.more then form.offLine.ndVisible = true end
+  form.copyLine.ndVisible = state.more and #copyTargets({ ref = sel.ref }) > 0
+  form.CopyMove:GenerateMenu()
   W.SetBoxText(form.Start, (drop.startMs or 0) > 0 and W.FormatTime(drop.startMs) or "")
   W.SetBoxText(form.Length, (drop.durationMs or 0) > 0 and W.FormatTime(drop.durationMs) or "")
-  form.Volume:SetValue(type(drop.volume) == "number" and drop.volume or 100)
+  local pv = state.pendingVolume
+  if pv and pv.ref == sel.ref and pv.id == sel.id then
+    form.Volume:SetValue(pv.value)        -- a drag not saved yet: keep the thumb where it is
+  else
+    form.Volume:SetValue(type(drop.volume) == "number" and drop.volume or 100)
+  end
   form.Volume:SetEnabled(canEdit)
   local tags, custom = drop.tags or {}, {}
   local fitting, funny = false, false
@@ -1565,7 +1769,7 @@ local function buildForm(pane)
       if here and here.mapID == drop.mapID and here.subzone then
         form.Landmark:SetText(here.subzone)
       end
-      if form.Landmark:IsVisible() then form.Landmark:SetFocus() end
+      if form.Landmark:IsVisible() then W.FocusBox(form.Landmark) end
     else
       Dt.RefreshForm()
     end
@@ -1665,7 +1869,7 @@ local function buildForm(pane)
   form.More = W.Button(line, L["More..."], 90, function()
     state.more = not state.more
     Dt.RefreshForm()
-  end, L["More..."], L["Start and length, volume, tags, a note, and turning this place off."])
+  end, L["More..."], L["Start and length, volume, tags, a note, turning this place off, and copying or moving the drop."])
   form.More:SetPoint("LEFT", line, "LEFT", 4, 0)
 
   -- More... (collapsed by default).
@@ -1694,10 +1898,10 @@ local function buildForm(pane)
   })
   form.Volume:RegisterCallback(MinimalSliderWithSteppersMixin.Event.OnValueChanged, function(owner, value)
     if form.refreshing then return end
-    local drop = Dt.SelectedDrop()
-    if not (drop and editable()) then return end
-    local v = math.floor(value + 0.5)
-    if v ~= (type(drop.volume) == "number" and drop.volume or 100) then Dt.Update({ volume = v }) end
+    Dt.VolumeChanged(value)
+  end, form)
+  form.Volume:RegisterCallback(MinimalSliderWithSteppersMixin.Event.OnInteractEnd, function()
+    flushVolume()
   end, form)
   form.VolumeNote = W.Label(line, L["Spotify and YouTube only; in-game files play at your Music volume."], "GameFontDisableSmall")
   form.VolumeNote:SetPoint("TOPLEFT", form.Volume, "BOTTOMLEFT", 4, 2)
@@ -1756,6 +1960,7 @@ local function buildForm(pane)
       end
       local drop = S().GetDrop(ref, id)
       if drop and text ~= (drop.note or "") then
+        holdHere({ id }, false)
         local ok, res = S().UpdateDrop(ref, id, { note = text })
         if ok then
           W.RefreshAll()
@@ -1778,7 +1983,21 @@ local function buildForm(pane)
   form.Off:SetPoint("LEFT", line, "LEFT", LABEL_W - 4, 0)
   W.SetTooltip(form.Off, W.SimpleTooltip(L["Turn off this place"], L["Nothing plays here, not even a soundtrack lower in the list."]))
 
-  for _, key in ipairs({ "timingLine", "volumeLine", "tagsLine", "noteLine", "offLine" }) do
+  -- Copy to / Move to, also in the row's right-click menu (out of a controller's reach).
+  line = newLine("copyLine", 28)
+  label(line, L["Copy"])
+  form.CopyMove = CreateFrame("DropdownButton", nil, line, "WowStyle1DropdownTemplate")
+  form.CopyMove:SetPoint("LEFT", line, "LEFT", LABEL_W, 0)
+  form.CopyMove:SetWidth(200)
+  form.CopyMove:SetDefaultText(L["Copy or move to..."])
+  form.CopyMove:SetupMenu(function(owner, root)
+    local data = Dt.SelectedRow()
+    if not (data and Dt.AddCopyMoveItems(root, data, true)) then
+      root:CreateTitle(L["Make a soundtrack of your own first (Soundtracks tab, New)."])
+    end
+  end)
+
+  for _, key in ipairs({ "timingLine", "volumeLine", "tagsLine", "noteLine", "offLine", "copyLine" }) do
     form[key].ndVisible = false
   end
 end
@@ -1890,6 +2109,9 @@ local function buildButtons(buttons)
     GameTooltip_SetTitle(tt, L["Test"])
     GameTooltip_AddNormalLine(tt, L["Plays this drop now, even an unsaved draft. It is not marked as heard."], true)
     local drop = Dt.SelectedDrop()
+    if drop and W.IsDraft(drop) then
+      GameTooltip_AddNormalLine(tt, L["This drop isn't finished: Test plays it, but it won't play when you arrive until it has an artist and title."], true)
+    end
     local C = ns.Companion
     local st = C and C.Status and C.Status()
     if drop and not nonEmpty(drop.file) and type(st) == "table" and not st.present then
@@ -1963,6 +2185,7 @@ end
 W.RegisterTab({
   key = "drops",
   title = L["Drops"],
+  hasStop = true,         -- its button bar has Stop: the window's own Stop stays hidden here
   Build = build,
   Refresh = function() Dt.Refresh() end,
   UpdateButtons = function() Dt.RefreshButtons() end,

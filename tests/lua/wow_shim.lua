@@ -155,6 +155,7 @@ for _, e in ipairs({
   "CINEMATIC_START", "CINEMATIC_STOP", "PLAY_MOVIE", "STOP_MOVIE", "LOADING_SCREEN_ENABLED",
   "LOADING_SCREEN_DISABLED", "SHARD_TRANSFER", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED",
   "PLAYER_LEVEL_UP", "PLAYER_FLAGS_CHANGED", "UPDATE_CHAT_WINDOWS", "CVAR_UPDATE",
+  "PLAYER_TARGET_CHANGED",
 }) do SHIM.KNOWN_EVENTS[e] = true end
 
 SHIM.frames = {}            -- every frame ever created, in creation order
@@ -746,11 +747,13 @@ function GetScreenWidth() return UIParent:GetWidth() end
 function GetScreenHeight() return UIParent:GetHeight() end
 function InCombatLockdown() return SHIM.state.inCombat end
 
+-- TOC metadata of the addon under test: tests/addon_harness.py copies the "## Key: value" lines
+-- of NeedleDropper.toc into SHIM.addonMetadata before the addon loads.
+SHIM.addonMetadata = { Version = "1.2.0", Title = "NeedleDropper" }
 C_AddOns = {}
 function C_AddOns.GetAddOnMetadata(addon, field)
-  if field == "Version" then return "1.0.0" end
-  if field == "Title" then return "NeedleDropper" end
-  return nil
+  if addon ~= "NeedleDropper" and addon ~= 1 then return nil end
+  return SHIM.addonMetadata[field]
 end
 GetAddOnMetadata = C_AddOns.GetAddOnMetadata
 function C_AddOns.IsAddOnLoaded(name) return name == "NeedleDropper" end
@@ -774,6 +777,7 @@ SHIM.maps = {
   [1411] = { name = "Durotar", mapType = 3, parentMapID = 1414 },
   [1454] = { name = "Orgrimmar", mapType = 3, parentMapID = 1414 },
   [2482] = { name = "Mount Hyjal", mapType = 3, parentMapID = 1414 },
+  [2521] = { name = "Zephras Isle", mapType = 3, parentMapID = 947 },  -- a zone directly under Azeroth (UiMap 1.60.1)
   [1429] = { name = "Elwynn Forest", mapType = 3, parentMapID = 1415 },
   [1436] = { name = "Westfall", mapType = 3, parentMapID = 1415 },
   [1453] = { name = "Stormwind City", mapType = 3, parentMapID = 1415 },
@@ -1042,11 +1046,15 @@ function StopMusic()
   tinsert(SHIM.log.music, { "stop", t = SHIM.now })
   SHIM.state.musicPath = nil
 end
+-- warcraft.wiki.gg API_PlaySoundFile: willPlay is nil when a muted channel prevents the sound;
+-- the Music channel's toggle is Sound_EnableMusic (Blizzard_SharedXML/Mainline/Sound.lua).
 function PlaySoundFile(path, channel)
   if type(path) ~= "string" and type(path) ~= "number" then shimError("PlaySoundFile needs a path") end
   local entry = { path = path, channel = channel, t = SHIM.now }
   tinsert(SHIM.log.sounds, entry)
-  if not SHIM.state.playableFiles[path] then
+  local muted = channel == "Music" and GetCVar("Sound_EnableMusic") == "0"
+  if muted then entry.muted = true end
+  if muted or not SHIM.state.playableFiles[path] then
     entry.willPlay = false
     return nil, nil
   end
@@ -1070,7 +1078,17 @@ end
 
 -- ----------------------------------------------------------------- cvars ----
 
-function GetCVar(name) return SHIM.cvars[name] end
+-- SHIM.cvars holds the stored values (what Config.wtf gets at logout). SHIM.tempCVars holds
+-- session-only values set with C_CVar.SetTempCVar: GetCVar reads through them, SetCVar changes
+-- only the stored value underneath, and only RemoveTempCVar drops a temp value. This is the
+-- model Blizzard's own code assumes (Blizzard_Gamepad/Core.lua pairs SetTempCVar with
+-- RemoveTempCVar, never with SetCVar; baseline finding ND-AUDIO-TEMPCVAR).
+SHIM.tempCVars = {}
+function GetCVar(name)
+  local t = SHIM.tempCVars[name]
+  if t ~= nil then return t end
+  return SHIM.cvars[name]
+end
 function SetCVar(name, value)
   if type(name) ~= "string" then shimError("SetCVar needs a name") end
   if type(value) == "boolean" then value = value and "1" or "0" end
@@ -1084,11 +1102,15 @@ function C_CVar.GetCVar(name) return GetCVar(name) end
 function C_CVar.SetCVar(name, value) return SetCVar(name, value) end
 function C_CVar.GetCVarDefault(name) return "1" end
 function C_CVar.GetCVarBool(name) return GetCVar(name) == "1" end
+-- C_CVar.SetTempCVar / RemoveTempCVar (CVarDocumentation.lua on forever: no return values).
 function SHIM.EnableTempCVar()
   function C_CVar.SetTempCVar(name, value)
-    SHIM.cvars[name] = tostring(value)
+    SHIM.tempCVars[name] = tostring(value)
     tinsert(SHIM.log.cvarSets, { name = name, value = tostring(value), temp = true, t = SHIM.now })
-    return true
+  end
+  function C_CVar.RemoveTempCVar(name)
+    SHIM.tempCVars[name] = nil
+    tinsert(SHIM.log.cvarSets, { name = name, removeTemp = true, t = SHIM.now })
   end
 end
 

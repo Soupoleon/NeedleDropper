@@ -35,28 +35,28 @@ compartment (the small numbered button by the minimap) and a key binding, if you
 
 - **Drops** (the default): every place and its song, with a form to change it.
 - **Soundtracks**: turn soundtracks on or off, set their order, and **New**, **Duplicate**,
-  **Rename**, **Delete**, **Share…** and **Import…**.
-- **Journal**: the songs this character has heard, newest first, each with ▶ **Replay**, **Play
+  **Rename**, **Delete**, **Share...** and **Import...**.
+- **Journal**: the songs this character has heard, newest first, each with **Replay**, **Play
   again next visit** (that place plays again the next time you arrive) and **Show drop**.
 
 At the top of the Drops tab:
 
 - **Showing:** picks what the list shows: *What plays (all active)*, which is the result of all the
   soundtracks you have on, or a single soundtrack (yours and the built-in ones are listed
-  separately), plus *New soundtrack…* and *Import…*.
+  separately), plus *New soundtrack...* and *Import...*.
 - The **search** box finds places, artists, titles and notes.
 - **Filter** narrows the list: *Here*, *Not heard yet (this character)*, *Needs a song*, *Changed by
   you*, *In-game files*, *Turned off*.
 - **Add drop here**, the button you'll use most.
 
-Each row shows the place (*Elwynn Forest › Goldshire*) and the song (*Eagles · Hotel California*,
+Each row shows the place (*Elwynn Forest > Goldshire*) and the song (*Eagles · Hotel California*,
 or *needs a song*). On the right, letters show where the song can play from: **S** Spotify,
-**Y** YouTube, **F** an in-game file. *heard ✓* means this character has heard it; *yours*, *off*
+**Y** YouTube, **F** an in-game file. *heard* (with a tick) means this character has heard it; *yours*, *off*
 and *overridden* say whether you changed it, turned it off, or a soundtrack higher in your list has
-another song there. Hover over a row for its sources, note and soundtrack, and for a ▶ button that
-tests it. Right-click a row for **Test**, **Change song here** (or **Edit**), **Turn off here** (or
-**Turn on**), **Copy to ▸** and **Move to ▸** (into one of your own soundtracks), **Revert to
-built-in** and **Delete**.
+another song there. Hover over a row for its sources, note and soundtrack, and for a **Test** button
+that plays it now. Right-click a row for **Test**, **Change song here** (or **Edit**), **Turn off
+here** (or **Turn on here**), **Copy to** and **Move to** (into one of your own soundtracks),
+**Revert to Azeroth Mixtape** (named after the soundtrack your change covers) and **Delete**.
 
 When you open the window, it selects the drop for the place you are standing in.
 
@@ -71,19 +71,23 @@ settings.
 2. **Press Add drop here** (or type `/needle add`, or use its key binding). NeedleDropper works out
    the place for you: inside a dungeon or raid, that instance; inside a landmark (when the game shows
    a subzone name that isn't the zone's), that landmark; otherwise the whole zone. If a drop for this
-   place already exists, NeedleDropper selects it instead of making a second one.
+   place already exists, NeedleDropper selects it instead of making a second one (a built-in drop
+   then shows **Change song here**, [below](#change-a-song-from-a-built-in-soundtrack)).
 3. **Fill in the song:** type the **Artist** and **Title**, and paste a link if you have one: a
    Spotify song link into **Spotify**, a YouTube link into **YouTube**. A link plays exactly that
    recording; without one, the app searches Spotify for the artist and title.
-4. **Press ▶ Test.** The title card appears and the song plays, through the app or, for an
+4. **Press Test.** The title card appears and the song plays, through the app or, for an
    in-game file, in WoW itself. Testing never marks a place as heard, and works on a drop you haven't
    finished.
 
 New drops go into **My Drops**, your personal soundtrack (NeedleDropper creates it the first time),
 or into the soundtrack you picked under **Showing:**, if it is one of yours.
 
-**In one line:** `/needle add Toto - Africa` or `/needle add https://youtu.be/QAo_Ycocl1E` adds the
-place and the song at once, and answers *Added Goldshire: Toto · Africa to My Drops.*
+**In one line:** `/needle add Toto - Africa` adds the place and the song at once, and answers *Added
+Goldshire: Toto · Africa to My Drops.* `/needle add https://youtu.be/QAo_Ycocl1E` (or a Spotify song
+link) saves just the link; type the artist and title in the window, which opens by itself when the drop
+has none yet. Until it has both, the drop is a draft: it never plays on arrival (the form says so), and
+**Test** still plays it. A link pasted into **Artist** or **Title** by mistake moves into its own field.
 
 A drop you add doesn't start during the visit you added it in, so it can't interrupt your typing.
 It plays the next time you arrive, even in a zone your character explored long ago.
@@ -94,23 +98,24 @@ The fields, in the order Tab moves through them:
 
 | Field | |
 |---|---|
-| **Place** | For example *Goldshire — Elwynn Forest*. **Use my location** sets it to where you stand; **This landmark** or **Whole zone** picks the scope. You can also pick a **Zone** from the list (every zone, named in your game language) and type a **Landmark** name. Standing in a landmark gives the drop the game's area number, which works on every game language; a landmark typed by name shows *landmark saved by name: works on <language> clients only*. Changing the place makes it a different place: the old one keeps its heard status |
+| **Place** | For example *Goldshire, Elwynn Forest*, *Elwynn Forest (whole zone)* or *The Deadmines (dungeon or raid)*. **Use my location** sets it to where you stand; **This landmark** or **Whole zone** picks the scope. You can also pick a **Zone** from the list (every zone, named in your game language) and type a **Landmark** name. Standing in a landmark gives the drop the game's area number, which works on every game language; a landmark typed by name shows *Landmark saved by name: works on <language> clients only.* Changing the place makes it a different place: the old one keeps its heard status |
 | **Artist**, **Title** | Required: a drop without them is a draft (*needs a song*) and never plays. They are shown on the title card, and used to search Spotify when there is no link |
-| **Spotify** | *Paste a Spotify song link*: `https://open.spotify.com/track/…` (with or without `intl-xx/` and `?si=…`), `spotify:track:…`, or the bare id. You'll see *Spotify song ✓*. In the Spotify app, right-click a song → **Share** → **Copy Song Link**. Album and playlist links don't work |
+| **Spotify** | *Paste a Spotify song link*: `https://open.spotify.com/track/…` (with or without `intl-xx/` and `?si=…`), `spotify:track:…`, or the bare id. You'll see *Spotify song* (with a tick). In the Spotify app, right-click a song → **Share** → **Copy Song Link**. Album and playlist links don't work |
 | **YouTube** | *Paste a YouTube link*: `youtube.com/watch?v=…`, `youtu.be/…`, `/shorts/…`, `/embed/…`, `/live/…`, `music.youtube.com` or `m.youtube.com`. If the link has a time in it (`t=` or `start=`), the form offers *Start at 1:23?* |
-| **In-game file** | The name of an .mp3 or .ogg file in `NeedleDropper_Local\media`, for example `goldshire.mp3`. You'll see *found ✓*, or *not found: copy it there and restart WoW (a /reload is not enough)*. See [In-game audio files](PROVIDERS.md#in-game-audio-files) |
-| **More…** | **Start at** (m:ss, to skip an intro), **Play for** (m:ss; empty = the whole song), **Volume** (Spotify and YouTube only: in-game files play at your Music volume), tags **Fitting** and **Funny** plus your own, a **Note** (why the song fits; shown in the tooltip) and **Turn off this place** |
-| Buttons | ▶ **Test** / ■ **Stop** and **Delete** |
+| **In-game file** | The name of an .mp3 or .ogg file in `NeedleDropper_Local\media`, for example `goldshire.mp3`. You'll see *found* (with a tick), or *not found: copy it there and restart WoW (a /reload is not enough)*. See [In-game audio files](PROVIDERS.md#in-game-audio-files) |
+| **More...** | **Start at** (m:ss, to skip an intro), **Play for** (m:ss; empty = the whole song), **Volume** (Spotify and YouTube only: in-game files play at your Music volume; saved when you let go of the slider), tags **Fitting** and **Funny** plus your own, a **Note** (why the song fits; shown in the tooltip), **Turn off this place**, and **Copy or move to...** (the row's right-click **Copy to** / **Move to**, also within reach of a gamepad) |
+| Buttons | **Test** / **Stop** and **Delete** |
 
 There is no Save button. Pressing Enter or leaving a field saves it; Escape puts the field back as
 it was. Changes apply at once, with no `/reload`: the app learns the song from the beacon the next
 time the drop plays.
 
-**Delete** is instant, with *Deleted Goldshire. [Undo]* for 15 seconds.
+**Delete** is instant: a bar says *Deleted Goldshire.* with an **Undo** button for 15 seconds. The
+bar's **Undo** brings back that drop, even if you changed something else in the meantime.
 
 **Spotify match.** When the app plays a drop without a Spotify link, it remembers which song it
-found. After your next login the form shows, for example, *Spotify match: Africa · Toto (4:55)
-[Use this exact song]*; one click pins that exact recording.
+found. After your next login the form shows, for example, *Spotify match: Africa · Toto (4:55)*
+with a **Use this exact song** button; one click pins that exact recording.
 
 **Save now (reloads UI).** WoW writes addon data to disk only when you log out, quit or reload. After
 10 or more changes since you logged in, the window's footer shows **Save now (reloads UI)**: click it
@@ -128,8 +133,8 @@ Drops from a built-in soundtrack are read-only. Their form has a banner, *From A
   just type the new one, then fix the **Title** and paste a link.
 - **Turn off here** means silence at this place: My Drops records the place as *off*.
 
-Once My Drops has its own version of a place, the form offers **Revert to Azeroth Mixtape** (the
-right-click menu says **Revert to built-in**), which brings the original back.
+Once My Drops has its own version of a place, the form (and the row's right-click menu) offers
+**Revert to Azeroth Mixtape**, which brings the original back.
 
 Why a layer instead of a copy? Changing one song takes one click, and fixes to the built-in
 soundtrack in later addon updates still reach every place you didn't change. If you want a full copy
@@ -155,17 +160,18 @@ The buttons at the bottom:
 | **Duplicate** | A full copy you can edit, turned on the same way; a built-in one becomes *<name> (my copy)*, one of yours *<name> (copy)* |
 | **Rename** | Your soundtracks only |
 | **Delete** | Your soundtracks only, after *Delete <name> and its N drops? This cannot be undone.* |
-| **Share…** | A share code for the soundtrack ([below](#share-codes)) |
-| **Import…** | Paste a share code |
+| **Share...** | A share code for the soundtrack ([below](#share-codes)) |
+| **Import...** | Paste a share code |
 
 Built-in soundtracks can't be renamed or deleted. To move drops between your own soundtracks,
-right-click them in the Drops tab: **Copy to ▸** or **Move to ▸**. You can have up to 50 soundtracks
+right-click them in the Drops tab (**Copy to** or **Move to**), or use **Copy or move to...** under the
+form's **More...**. You can have up to 50 soundtracks
 of your own, with up to 300 drops each and 3,000 in total.
 
 ## Which song plays: the priority order
 
-You can turn on as many soundtracks as you like. When two or more are on, ↑ and ↓ buttons appear to
-order them, and the tab explains the rule: *When two soundtracks have a song for the same place, the
+You can turn on as many soundtracks as you like. When two or more are on, arrow buttons (**Move up**,
+**Move down**) appear to order them, and the tab explains the rule: *When two soundtracks have a song for the same place, the
 one higher in this list plays.*
 
 - The **top** of the list wins. That is why My Drops goes to the top: your changes beat the
@@ -198,7 +204,7 @@ forum, a guild website. It looks like `!NeedleDropper:1!eNpdjzEL…Vdg==!`: it a
 
 ### Sharing a soundtrack
 
-1. On the Soundtracks tab, select the soundtrack and click **Share…** (or type
+1. On the Soundtracks tab, select the soundtrack and click **Share...** (or type
    `/needle share My Drops`).
 2. Fill in **Author** if you like. It is empty by default, for your privacy, and NeedleDropper
    remembers what you type there.
@@ -222,7 +228,7 @@ message.txt, which works.*
 
 ### Importing a soundtrack
 
-1. On the Soundtracks tab click **Import…** (also in the **Showing:** list, or type
+1. On the Soundtracks tab click **Import...** (also in the **Showing:** list, or type
    `/needle import`), and paste the code with **Ctrl+V**.
 2. The preview shows the soundtrack's name, author, revision and number of drops, its first 12 places
    with their **S Y F** letters, and any warnings: unknown zones, in-game files you may not have,
@@ -230,7 +236,7 @@ message.txt, which works.*
    were dropped.
 3. Change the **Name** if you like, then click **Import**.
 
-The soundtrack arrives **turned off**: *Imported <name> (off). [Turn on]*. An import never replaces
+The soundtrack arrives **turned off**: *Imported <name> (off).*, with a **Turn on** button. An import never replaces
 anything: a soundtrack with the same id is imported as a new one (its id gets `-2`, `-3`, …), the same
 name gets *(2)*, and the ids of the built-in soundtracks are reserved. Nothing in a code is ever run:
 it is data only, and every field is checked before it is used.
@@ -244,7 +250,7 @@ When a code can't be read, the dialog says why: see [Share code problems](TROUBL
 ### Try it
 
 This code is a tiny My Drops: Toto's *Africa* in Goldshire. Copy all of it and paste it into
-**Import…**:
+**Import...**:
 
 ```
 !NeedleDropper:1!eNpdjzELwkAMhf+KZG6HiqB2Kyji4CC4iIik16iH16bkrkKV/ndz2skt+fKSvPcG7MKdBXKABCryRmwbLDcjEG495Kc3oBBuV5Av5onWwfqgigMHVpXDkpy2G3aVv1shZb4rX9zQHw02uMiKq1iDCnruQldGtC/4cjRsXLZW/tvNZtPlcE7gylJjfNgQVY6iq5YkbdE8VGsrndR9+jObQIN1PLjrJ6uRCD2t/4bK1APeYiQ9+yQZ6fABJcJVdg==!
@@ -364,7 +370,9 @@ into a file with `packs decode` (below).
 ### The packs commands
 
 `NeedleDropper.exe` has commands for checking and converting packs. Open the folder that holds
-`NeedleDropper.exe`, type `cmd` in File Explorer's address bar and press Enter, then:
+`NeedleDropper.exe`, type `cmd` in File Explorer's address bar and press Enter, then type one of the
+commands below. (Windows doesn't wait for the app, so the prompt can come back before its output:
+put `start /wait` in front, for example `start /wait NeedleDropper.exe packs validate code.txt`.)
 
 | Command | What it does |
 |---|---|
@@ -403,10 +411,13 @@ To add a built-in soundtrack to NeedleDropper itself, see [SETS-FORMAT.md](SETS-
 
 ## Coming from 1.1
 
-- **Your packs come with you.** The 1.2 app turns each pack file in `%APPDATA%\NeedleDropper\packs`
-  into a share code, and at your next login the game offers them, for example *2 soundtracks from
-  your NeedleDropper app: [Review & import]*. They go through the normal import preview, arrive
-  turned off, and are offered only once.
+- **Your packs come with you, in one command.** Run `NeedleDropper.exe packs convert-legacy` once
+  ([how](#the-packs-commands)): it turns each pack file of the 1.1 app (in
+  `%APPDATA%\NeedleDropper\packs`, plus the packs its settings named) into a share code and hands the
+  codes to the game. At your next login the chat says, for example, *2 soundtracks from your
+  NeedleDropper app are ready to import: type /needle import to review them.* Each `/needle import`
+  opens the next one in the normal import preview; they arrive turned off, and each is offered only
+  once.
 - **No more Rebuild map, no more `/reload`.** The 1.1 app built a "map" from your packs
   (**Rebuild map** in its control panel, `build-map` on the command line) that the game only read
   after a `/reload`. In 1.2 the game owns your soundtracks, and edits apply the moment you make them.

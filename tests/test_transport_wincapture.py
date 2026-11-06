@@ -86,9 +86,13 @@ def test_invalid_window_handles():
 
 @windows_only
 def test_find_window_without_match_returns_none():
+    # Hermetic: the exe must not share a flavor folder + name with a real game. The old path
+    # (<repo>/no/_forever_/Wow.exe) matched the owner's running WoW: Forever by design (score 60:
+    # "same flavor dir + exe name, different install root"), so the test failed whenever the game ran.
     title = "NeedleDropper test window that does not exist 7f3a"
     assert wincapture.find_game_window(None, title=title) is None
-    assert wincapture.find_game_window(ROOT / "no" / "_forever_" / "Wow.exe", title=title) is None
+    assert wincapture.find_game_window(ROOT / "no" / "_nd_none_7f3a_" / "NoSuchGame7f3a.exe", title=title) is None
+    assert wincapture.find_game_window(None, title=title, strict=True) is None
 
 
 @windows_only

@@ -99,11 +99,12 @@ def test_serves_panel_and_player_pages(deck):
     resp, body = get(deck, "/")
     assert resp.status == 200 and resp.getheader("Content-Type").startswith("text/html")
     html = body.decode("utf-8")
-    assert "/static/panel.js" in html and "Music services" in html
+    # v1.2: the Connect page (four cards) replaced the v1.1 control panel (panel.js / "Music services")
+    assert "/static/connect.js" in html and "World of Warcraft" in html and "Check the link" in html
     resp, body = get(deck, "/player")
     html = body.decode("utf-8")
     assert resp.status == 200 and "Click to enable sound" in html and "/static/player.js" in html
-    for path, ctype in (("/static/panel.js", "text/javascript"), ("/static/panel.css", "text/css"),
+    for path, ctype in (("/static/connect.js", "text/javascript"), ("/static/connect.css", "text/css"),
                         ("/static/player.js", "text/javascript"), ("/static/player.css", "text/css"),
                         ("/static/favicon.svg", "image/svg+xml")):
         r, b = get(deck, path)
@@ -111,7 +112,8 @@ def test_serves_panel_and_player_pages(deck):
     js = get(deck, "/static/player.js")[1].decode("utf-8")
     assert "https://www.youtube.com/iframe_api" in js and "origin: location.origin" in js
     assert "EventSource" in js and "/events?client=player" in js and "/status" in js and "X-ND-Token" in js
-    for bad in ("/static/../server.py", "/static/..%2Fserver.py", "/static/panel.html", "/nope", "/media/unknown",
+    for bad in ("/static/../server.py", "/static/..%2Fserver.py", "/static/connect.html", "/static/panel.js",
+                "/nope", "/media/unknown",
                 "/deck.js", "/index.htm"):
         assert get(deck, bad)[0].status == 404, bad
 

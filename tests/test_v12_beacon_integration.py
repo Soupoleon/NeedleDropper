@@ -1,26 +1,20 @@
-"""The protocol cutover with the real v1.1 Director, Location, Toast, Options and SelfTest.
+"""The protocol cutover with the real Director, Location, Toast, Options and SelfTest.
 
-Loads the addon in final-TOC order without Protocol.lua (v1), after applying in memory exactly the
-patch the integrator is asked to make (tests/v12_beacon_harness.py ``integrated_source``):
-
-* Director.lua: delete ``ns.Events`` / ``ns.LastEvent``, ``addFlag``, ``D.ComputeFlags`` and the v1
-  ``ns.Emit`` (Emit.lua provides them), and read ``EV`` / ``FLAG`` / ``HasFlag`` / ``EV_NAME`` from
-  ``ns.Protocol2``;
-* SelfTest.lua: ``local P = ns.Protocol2`` (it uses ``EV.PING`` and ``PadLine``).
-
-Then real play -- login, arriving in a zone, the drop firing, combat, the self-tests -- must reach
-the companion's decoders as v2 frames over both transports.
+Loads the whole addon in the final TOC order (CONTRACTS-v1.2 2.1; Protocol.lua is gone) with a test
+soundtrack in place of the bundled Sets. Real play -- login, arriving in a zone, the drop firing,
+combat, the self-tests -- must reach the companion's decoders as v2 frames over both transports.
+(Before the integration this file applied the Director / SelfTest patch in memory; the shipped
+files now carry it, which test_shipped_director_has_no_v1_emit checks.)
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
-import pytest
-
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from addon_harness import make_map  # noqa: E402
+from addon_harness import make_set  # noqa: E402
 from v12_beacon_harness import BeaconHarness, integrated_source  # noqa: E402
 from needledropper import protocol2 as p2  # noqa: E402
 from needledropper.models import EventType as ET, Flags  # noqa: E402
@@ -35,19 +29,14 @@ DROPS = [
 
 
 def make(**settings) -> BeaconHarness:
-    try:
-        integrated_source("Director.lua")
-        integrated_source("SelfTest.lua")
-    except LookupError as exc:  # the integrator changed these files: this check has done its job
-        pytest.skip(str(exc))
-    s = {"chatlog": True, "cooldownMin": 0, "beaconCellPx": 3}
+    s = {"chatlog": True, "cooldownMin": 0, "beaconCellPx": 3, "historyMode": "fresh", "duckWithoutApp": True}
     s.update(settings)
-    return BeaconHarness(map=make_map(DROPS), integrated=True, settings=s)
+    return BeaconHarness(sets=[make_set(DROPS)], integrated=True, settings=s, location=(1415, ""))
 
 
-def test_patch_removes_every_v1_emit_piece():
+def test_shipped_director_has_no_v1_emit():
     src = integrated_source("Director.lua")
-    assert "function ns.Emit" not in src and "D.ComputeFlags" not in src and "ns.Protocol\n" not in src
+    assert "function ns.Emit" not in src and not re.search(r"ns\.Protocol(?![0-9A-Za-z_])", src)
     assert "local P = ns.Protocol2" in src and "ns.Emit(EV.ARM, d)" in src
     assert "local P = ns.Protocol2" in integrated_source("SelfTest.lua")
 
@@ -91,7 +80,7 @@ def test_status_and_selftests_work_on_v2():
     assert ping["type"] == ET.PING and any(f"PING seq {ping['seq']}" in line for line in out)
     assert h.beacon_shown() and h.beacon_decoded() == p2.frame_from_event(ping)
     out = h.slash("status")
-    assert any("transports: beacon off (3 px cells, last PING" in line for line in out), out
+    assert any("transports: beacon off (3 px cells" in line and "last PING" in line for line in out), out
     h.slash("test")
     test_fire = h.last_event()
     assert test_fire["type"] == ET.FIRE and test_fire["flags"] & Flags.TEST and test_fire["dropId"] == "test"

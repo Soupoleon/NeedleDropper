@@ -1065,27 +1065,38 @@ def test_base64_edge_cases_and_argument_validation(lua):
 # =========================================================== share codes / misc ==
 
 def test_share_code_round_trip_with_python(lua):
-    """The intended use: an in-game share code is base64url(JSON) of a soundtrack set."""
-    soundtrack = {
-        "format": "needledropper-set", "version": 1, "name": "Azeroth Unbound · ★",
-        "songs": [
-            {"zone": 1429, "title": "I'll Keep Coming", "artist": "Low Roar", "spotify": "4uLU6hMCjMI75M1A2tKUQC",
-             "startMs": 0, "durationMs": 245000},
-            {"zone": "Mulgore", "title": "Café \"Tauren\" \\ \U0001F3B5", "artist": "中文",
-             "youtube": "dQw4w9WgXcQ", "startMs": 15500, "durationMs": 0},
+    """The intended use (DESIGN-v1.2 5.1-5.4): a share code is ``!NeedleDropper:1!`` + standard,
+    padded Base64 of zlib-compressed JSON (a needledropper-pack v1), with Json.lua and Base64.lua
+    doing everything but zlib. (Before v1.2 this test used a sketch format, ``needledropper-set``
+    as uncompressed base64url, that never shipped; the full Share.lua pipeline and its golden
+    vectors are tests/test_v12_share_*.py.)"""
+    import zlib
+
+    pack = {
+        "format": "needledropper-pack", "version": 1, "id": "azeroth-unbound-mine", "name": "Azeroth Unbound · ★",
+        "author": "", "description": "", "revision": 3, "tags": [],
+        "drops": [
+            {"zone": 1429, "title": "I'll Keep Coming", "artist": "Low Roar",
+             "spotify": "spotify:track:4uLU6hMCjMI75M1A2tKUQC", "durationMs": 245000},
+            {"zone": 1412, "title": "Caf\u00e9 \"Tauren\" \\ \U0001F3B5", "artist": "\u4e2d\u6587",
+             "youtube": "dQw4w9WgXcQ", "startMs": 15500},
         ],
-        "empty": [],
     }
-    code = lua.run("local held = ... return B.Encode(J.Encode(held[1]), true)", lua.held(to_lua(soundtrack)))
-    assert re.fullmatch(rb"[A-Za-z0-9_-]+", code), "url-safe, unpadded"
-    padded = code + b"=" * (-len(code) % 4)
-    assert_same(json.loads(base64.urlsafe_b64decode(padded)), soundtrack)
-    # And a code made by Python decodes in Lua.
-    py_code = base64.urlsafe_b64encode(json.dumps(soundtrack).encode()).rstrip(b"=")
-    value, err = unpack(lua.run("local code = ... local text, e = B.Decode(code) if not text then return nil, e end"
-                                " return J.Decode(text)", py_code))
+    # Lua writes the JSON (sorted keys, raw UTF-8) and the Base64; Python plays the client's zlib.
+    text, err = lua.encode(pack, {"sortKeys": True})
     assert err is None
-    lua.assert_matches(value, soundtrack)
+    assert text == json.dumps(pack, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
+    body = lua.run("local z = ... return B.Encode(z, false, true)", zlib.compress(text, 9))
+    code = b"!NeedleDropper:1!" + body + b"!"
+    assert re.fullmatch(rb"!NeedleDropper:1![A-Za-z0-9+/]+=*!", code), "standard alphabet, padded"
+    assert json.loads(zlib.decompress(base64.b64decode(body))) == pack
+    # And a code made by Python's reference encoder (DESIGN 5.4) decodes in Lua to the same pack.
+    raw = json.dumps(pack, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
+    py_body = base64.b64encode(zlib.compress(raw, 9))
+    payload = lua.run("local b = ... return B.Decode(b)", py_body)
+    value, err = unpack(lua.json.Decode(zlib.decompress(payload)))
+    assert err is None
+    lua.assert_matches(value, pack)
 
 
 def test_secret_values_are_never_touched():

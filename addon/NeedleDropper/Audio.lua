@@ -3,16 +3,29 @@ local ADDON, ns = ...
 -- drops that ship an in-game file through PlaySoundFile on the Music channel.
 --
 -- Never sets Sound_EnableMusic=0 to mute zone music during a drop (that would also mute
--- in-game drops); it is only toggled 0 -> 1 for 0.1 s afterwards to restart zone music.
+-- in-game drops); it is only toggled 0 -> 1 for 0.1 s afterwards to restart zone music, and a
+-- drop that starts meanwhile ends that window at once (FinishKick, baseline ND-DIR-02).
+--
+-- The "volume" method prefers C_CVar.SetTempCVar (a session-only value that never reaches
+-- Config.wtf) and then undoes it with C_CVar.RemoveTempCVar, never with SetCVar: Blizzard's
+-- own gamepad code (Blizzard_Gamepad/Core.lua) treats the two as a pair, and a SetCVar on top
+-- of an active temp value is not documented to clear it (baseline ND-AUDIO-TEMPCVAR).
 
 local A = {}
 ns.Audio = A
 
 local KICK_DELAY = 0.1
 local LOCAL_FADE_MS = 3000
+local VOLUME_CVAR = "Sound_MusicVolume"
 
 A.ducked = nil          -- nil | "silence" | "volume"
+A.tempCVar = false      -- the volume duck used SetTempCVar (undo with RemoveTempCVar)
 A.kickPending = false
+A.kickToken = 0
+
+local function tempCVarAPI()
+  return C_CVar and type(C_CVar.SetTempCVar) == "function" and type(C_CVar.RemoveTempCVar) == "function"
+end
 
 -- Fades out zone music. opts.forLocal: an in-game file will play on the Music channel, so
 -- the "volume" method (which would silence it too) is replaced by "silence".
@@ -25,16 +38,40 @@ function A.Duck(opts)
     local ok = pcall(PlayMusic, ns.SILENCE)
     if ok then A.ducked = "silence" end
   elseif method == "volume" then
-    ns.SaveCVar("Sound_MusicVolume")
-    local done = false
-    if C_CVar and C_CVar.SetTempCVar then
-      done = pcall(C_CVar.SetTempCVar, "Sound_MusicVolume", "0")
+    -- The saved original is kept for a crash restore (RepairCVars) on both paths.
+    ns.SaveCVar(VOLUME_CVAR)
+    A.tempCVar = false
+    if tempCVarAPI() then
+      local ok, res = pcall(C_CVar.SetTempCVar, VOLUME_CVAR, "0")
+      A.tempCVar = ok and res ~= false
     end
-    if not done then ns.SetCVar("Sound_MusicVolume", "0") end
+    if not A.tempCVar then ns.SetCVar(VOLUME_CVAR, "0") end
     A.ducked = "volume"
   end
-  ns.Debug("audio: duck (%s)", tostring(A.ducked or "none"))
+  ns.Debug("audio: duck (%s%s)", tostring(A.ducked or "none"), A.tempCVar and ", temp cvar" or "")
   return A.ducked
+end
+
+-- Undoes a volume duck: the temp value is removed (the saved value was never changed), or the
+-- saved value is written back.
+local function undoVolume()
+  if A.tempCVar then
+    A.tempCVar = false
+    pcall(C_CVar.RemoveTempCVar, VOLUME_CVAR)
+    ns.ForgetCVar(VOLUME_CVAR)
+  else
+    ns.RestoreCVar(VOLUME_CVAR)
+  end
+end
+
+-- Ends a pending Sound_EnableMusic kick right away: music back on now.
+function A.FinishKick()
+  if not A.kickPending then return false end
+  A.kickToken = A.kickToken + 1
+  A.kickPending = false
+  ns.SetCVar("Sound_EnableMusic", "1")
+  ns.ForgetCVar("Sound_EnableMusic")
+  return true
 end
 
 -- Toggles Sound_EnableMusic off and back on so the client restarts zone music now.
@@ -43,9 +80,12 @@ function A.KickZoneMusic()
   if A.kickPending then return end
   if ns.GetCVar("Sound_EnableMusic") ~= "1" then return end
   A.kickPending = true
+  A.kickToken = A.kickToken + 1
+  local mine = A.kickToken
   ns.SaveCVar("Sound_EnableMusic", "1")
   ns.SetCVar("Sound_EnableMusic", "0")
   C_Timer.After(KICK_DELAY, function()
+    if mine ~= A.kickToken then return end   -- FinishKick already turned it back on
     A.kickPending = false
     ns.SetCVar("Sound_EnableMusic", "1")
     ns.ForgetCVar("Sound_EnableMusic")
@@ -60,7 +100,7 @@ function A.Restore()
     pcall(StopMusic)
     if ns.settings and ns.settings.kickZoneMusic then A.KickZoneMusic() end
   elseif how == "volume" then
-    ns.RestoreCVar("Sound_MusicVolume")
+    undoVolume()
   end
   if how then ns.Debug("audio: restore (%s)", how) end
 end
@@ -94,9 +134,10 @@ end
 
 -- Logging out mid-drop: put the CVars back now so they are saved correctly.
 ns.On("PLAYER_LOGOUT", function()
-  if A.ducked == "volume" then ns.RestoreCVar("Sound_MusicVolume") end
+  if A.ducked == "volume" then undoVolume() end
   A.ducked = nil
   if A.kickPending then
+    A.kickToken = A.kickToken + 1
     A.kickPending = false
     ns.SetCVar("Sound_EnableMusic", "1")
     ns.ForgetCVar("Sound_EnableMusic")

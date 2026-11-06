@@ -23,8 +23,16 @@ v2 frames carry the song itself, so the engine needs no map and keeps no soundtr
   the drop id ``test`` carries no song and plays nothing.
 * ``CANCEL`` -- fade out the drop playing at that place (or forget an armed one).
 * ``HELLO``  -- the addon is alive; while a drop plays, a HELLO without ``DROP_ACTIVE`` for more
-  than 5 s stops it.
+  than 5 s stops it -- but only a HELLO the addon sent *after* the FIRE that started the drop
+  (``(seq - fireSeq) mod 256`` in 1..127): the chat log delivers HELLO/ARM lines late, in one
+  batch with the FIRE (ENG-STALE-HELLO). ``DROP_ACTIVE`` cancels the timer even on a duplicate
+  frame, unless that frame is older than the HELLO that started it.
 * ``PING``   -- logged prominently, never played.
+
+A provider that fails after it had taken over playback may attach ``cleanup`` (a handle) and
+``notice`` (a change kind) to its ``ProviderError`` (providers/base.py): the next provider plays
+the drop, the shell is told (e.g. ``spotifyStuck``: Spotify accepted the song but never started
+it), and the clean-up handle is stopped when the drop ends.
 
 Every frame with the ``TEST`` flag, and every PING, calls ``on_link_check(frame, transport)``;
 notable changes call ``on_status(status)`` with :meth:`Engine.status` plus a ``change`` entry
@@ -69,6 +77,7 @@ TrackRecorder = Callable[[str, dict], None]
 
 DEDUPE_SEC = 15.0
 HELLO_STALE_SEC = 5.0
+STALE_HELLO_WINDOW_SEC = 10.0  # a HELLO older (by seq) than the FIRE is a late chat-log line only this soon
 POLL_INTERVAL_SEC = 1.0
 SWITCH_FADE_MS = 1000
 FALLBACK_WINDOW_SEC = 15.0
@@ -151,6 +160,10 @@ class _Active:
     next_poll_at: Optional[float] = None
     tried: list[str] = field(default_factory=list)  # provider names attempted for this drop
     play_started_at: Optional[float] = None
+    fire_seq: Optional[int] = None  # seq of the transport FIRE that started it (HELLO age check)
+    #: handles of providers that failed after taking over playback (``ProviderError.cleanup``): stopped
+    #: when the drop ends, so e.g. Spotify resumes the player's own music after the YouTube fallback
+    cleanups: list[tuple[Provider, PlayHandle]] = field(default_factory=list)
 
 
 @dataclass
@@ -168,6 +181,10 @@ class _Resolution:
     error: Optional[str] = None
     finished: Optional[float] = None
     recorded: bool = False
+    #: what was searched, as the drop spelled it (the key is lowercased): for the shell's notices
+    q_artist: str = ""
+    q_title: str = ""
+    q_label: str = ""
 
 
 @dataclass
@@ -407,6 +424,7 @@ class Engine:
         self._flagged_yt: set[str] = set()
         self._current: Optional[_Active] = None
         self._stale_since: Optional[float] = None
+        self._stale_seq: Optional[int] = None  # seq of the HELLO that started the stale timer
         self._addon_seen_at: Optional[float] = None
         self._last_hello_at: Optional[float] = None
         self._addon_hash: Optional[int] = None
@@ -619,6 +637,8 @@ class Engine:
                         self._stop_current(self.fade_out_ms, "stop requested")
                 elif kind == "resolved":
                     self._on_resolved(item[1], item[2])
+                elif kind == "note":  # a notice found by the pre-warm worker
+                    self._note(item[1], **item[2])
             except Exception as exc:  # never let one bad event kill the engine thread
                 self.log.error("engine error while handling %s: %r", kind, exc)
                 logging.getLogger("needledropper.engine").debug("traceback", exc_info=True)
@@ -638,6 +658,13 @@ class Engine:
     def _accept(self, ev: AnyEvent, key: tuple, transport: str, protocol: int) -> Optional[float]:
         """Common bookkeeping; the event's time, or None for a duplicate."""
         now = self.clock()
+        # DROP_ACTIVE counts even on a duplicate (ENG-STALE-HELLO): the chat log often delivers
+        # its copy of a frame after the beacon did, and that copy must still cancel a stale timer
+        # started by an older HELLO in the same batch -- unless it is older than that HELLO.
+        if ev.has(Flags.DROP_ACTIVE) and self._stale_since is not None and (
+                self._stale_seq is None or (int(ev.seq) - self._stale_seq) % 256 < 128):
+            self._stale_since = None
+            self._stale_seq = None
         first = self._seen.get(key)
         if first is not None and now - first < self.dedupe_sec:
             self.duplicates += 1
@@ -647,6 +674,8 @@ class Engine:
         self.counts[ev.type.name] = self.counts.get(ev.type.name, 0) + 1
         self.transport_counts[transport] = self.transport_counts.get(transport, 0) + 1
         back = self._addon_seen_at is None or now - self._addon_seen_at > ADDON_GONE_SEC
+        if back and self._addon_seen_at is not None:
+            self._new_game_session()
         changed = self._addon_protocol != protocol
         self._addon_seen_at = now
         self._addon_flags = ev.flags
@@ -654,11 +683,30 @@ class Engine:
         desc = describe_event(ev, transport)
         self._last_event = desc
         self.recent.append(desc)
-        if ev.has(Flags.DROP_ACTIVE):
-            self._stale_since = None
         if back or changed:
             self._note("addon", protocol=protocol, transport=transport)
         return now
+
+    def _new_game_session(self) -> None:
+        """The addon is back after a silence (ADDON_GONE_SEC): most likely a new game session.
+
+        * ENG-HELLO-SEQ-ROLLBACK: ``lastSeq`` is a SavedVariable written only at logout, /reload
+          or a clean quit, so after a crash the new session's frames reuse lower seq values; the
+          playing drop's FIRE seq no longer orders anything, and the stale-HELLO rule must apply.
+        * A stuck Spotify gets one more chance (the player may have restarted the app, as the
+          notification asked); the pre-warm's health read finds a still-stuck one before any song.
+        """
+        cur = self._current
+        if cur is not None and cur.fire_seq is not None:
+            self.log.debug("addon back after a silence: the seq of %s's FIRE no longer counts", cur.drop.id)
+            cur.fire_seq = None
+        sp = self._provider("spotify")
+        clear = getattr(sp, "clear_stuck", None) if sp is not None else None
+        if callable(clear) and self._stuck(sp):
+            try:
+                clear("a new game session")
+            except Exception:  # noqa: BLE001 - a provider bug must not stop the engine
+                pass
 
     # -- v2 frames
     def _on_frame(self, fr: Frame, transport: str) -> None:
@@ -710,6 +758,18 @@ class Engine:
         except Exception:
             return False
 
+    @staticmethod
+    def _stuck(p: Optional[Provider]) -> bool:
+        """Spotify's session health verdict (``SpotifyProvider.stuck``): it accepted a song and did not
+        start it this session, so other providers play first (real-client findings #8 and #10)."""
+        fn = getattr(p, "stuck", None) if p is not None else None
+        if not callable(fn):
+            return False
+        try:
+            return bool(fn())
+        except Exception:
+            return False
+
     def _on_arm2(self, fr: Frame, transport: str, now: float) -> None:
         pk = fr.place_key
         if pk is None:
@@ -753,7 +813,8 @@ class Engine:
             key = query_key(drop.artist, drop.title)
             res = self._resolutions.get(key)
             if res is None or (res.done.is_set() and res.error):
-                res = self._resolutions[key] = _Resolution(key=key, created=self.clock())
+                res = self._resolutions[key] = _Resolution(key=key, created=self.clock(), q_artist=drop.artist,
+                                                           q_title=drop.title, q_label=drop.display_label)
                 search = True
         sp_route = sp_ok and bool(drop.spotify or (drop.title and drop.artist))
         lookup_link = bool(sp_route and drop.spotify and hasattr(sp, "resolve_drop") and not test
@@ -763,11 +824,31 @@ class Engine:
         if self.prewarm_async:  # results are handled on the engine thread
             def deliver(r: _Resolution) -> None:
                 self._queue.put(("resolved", r, test))
+
+            def notice(kind: str, info: dict) -> None:
+                self._queue.put(("note", kind, info))
         else:  # inline: we are on the engine thread already
             def deliver(r: _Resolution) -> None:
                 self._on_resolved(r, test)
 
+            def notice(kind: str, info: dict) -> None:
+                self._note(kind, **info)
+
         def work() -> None:
+            # Session health (real-client #8 / #10): one cheap read of Spotify's player re-checks a
+            # stuck Spotify, and spots the stuck signature before a song is sent to it at all.
+            was_stuck = self._stuck(sp)
+            check = getattr(sp, "check_health", None) if sp_ok else None
+            if callable(check):
+                try:
+                    check()
+                except Exception as exc:  # noqa: BLE001 - a probe
+                    self.log.debug("Spotify health check failed: %s", exc)
+            stuck = self._stuck(sp)
+            if stuck and not was_stuck:
+                notice("spotifyStuck", {"provider": "spotify", "dropId": drop.id, "label": drop.display_label,
+                                        "title": drop.title, "artist": drop.artist, "test": test,
+                                        "detail": "Spotify's player allows neither play nor pause"})
             resolved = drop
             if search and res is not None:
                 resolved = self._search(sp, drop, res)
@@ -778,10 +859,11 @@ class Engine:
                     resolved = dataclasses.replace(drop, spotify=res.uri)
             elif lookup_link:
                 resolved = self._lookup_link(sp, drop, deliver)
-            if sp_route and (resolved.spotify or res is None or not res.not_found):
+            yt_ok = self._usable(yt, drop)
+            if sp_route and not (stuck and yt_ok) and (resolved.spotify or res is None or not res.not_found):
                 self._safe_prepare(sp, resolved)
                 return
-            target = yt if self._usable(yt, drop) else next((p for p in others if self._usable(p, drop)), None)
+            target = yt if yt_ok else next((p for p in others if self._usable(p, drop)), None)
             if target is not None:
                 self._safe_prepare(target, drop)
 
@@ -817,7 +899,8 @@ class Engine:
                 key = query_key(drop.artist, drop.title)
                 if key in self._resolutions or key in self._recorded:
                     continue
-                res = self._resolutions[key] = _Resolution(key=key, created=self.clock())
+                res = self._resolutions[key] = _Resolution(key=key, created=self.clock(), q_artist=drop.artist,
+                                                           q_title=drop.title)
                 queued += 1
                 if self.prewarm_async:
                     def work(drop: Drop = drop, res: _Resolution = res) -> None:
@@ -916,12 +999,12 @@ class Engine:
                 res.recorded = True
                 self._record(res.key, {"notFound": True})
                 self.log.warning("no confident Spotify match for %s", res.key[2:].replace("\x1f", " / "))
-                self._note("notFound", key=res.key)
+                self._note("notFound", key=res.key, artist=res.q_artist, title=res.q_title, label=res.q_label)
             elif res.error and res.error != "cancelled":
                 res.recorded = True  # nothing to record: the search is tried again next time
                 self.log.warning("Spotify search for %s failed: %s", res.key[2:].replace("\x1f", " / "), res.error)
-                self._note("searchFailed", key=res.key, detail=res.error,
-                           unavailable=res.error.startswith("unavailable:"))
+                self._note("searchFailed", key=res.key, detail=res.error, artist=res.q_artist, title=res.q_title,
+                           label=res.q_label, unavailable=res.error.startswith("unavailable:"))
         elif res.key.startswith("sp:"):
             res.recorded = True
             if res.not_found:
@@ -948,12 +1031,12 @@ class Engine:
         drop = self._drop_from_frame(song)
         if local:
             self._start_drop(drop, origin=transport, local=True, test=test, map_hash=None, version=2, place_key=pk,
-                             frame_drop_id=song.drop_id)
+                             frame_drop_id=song.drop_id, fire_seq=fr.seq)
             return
         job = armed.job if armed is not None else None
         routes, qkey = self._routes_v2(drop, pk, job)
         self._start_drop(drop, origin=transport, local=False, test=test, map_hash=None, version=2, place_key=pk,
-                         routes=routes, qkey=qkey, frame_drop_id=song.drop_id)
+                         routes=routes, qkey=qkey, frame_drop_id=song.drop_id, fire_seq=fr.seq)
 
     def _routes_v2(self, drop: Drop, place_key: Optional[int],
                    job: Optional[_Job]) -> tuple[list[_Route], Optional[str]]:
@@ -969,6 +1052,15 @@ class Engine:
         routes: list[_Route] = []
         late: list[_Route] = []
         sp_ok = self._usable(sp, drop)
+        # A stuck Spotify (it accepted a song this session and never started it) is not tried
+        # again while YouTube can play the drop; with no YouTube id it is tried last.
+        sp_stuck = sp_ok and self._stuck(sp)
+        yt_ok = bool(yt is not None and drop.youtube and self._usable(yt, drop))
+        if sp_stuck:
+            self.log.info("Spotify isn't starting songs this session: %s for %s",
+                          "YouTube plays" if yt_ok else "trying it last", drop.id)
+        if sp_stuck and yt_ok:
+            sp_ok = False
         own_pending = job is not None and not job.done.is_set() and not job.cancelled
         started = time.monotonic()
         deadline = started + self.fire_wait_sec  # one budget for every wait below
@@ -1002,12 +1094,16 @@ class Engine:
                     late.append(_Route(sp, drop, search=False))
                 else:
                     routes.append(_Route(sp, drop, search=True))
+        sp_routes: list[_Route] = []
+        if sp_stuck and routes:
+            sp_routes, routes = routes, []  # the stuck Spotify goes after everything else
         if yt is not None and drop.youtube:
             routes.append(_Route(yt, drop))
         routes += late
         for p in self.providers:
             if p.name not in ("spotify", "youtube"):
                 routes.append(_Route(p, drop))
+        routes += sp_routes
         return routes, qkey
 
     def _on_cancel2(self, fr: Frame) -> None:
@@ -1016,6 +1112,12 @@ class Engine:
         cur = self._current
         if cur is not None and cur.version == 2 and pk is not None and cur.place_key == pk and not (
                 fr.drop_id and cur.frame_drop_id and fr.drop_id != cur.frame_drop_id):
+            if cur.fire_seq is not None and not 1 <= (int(fr.seq) - cur.fire_seq) % 256 <= 127:
+                # A CANCEL the addon sent before this drop's FIRE (a chat-log line that waited out a
+                # lockdown, protocol review F5): it cancelled an earlier play of the place, not this one.
+                self.log.info("CANCEL seq=%d is older than the FIRE seq=%d of %s; ignored", fr.seq, cur.fire_seq,
+                              cur.drop.id)
+                return
             self._stop_current(self.fade_out_ms, "cancelled by addon")
         elif removed is not None:
             self.log.info("ARM %s abandoned", self._label(removed.frame) or f"place={pk}")
@@ -1079,9 +1181,21 @@ class Engine:
         self._last_hello_at = now
         self.log.debug("addon alive (%s)", describe_event(ev))
         cur = self._current
-        if cur is not None and cur.origin != "cli" and not (flags & Flags.DROP_ACTIVE):
-            if self._stale_since is None:
-                self._stale_since = now
+        if cur is None or cur.origin == "cli" or (flags & Flags.DROP_ACTIVE):
+            return
+        seq = int(getattr(ev, "seq", 0) or 0)
+        if cur.fire_seq is not None and not 1 <= (seq - cur.fire_seq) % 256 <= 127                 and now - cur.started_at <= STALE_HELLO_WINDOW_SEC:
+            # ENG-STALE-HELLO: a HELLO the addon sent *before* this drop's FIRE (the chat log delivers
+            # unpadded HELLO/ARM lines late, in one batch with the FIRE) says nothing about this drop.
+            # Only soon after the FIRE, though: later, a lower seq means the game started over (lastSeq
+            # is saved at logout / reload only, so a crashed session's seq rolls back:
+            # ENG-HELLO-SEQ-ROLLBACK) and the HELLO is current.
+            self.log.debug("HELLO seq=%d is older than the FIRE seq=%d of %s; ignored", seq, cur.fire_seq,
+                           cur.drop.id)
+            return
+        if self._stale_since is None:
+            self._stale_since = now
+            self._stale_seq = seq
 
     def _on_arm(self, ev: Event, transport: str) -> None:
         drop = self.registry.resolve_event(ev)
@@ -1109,7 +1223,7 @@ class Engine:
             self.log.warning("FIRE n=%d: %s", ev.n, self.registry.describe_miss(ev))
             return
         self._start_drop(drop, origin=transport, local=ev.has(Flags.LOCAL_PLAYBACK),
-                         test=ev.has(Flags.TEST), map_hash=ev.hash)
+                         test=ev.has(Flags.TEST), map_hash=ev.hash, fire_seq=ev.seq)
 
     def _on_cancel(self, ev: Event) -> None:
         if self._armed.pop((ev.hash, ev.n), None) is not None and (
@@ -1130,15 +1244,17 @@ class Engine:
     def _start_drop(self, drop: Drop, *, origin: str, local: bool, test: bool, map_hash: Optional[int],
                     only: Optional[str] = None, version: int = 1, place_key: Optional[int] = None,
                     routes: Optional[list[_Route]] = None, qkey: Optional[str] = None,
-                    frame_drop_id: Optional[str] = None) -> None:
+                    frame_drop_id: Optional[str] = None, fire_seq: Optional[int] = None) -> None:
         now = self.clock()
         if self._current is not None:
             self.log.info("new drop %s replaces %s", drop.id, self._current.drop.id)
             self._stop_current(self.switch_fade_ms, "replaced", hide=False)
         self._stale_since = None
+        self._stale_seq = None
         self._idle_evt.clear()
         cur = _Active(drop=drop, started_at=now, origin=origin, map_hash=map_hash, local=local, test=test,
-                      version=version, place_key=place_key, query_key=qkey, frame_drop_id=frame_drop_id)
+                      version=version, place_key=place_key, query_key=qkey, frame_drop_id=frame_drop_id,
+                      fire_seq=fire_seq)
         if routes is None:
             routes = [_Route(p, drop) for p in self.providers]
         if only:
@@ -1190,14 +1306,25 @@ class Engine:
             cur.tried.append(p.name)
             try:
                 handle = p.play(drop, fade_in_ms=self.fade_in_ms)
-            except ProviderUnavailable as exc:
-                self.log.warning("%s unavailable: %s", p.name, exc)
-                reasons.append(f"{p.name}: {exc}")
-                continue
             except ProviderError as exc:
-                self.log.warning("%s could not play %s: %s", p.name, drop.id, exc)
+                if isinstance(exc, ProviderUnavailable):
+                    self.log.warning("%s unavailable: %s", p.name, exc)
+                else:
+                    self.log.warning("%s could not play %s: %s", p.name, drop.id, exc)
                 reasons.append(f"{p.name}: {exc}")
-                self._note_failure(cur, p, str(exc))
+                # A provider that failed after taking over playback hands back a handle to stop
+                # when the drop ends (Spotify accepted the song: a late start is paused then) --
+                # an "unavailable" refusal after the play command included.
+                cleanup = getattr(exc, "cleanup", None)
+                if isinstance(cleanup, PlayHandle):
+                    cur.cleanups.append((p, cleanup))
+                notice = getattr(exc, "notice", None)
+                if isinstance(notice, str) and notice:
+                    self._note(notice, provider=p.name, detail=str(exc), dropId=cur.drop.id,
+                               label=cur.drop.display_label, title=cur.drop.title, artist=cur.drop.artist,
+                               test=cur.test)
+                if not isinstance(exc, ProviderUnavailable):
+                    self._note_failure(cur, p, str(exc))
                 continue
             except Exception as exc:
                 self.log.error("%s crashed playing %s: %r", p.name, drop.id, exc)
@@ -1230,7 +1357,8 @@ class Engine:
         if res is not None and not res.done.is_set():
             return drop  # searching elsewhere right now: the provider resolves it inside play()
         if res is None or res.error:
-            res = self._resolutions[key] = _Resolution(key=key, created=self.clock())
+            res = self._resolutions[key] = _Resolution(key=key, created=self.clock(), q_artist=drop.artist,
+                                                       q_title=drop.title, q_label=cur.drop.display_label)
             resolved = self._search(p, drop, res)
         else:
             resolved = dataclasses.replace(drop, spotify=res.uri) if res.uri else drop
@@ -1307,14 +1435,25 @@ class Engine:
         except Exception as exc:  # stop must not raise; be defensive anyway
             self.log.warning("%s stop failed: %s", cur.provider.name, exc)
 
+    def _run_cleanups(self, cur: _Active) -> None:
+        """Stop the handles failed providers left behind (after the drop's own provider stopped)."""
+        cleanups, cur.cleanups = cur.cleanups, []
+        for p, handle in cleanups:
+            try:
+                p.stop(handle, fade_out_ms=0)
+            except Exception as exc:  # stop must not raise; be defensive anyway
+                self.log.warning("%s clean-up failed: %s", p.name, exc)
+
     def _stop_current(self, fade_ms: int, reason: str, *, hide: bool = True) -> None:
         cur = self._current
         if cur is None:
             return
         self._current = None
         self._stale_since = None
+        self._stale_seq = None
         self.log.info("stop %s (%s)", cur.drop.id, reason)
         self._safe_stop(cur, fade_ms)
+        self._run_cleanups(cur)
         if hide:
             self._deck_send({"cmd": "hide", "dropId": cur.drop.id})
         self._note("stopped", dropId=cur.drop.id, reason=reason)

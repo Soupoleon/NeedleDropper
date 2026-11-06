@@ -3017,6 +3017,14 @@ function F.Install(ns, opts)
     return ref, db().soundtracks["my-drops"]
   end
 
+  -- Soundtracks.EnsureMyDrops (beyond CONTRACTS 2.5): My Drops created when missing and first.
+  function S.EnsureMyDrops()
+    note("EnsureMyDrops")
+    local ref = ensureMyDrops()
+    changed()
+    return ref
+  end
+
   local function effective(id)
     for _, ref in ipairs(S.ActiveRefs()) do
       if ref ~= "user:my-drops" then
@@ -3281,22 +3289,70 @@ function F.Install(ns, opts)
   return S, Sh, C
 end
 
--- Director entry points CONTRACTS 2.9 lets the window call; the v1 Director's PlayTest() ignores
--- its argument and SuppressHere does not exist yet (the integrator adds both).
+-- Director entry points CONTRACTS 2.9 lets the window call: every call is recorded
+-- (F.playTests, F.suppressed) and then handed to the real Director.
 function F.InstallDirector(ns)
   local D = ns.Director
-  local start = D.StartActive
+  if type(D) ~= "table" or D.__uiFakesInstalled then return end
+  D.__uiFakesInstalled = true
+  local realPlayTest, realSuppress, start = D.PlayTest, D.SuppressHere, D.StartActive
   D.PlayTest = function(drop)
     F.playTests[#F.playTests + 1] = copy(drop)
+    if realPlayTest then return realPlayTest(drop) end
     if type(drop) == "table" and start then return start(drop, { isTest = true }) end
   end
   D.SuppressHere = function(id)
     F.suppressed[#F.suppressed + 1] = id
+    if realSuppress then return realSuppress(id) end
     if D.suppress and ns.Location and ns.Location.Candidates then
       for _, d in ipairs(ns.Location.Candidates()) do
         if d.id == id then D.suppress[id] = D.EntryTime(d) end
       end
     end
+  end
+end
+
+-- ======================================================================
+-- Forever's gamepad UI (Blizzard_GamepadSharedUtility / Blizzard_GamepadSmartNavigation), for
+-- the window's opt-in (UI/Window.lua W.GamepadShown): InputUtil.IsGamepadUIEnabled, and
+-- GamepadMode.FrameControlsManager:FrameShown / FrameHidden and SmartNavigation:
+-- RefreshButtonGroups that record their calls. Like the real SecureHelper-wrapped functions, an
+-- insecure call inside the combat restriction is refused ("Interface action failed"), recorded in
+-- SHIM.gamepad.blocked.
+-- ======================================================================
+
+SHIM.gamepad = { enabled = false, shown = {}, hidden = {}, refreshed = {}, blocked = {}, frames = {} }
+
+function SHIM.EnableGamepadUI(on)
+  local G = SHIM.gamepad
+  G.enabled = on ~= false
+  InputUtil = InputUtil or {}
+  function InputUtil.IsGamepadUIEnabled() return SHIM.gamepad.enabled end
+  local function refused(what, frame)
+    if SHIM.state.inCombat then
+      G.blocked[#G.blocked + 1] = { what = what, name = frame and frame.GetName and frame:GetName() or nil }
+      return true
+    end
+    return false
+  end
+  local FCM = {}
+  function FCM:FrameShown(frame, isPopup, shouldFocus)
+    if not SHIM.gamepad.enabled or refused("FrameShown", frame) then return end
+    G.shown[#G.shown + 1] = frame
+    G.frames[frame] = true
+    return true
+  end
+  function FCM:FrameHidden(frame)
+    if not SHIM.gamepad.enabled or refused("FrameHidden", frame) then return end
+    G.hidden[#G.hidden + 1] = frame
+    G.frames[frame] = nil
+    return true
+  end
+  GamepadMode = { FrameControlsManager = FCM }
+  SmartNavigation = {}
+  function SmartNavigation:RefreshButtonGroups(frame)
+    if refused("RefreshButtonGroups", frame) then return end
+    G.refreshed[#G.refreshed + 1] = frame
   end
 end
 

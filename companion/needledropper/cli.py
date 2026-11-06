@@ -368,10 +368,24 @@ def _start_deck(ctx: Ctx, *, out: Out = say, allow_fallback: bool = False):
                 f"Another program uses this port. Close it, or change \"deck\": {{\"port\": ...}} in {config_path()}.")
             return None
     dcfg = ctx.cfg.get("deck") or {}
+    attach_player_window(deck)
     deck.configure_player(auto_open=str(dcfg.get("autoOpen") or "youtube"), browser=str(dcfg.get("browser") or "edge"),
                           position=parse_position(dcfg.get("playerPosition")),
-                          profile_dir=ctx.paths.app_dir / "deck-browser")
+                          profile_dir=ctx.paths.app_dir / "deck-browser",
+                          corner=str(dcfg.get("playerCorner") or "topright"),
+                          browser_log=ctx.paths.logs_dir / "browser.log")
     return deck
+
+
+def attach_player_window(deck: Any) -> None:
+    """Give the deck its never-activating player window manager (deck/window.py; Windows only)."""
+    if getattr(deck, "window", None) is not None:
+        return
+    try:
+        from .deck.window import make_player_window
+        deck.window = make_player_window()
+    except Exception as exc:  # noqa: BLE001 - the plain window still works
+        log.info("no player window manager: %s", exc)
 
 
 _PLAYER_POLICY = {"youtube": "opens for YouTube songs", "always": "opens at start and for YouTube songs",
@@ -642,8 +656,10 @@ def _already_running(port: int, info: dict[str, Any], *, open_panel: bool) -> in
     return EXIT_OK
 
 
-def _start_tray(app: Any, quit_event: threading.Event) -> Optional[Any]:
-    """The notification-area icon with ``tray.companion_menu`` wired to ``app``; None if there is none."""
+def _start_tray(app: Any, quit_event: threading.Event,
+                session_end: Optional[Callable[[], Any]] = None) -> Optional[Any]:
+    """The notification-area icon with ``tray.companion_menu`` wired to ``app``; None if there is none.
+    ``session_end`` runs synchronously when Windows logs off / shuts down (see :class:`_SessionEnd`)."""
     from . import tray
 
     factory = tray_factory or tray.TrayIcon
@@ -655,10 +671,11 @@ def _start_tray(app: Any, quit_event: threading.Event) -> Optional[Any]:
         on_quit=quit_event.set,
         status=app.status_line,
     )
+    kw: dict[str, Any] = {"on_session_end": session_end} if session_end is not None else {}
     try:
         icon = factory(APP_TITLE, tray.default_icon_path(app.paused), menu, app.open_setup,
                        tooltip=f"{APP_TITLE} - {app.status_line()}", on_notification_click=app.notifier.clicked,
-                       on_close=quit_event.set)
+                       on_close=quit_event.set, **kw)
         icon.start()
     except (RuntimeError, OSError, ValueError) as exc:
         log.warning("no tray icon (%s); NeedleDropper keeps running without one", exc)
@@ -675,6 +692,95 @@ def _start_tray(app: Any, quit_event: threading.Event) -> Optional[Any]:
 def _wait_quit(quit_event: threading.Event, timeout: float) -> bool:
     """One wait of the companion's main loop (Ctrl+C arrives here when run from a console)."""
     return quit_event.wait(timeout)
+
+
+# ------------------------------------------------- session end / console close ----
+#
+# CLI-CONSOLE-CLOSE-NO-CLEANUP (baseline-findings.md): closing the console, logging off or shutting
+# Windows down ends the process without running ``finally`` blocks, so a playing Spotify drop kept
+# playing at its fade volume and the player's own music was never restored. Windows allows a few
+# seconds of clean-up in two places, and both now run the fast stop synchronously:
+#
+# * the tray's hidden window receives WM_ENDSESSION (the windowed exe: log off / shut down);
+# * a console control handler receives CTRL_CLOSE_EVENT (``run`` in a console window: its X button;
+#   also CTRL_LOGOFF / CTRL_SHUTDOWN for a console process without a window of its own).
+
+#: Console control events that end the process (CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT).
+CTRL_CLOSE_EVENTS = (2, 5, 6)
+#: How long a session-end / console-close handler waits for the clean-up (Windows allows about 5 s).
+SESSION_END_WAIT_S = 4.5
+#: ``kernel32``-like object with ``SetConsoleCtrlHandler`` (tests inject a fake); None = the real one.
+console_ctrl_api: Any = None
+_console_handlers: list[Any] = []  # keeps the ctypes callbacks alive while installed
+
+
+class _SessionEnd:
+    """The handshake between a session-end callback (tray or console thread) and the main thread."""
+
+    def __init__(self, quit_event: threading.Event) -> None:
+        self.quit_event = quit_event
+        self.requested = threading.Event()
+        self.done = threading.Event()
+
+    def __call__(self, why: str = "session end") -> None:
+        """Ask the main loop to stop *now* and block until it cleaned up (at most SESSION_END_WAIT_S)."""
+        if not self.requested.is_set():
+            log.info("Windows is ending NeedleDropper (%s): stopping playback now", why)
+        self.requested.set()
+        self.quit_event.set()
+        if not self.done.wait(SESSION_END_WAIT_S):
+            log.warning("clean-up did not finish within %.1f s", SESSION_END_WAIT_S)
+
+
+def install_console_handler(on_close: Callable[[str], Any]) -> Optional[Callable[[], None]]:
+    """Run ``on_close(reason)`` (synchronously) on CTRL_CLOSE / CTRL_LOGOFF / CTRL_SHUTDOWN; Ctrl+C
+    and Ctrl+Break keep Python's own handling (KeyboardInterrupt). Returns an undo, or None when
+    there is no console API (not Windows)."""
+    api = console_ctrl_api
+    if api is None:
+        if sys.platform != "win32":
+            return None
+        try:
+            import ctypes
+
+            api = ctypes.WinDLL("kernel32", use_last_error=True)
+        except (OSError, AttributeError):
+            return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        handler_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+    except (ImportError, AttributeError, ValueError):  # pragma: no cover - no ctypes support
+        return None
+    names = {2: "console closed", 5: "log off", 6: "shut down"}
+
+    def routine(event: int) -> int:
+        if int(event) not in CTRL_CLOSE_EVENTS:
+            return 0  # not ours: the next handler (Python's Ctrl+C) runs
+        try:
+            on_close(names.get(int(event), f"console event {event}"))
+        except Exception:  # noqa: BLE001 - never raise into Windows
+            log.exception("console close clean-up failed")
+        return 1
+
+    callback = handler_type(routine)
+    try:
+        if not api.SetConsoleCtrlHandler(callback, True):
+            return None
+    except (OSError, AttributeError, TypeError, ValueError):
+        return None
+    _console_handlers.append(callback)
+
+    def undo() -> None:
+        try:
+            api.SetConsoleCtrlHandler(callback, False)
+        except (OSError, AttributeError, TypeError, ValueError):
+            pass
+        if callback in _console_handlers:
+            _console_handlers.remove(callback)
+
+    return undo
 
 
 def _install_excepthook() -> Callable[[], None]:
@@ -740,11 +846,13 @@ def _serve(ctx: Ctx, args: argparse.Namespace, session: _LogSession, Deck: Any, 
     app = Companion(ctx.cfg, ctx.paths, deck=deck, config_file=ctx.config_file,
                     out=(say if sys.stdout is not None else None))
     quit_event = threading.Event()
+    ending = _SessionEnd(quit_event)
     icon = None
+    undo_console = install_console_handler(ending)  # closing the console window / log off / shut down
     try:
         app.start()
         if tray_mode:
-            icon = _start_tray(app, quit_event)
+            icon = _start_tray(app, quit_event, session_end=lambda: ending("log off or shut down"))
             if icon is None and not background:
                 want_panel = True  # no tray icon to find NeedleDropper by: show the page instead
         opened = ""
@@ -776,14 +884,35 @@ def _serve(ctx: Ctx, args: argparse.Namespace, session: _LogSession, Deck: Any, 
         except KeyboardInterrupt:
             say("\nShutting down...")
     finally:
-        if icon is not None:
+        if ending.requested.is_set():
+            # Windows is ending us: clean up first (seconds count), then let the waiting handler return.
             try:
-                icon.stop()
+                app.stop(fast=True)
             except Exception:  # noqa: BLE001
-                log.debug("tray stop failed", exc_info=True)
-        app.stop()
-        deck.stop()
-        log.info("NeedleDropper stopped")
+                log.exception("fast stop failed")
+            try:
+                deck.stop()
+            except Exception:  # noqa: BLE001
+                log.debug("deck stop failed", exc_info=True)
+            ending.done.set()
+            log.info("NeedleDropper stopped (session end)")
+            if icon is not None:
+                try:
+                    icon.stop(timeout=1.0)
+                except Exception:  # noqa: BLE001
+                    log.debug("tray stop failed", exc_info=True)
+        else:
+            if icon is not None:
+                try:
+                    icon.stop()
+                except Exception:  # noqa: BLE001
+                    log.debug("tray stop failed", exc_info=True)
+            app.stop()
+            deck.stop()
+            ending.done.set()
+            log.info("NeedleDropper stopped")
+        if undo_console is not None:
+            undo_console()
     say("Bye.")
     return EXIT_OK
 

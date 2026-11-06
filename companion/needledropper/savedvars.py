@@ -108,6 +108,8 @@ import time
 from pathlib import Path
 from typing import Any, NamedTuple, Optional, Union
 
+from . import atomicio as _atomicio
+
 __all__ = [
     "MAX_BYTES",
     "MAX_DEPTH",
@@ -1009,10 +1011,7 @@ def backup_savedvariables(flavor_root: Union[str, os.PathLike], backup_dir: Unio
         while target.exists():
             n += 1
             target = folder / f"{prefix}{stamp}-{n}{_BACKUP_SUFFIX}"
-        tmp = target.with_name(target.name + ".tmp")
-        with open(tmp, "wb") as out:
-            out.write(data)
-        os.replace(tmp, target)
+        _atomicio.atomic_write_bytes(target, data, prefix=target.name + ".")  # WinError 17 safe
         made.append(target)
         for old in sorted(folder.glob(f"{prefix}*{_BACKUP_SUFFIX}"))[:-keep]:
             try:

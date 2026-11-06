@@ -121,6 +121,7 @@ NOTIFYICONDATAW_SIZE = 976 if ctypes.sizeof(ctypes.c_void_p) == 8 else 956
 WM_NULL = 0x0000
 WM_DESTROY = 0x0002
 WM_CLOSE = 0x0010
+WM_QUERYENDSESSION = 0x0011
 WM_ENDSESSION = 0x0016
 WM_CONTEXTMENU = 0x007B
 WM_TIMER = 0x0113
@@ -769,14 +770,15 @@ class TrayIcon:
                  menu_items: Iterable[MenuEntry] = (), on_click: Optional[Callable[[], Any]] = None, *,
                  tooltip: Optional[str] = None, on_notification_click: Optional[Callable[[], Any]] = None,
                  on_close: Optional[Callable[[], Any]] = None, icon_id: int = 1, dpi_aware: bool = True,
-                 shell_notify: Optional[Callable[[int, Any], bool]] = None) -> None:
+                 shell_notify: Optional[Callable[[int, Any], bool]] = None,
+                 on_session_end: Optional[Callable[[], Any]] = None) -> None:
         title = str(title).strip()
         if not title:
             raise ValueError("TrayIcon needs a non-empty title")
         if not 0 <= int(icon_id) <= 0xFFFF:
             raise ValueError("icon_id must be in 0..65535 (it travels in a 16-bit field)")
         for name, fn in (("on_click", on_click), ("on_notification_click", on_notification_click),
-                         ("on_close", on_close), ("shell_notify", shell_notify)):
+                         ("on_close", on_close), ("shell_notify", shell_notify), ("on_session_end", on_session_end)):
             if fn is not None and not callable(fn):
                 raise TypeError(f"{name} must be callable")
         self._title = title
@@ -786,6 +788,11 @@ class TrayIcon:
         self.on_click = on_click
         self.on_notification_click = on_notification_click
         self.on_close = on_close
+        #: Called **synchronously** on the tray thread when Windows ends the session (log off, shut
+        #: down, restart): the process may be killed as soon as WM_ENDSESSION returns, so this is the
+        #: only place a clean-up (pause Spotify, restore its volume and the player's music) can run.
+        #: Without it, ``on_close`` is dispatched instead (asynchronously, the v1.1 behaviour).
+        self.on_session_end = on_session_end
 
         self._lock = threading.RLock()
         self._items: List[MenuEntry] = _checked_entries(menu_items)
@@ -1174,10 +1181,18 @@ class TrayIcon:
                 else:
                     log.info("tray: ignoring WM_CLOSE (no on_close handler)")
                 return 0
+            if msg == WM_QUERYENDSESSION:
+                return 1  # never block a log off / shut down; the clean-up runs at WM_ENDSESSION
             if msg == WM_ENDSESSION:
                 if wparam:  # the session is ending: don't leave a ghost icon behind
                     self._delete_icon()
-                    self._dispatch(self.on_close)
+                    if self.on_session_end is not None:
+                        try:
+                            self.on_session_end()  # blocks (bounded by the callback) until cleaned up
+                        except Exception:  # noqa: BLE001 - never escape into Win32
+                            log.exception("tray: session-end clean-up failed")
+                    else:
+                        self._dispatch(self.on_close)
                 return 0
             if msg == WM_DESTROY:
                 self._delete_icon()
@@ -1453,6 +1468,7 @@ NOTE_TEST = "test"  # a TEST-flagged frame (/needle test, Settings > Send a test
 NOTE_SPOTIFY_EXPIRED = "spotify-expired"  # the stored Spotify sign-in stopped working
 NOTE_NOT_FOUND = "spotify-not-found"  # a search-only drop has no match on Spotify
 NOTE_NOT_EMBEDDABLE = "youtube-not-embeddable"  # the video's owner does not allow embedding
+NOTE_SPOTIFY_STUCK = "spotify-stuck"  # Spotify accepted a song but did not start it (restart the app)
 NOTE_FAULT = "fault"  # a transport / engine thread died
 NOTE_UPDATE = "update"  # a newer NeedleDropper release exists
 
@@ -1473,6 +1489,7 @@ NOTE_POLICIES: Dict[str, NotePolicy] = {
     NOTE_SPOTIFY_EXPIRED: NotePolicy(once_per_session=True),
     NOTE_NOT_FOUND: NotePolicy(cooldown_s=6 * 3600.0),
     NOTE_NOT_EMBEDDABLE: NotePolicy(cooldown_s=6 * 3600.0),
+    NOTE_SPOTIFY_STUCK: NotePolicy(cooldown_s=30 * 60.0),
     NOTE_FAULT: NotePolicy(once_per_session=True),
     NOTE_UPDATE: NotePolicy(once_per_session=True),
 }
@@ -1602,6 +1619,7 @@ __all__ = [
     "MenuEntry", "LayoutEntry", "MenuLayout", "find_item", "default_item", "companion_menu", "build_hmenu",
     "default_icon_path", "TrayIcon", "ITEM_STATUS", "ITEM_SETUP", "ITEM_PAUSE", "ITEM_AUTOSTART",
     "ITEM_LOG_FOLDER", "ITEM_QUIT", "NOTE_LINKED", "NOTE_TEST", "NOTE_SPOTIFY_EXPIRED", "NOTE_NOT_FOUND",
-    "NOTE_NOT_EMBEDDABLE", "NOTE_FAULT", "NOTE_UPDATE", "NotePolicy", "NOTE_POLICIES", "Note", "Notifier",
+    "NOTE_NOT_EMBEDDABLE", "NOTE_SPOTIFY_STUCK", "NOTE_FAULT", "NOTE_UPDATE", "NotePolicy", "NOTE_POLICIES", "Note",
+    "Notifier",
     "message_box",
 ]

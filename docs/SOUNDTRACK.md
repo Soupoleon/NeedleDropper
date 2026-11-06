@@ -423,9 +423,9 @@ A floating island in the plane of air: a song forever tied to a record-breaking 
    drop for where you stand.
 2. **Change the song.** Click **Change song here**. NeedleDropper copies the drop into **My Drops**,
    your own soundtrack at the top of your list, and puts the cursor in **Artist**. Type the new artist
-   and title, and paste a Spotify or YouTube link to pin the exact recording. Under **More…**,
+   and title, and paste a Spotify or YouTube link to pin the exact recording. Under **More...**,
    **Play for** turns a long song into an excerpt (as this soundtrack does for its five longest songs)
-   and **Start at** skips an intro. ▶ **Test** plays it at once.
+   and **Start at** skips an intro. **Test** plays it at once.
 3. **Use your own audio file.** Copy an .mp3 or .ogg into
    `World of Warcraft\_forever_\Interface\AddOns\NeedleDropper_Local\media`, restart the game (WoW
    only notices new files when it starts), and type the file's name into the drop's **In-game file**
@@ -436,10 +436,10 @@ A floating island in the plane of air: a song forever tied to a record-breaking 
 
 Changes apply at once, with no `/reload`, and later fixes to Azeroth Unbound still reach every place
 you didn't change. For a full copy to rework from top to bottom, use **Duplicate** on the
-**Soundtracks** tab; share your version with **Share…** there.
+**Soundtracks** tab; share your version with **Share...** there.
 
 Drops play once per character. To hear a place's first-arrival moment again, click **Play again next
-visit** (or ▶ **Replay**) on the **Journal** tab, type `/needle play Duskwood` to hear any drop now,
+visit** (or **Replay**) on the **Journal** tab, type `/needle play Duskwood` to hear any drop now,
 or `/needle reset char` to start this character over. If you played NeedleDropper 1.1, this was its
 soundtrack: the places you heard then stay heard. The file format for soundtrack authors is in
 [Soundtracks](PACKS.md#for-soundtrack-authors-the-pack-format).

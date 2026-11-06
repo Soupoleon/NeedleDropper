@@ -1,4 +1,13 @@
-"""Addon scenario tests: the Director state machine (SPEC 4.3) driven through the WoW shim."""
+"""Addon scenario tests: the Director state machine (SPEC 4.3, DESIGN-v1.2 4.2) driven through
+the WoW shim with the whole addon loaded in TOC order.
+
+v1.2 migration: the v1 test map (Map.lua with numbered drops and a map hash) became a built-in
+test soundtrack (``make_set``: built-in drops, so exploration history applies like it did to the
+v1 map) plus, for the in-game file, a soundtrack of the player's own (only those carry files).
+Events are Protocol2 event tables: a drop is identified by ``dropId`` instead of v1's ``n`` /
+``hash``. The NeedleDropper app is "known" (NeedleDropper_CompanionData) so that drops fade the
+zone music as before (real-client finding 6: without the app they leave it alone).
+"""
 from __future__ import annotations
 
 import sys
@@ -8,10 +17,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from addon_harness import AddonHarness, make_map  # noqa: E402
+from addon_harness import MEDIA_PATH, AddonHarness, make_set, user_db  # noqa: E402
 from needledropper.models import EventType as ET, Flags  # noqa: E402
 
-LOCAL_FILE = "Interface\\AddOns\\NeedleDropper_Local\\media\\sentinel.mp3"
+LOCAL_FILE = MEDIA_PATH + "sentinel.mp3"
 
 DROPS = [
     {"id": "zone:1429", "kind": "zone", "mapID": 1429, "label": "Elwynn Forest",
@@ -20,12 +29,28 @@ DROPS = [
      "label": "Goldshire", "title": "Inn Song", "artist": "Bard", "durationMs": 30000},
     {"id": "zone:1436", "kind": "zone", "mapID": 1436, "label": "Westfall",
      "title": "Dust", "artist": "Farmer", "durationMs": 30000},
-    {"id": "sub:1436:sentinel-hill", "kind": "subzone", "mapID": 1436, "subzone": "Sentinel Hill",
-     "label": "Sentinel Hill", "title": "Watch", "artist": "Guard", "durationMs": 0, "file": LOCAL_FILE},
     {"id": "inst:36", "kind": "instance", "instanceID": 36, "label": "The Deadmines",
      "title": "Below", "artist": "Miners", "durationMs": 30000},
 ]
-MAP = make_map(DROPS)
+# In-game files are a soundtrack-of-your-own feature (built-in drops never carry one).
+LOCAL_DROPS = [
+    {"id": "sub:1436:sentinel-hill", "kind": "subzone", "mapID": 1436, "subzone": "Sentinel Hill",
+     "label": "Sentinel Hill", "title": "Watch", "artist": "Guard", "durationMs": 0, "file": "sentinel.mp3"},
+]
+SET = make_set(DROPS)
+APP = {"schema": 1, "appVersion": "1.2.0", "written": 1762365000,
+       "status": {"spotify": "connected", "youtube": True, "transports": {"pixel": True}}}
+
+
+def make(**kw) -> AddonHarness:
+    """The test soundtrack (built-in) under a soundtrack of your own with the in-game file drop."""
+    db = kw.pop("db", None)
+    settings = kw.pop("settings", None)
+    base = user_db(LOCAL_DROPS, active=["user:test", "builtin:test-set"])
+    if db:
+        base.update(db)
+    kw.setdefault("companion_data", APP)
+    return AddonHarness(sets=[SET], db=base, settings=settings, **kw)
 
 
 def names(evs):
@@ -36,17 +61,21 @@ def has(flags: int, f: Flags) -> bool:
     return bool(flags & int(f))
 
 
+def ids(evs):
+    return [e.get("dropId") for e in evs]
+
+
 @pytest.fixture
 def h():
-    return AddonHarness(map=MAP)
+    return make()
 
 
 # --------------------------------------------------------------- arrival --
 
-def test_login_emits_hello_with_map_hash(h):
+def test_login_emits_one_hello_without_drop_fields(h):
     evs = h.events()
     assert names(evs) == ["HELLO"]
-    assert evs[0]["hash"] == MAP["hash"] and evs[0]["n"] == 0
+    assert evs[0].get("dropId") is None and evs[0].get("placeKey") is None and evs[0]["flags"] == 0
 
 
 def test_first_arrival_arms_then_fires_after_dwell_and_marks_done(h):
@@ -54,7 +83,7 @@ def test_first_arrival_arms_then_fires_after_dwell_and_marks_done(h):
     h.set_location(1429, "Northshire Valley")
     evs = h.events_since(m)
     assert names(evs) == ["ARM"]
-    assert evs[0]["n"] == h.n_of("zone:1429") and evs[0]["id"] == "zone:1429"
+    assert evs[0]["dropId"] == "zone:1429" and evs[0]["artist"] == "Low Roar"
     h.advance(7)                       # 7.6 s after arrival: dwell (10 s) not met yet
     assert not h.events_of(ET.FIRE)
     assert "zone:1429" not in h.char_db()["done"]
@@ -62,11 +91,14 @@ def test_first_arrival_arms_then_fires_after_dwell_and_marks_done(h):
     fires = h.events_of(ET.FIRE)
     assert len(fires) == 1
     f = fires[0]
-    assert f["n"] == h.n_of("zone:1429")
+    assert f["dropId"] == "zone:1429" and (f["title"], f["lengthMs"]) == ("I'll Keep Coming", 60000)
     assert has(f["flags"], Flags.DROP_ACTIVE) and not has(f["flags"], Flags.TEST)
     cdb = h.char_db()
     assert cdb["done"]["zone:1429"]["how"] == "played"
-    assert cdb["journal"][-1]["id"] == "zone:1429"
+    j = cdb["journal"][-1]
+    assert j["id"] == "zone:1429"
+    # DESIGN-v1.2 4.6: the journal keeps the song itself, so a replay works after edits
+    assert (j["artist"], j["title"], j["durationMs"], j["setId"]) == ("Low Roar", "I'll Keep Coming", 60000, "test-set")
     assert cdb["lastFireAt"] > 0
     assert h.account_db()["accountDone"]["zone:1429"]["how"] == "played"
 
@@ -115,11 +147,11 @@ def test_combat_holds_then_fires_on_regen_enabled(h):
     h.combat(False)                      # the nudge fires without waiting for the ticker
     evs = h.events_since(m)
     assert names(evs) == ["FIRE"]
-    assert evs[0]["n"] == h.n_of("zone:1429")
+    assert evs[0]["dropId"] == "zone:1429"
 
 
 def test_combat_flag_set_on_armed_event():
-    h = AddonHarness(map=MAP)
+    h = make()
     h.combat(True)
     h.set_location(1429, "Northshire Valley")
     arm = h.events_of(ET.ARM)[0]
@@ -127,19 +159,19 @@ def test_combat_flag_set_on_armed_event():
 
 
 def test_taxi_holds_unless_disabled():
-    h = AddonHarness(map=MAP, state={"taxi": True})
+    h = make(state={"taxi": True})
     h.set_location(1429, "Northshire Valley")
     h.advance(20)
     assert not h.events_of(ET.FIRE)
     assert has(h.events_of(ET.ARM)[0]["flags"], Flags.ON_TAXI)
-    h2 = AddonHarness(map=MAP, state={"taxi": True}, settings={"suppressOnTaxi": False})
+    h2 = make(state={"taxi": True}, settings={"suppressOnTaxi": False})
     h2.set_location(1429, "Northshire Valley")
     h2.advance(12)
     assert len(h2.events_of(ET.FIRE)) == 1
 
 
 def test_dead_holds_until_alive():
-    h = AddonHarness(map=MAP, state={"dead": True})
+    h = make(state={"dead": True})
     h.set_location(1429, "Northshire Valley")
     h.advance(20)
     assert not h.events_of(ET.FIRE)
@@ -149,7 +181,7 @@ def test_dead_holds_until_alive():
 
 
 def test_cinematic_holds_new_character_until_cinematic_stop():
-    h = AddonHarness(map=MAP, state={"cinematic": True, "level": 1}, location=(1429, "Northshire Valley"))
+    h = make(state={"cinematic": True, "level": 1}, location=(1429, "Northshire Valley"))
     h.fire("CINEMATIC_START")
     h.advance(30)
     assert len(h.events_of(ET.ARM)) == 1
@@ -160,7 +192,7 @@ def test_cinematic_holds_new_character_until_cinematic_stop():
 
 
 def test_movie_frame_holds():
-    h = AddonHarness(map=MAP)
+    h = make()
     h.lua("MovieFrame:Show()")
     h.fire("PLAY_MOVIE", 1)
     h.set_location(1429, "Northshire Valley")
@@ -172,7 +204,7 @@ def test_movie_frame_holds():
 
 
 def test_encounter_restriction_holds():
-    h = AddonHarness(map=MAP, state={"encounterRestricted": True})
+    h = make(state={"encounterRestricted": True})
     h.set_location(1429, "Northshire Valley")
     h.advance(20)
     assert not h.events_of(ET.FIRE)
@@ -182,7 +214,7 @@ def test_encounter_restriction_holds():
 
 
 def test_disabled_addon_never_arms():
-    h = AddonHarness(map=MAP, settings={"enabled": False})
+    h = make(settings={"enabled": False})
     h.set_location(1429, "Northshire Valley")
     h.advance(20)
     assert not h.events_of(ET.ARM) and not h.events_of(ET.FIRE)
@@ -197,7 +229,7 @@ def test_leaving_before_dwell_cancels_and_does_not_mark_done(h):
     h.set_location(1411, "Razor Hill")
     evs = h.events_since(m)
     assert names(evs) == ["CANCEL", "HELLO"]
-    assert evs[0]["n"] == h.n_of("zone:1429")
+    assert evs[0]["dropId"] == "zone:1429"
     h.advance(20)
     assert not h.events_of(ET.FIRE)
     assert "zone:1429" not in h.char_db()["done"]
@@ -220,7 +252,7 @@ def test_combat_longer_than_fade_cancels_active_drop(h):
     h.advance(3.5)
     evs = h.events_since(m)
     assert names(evs) == ["CANCEL"]
-    assert evs[0]["n"] == h.n_of("zone:1429")
+    assert evs[0]["dropId"] == "zone:1429"
     assert has(evs[0]["flags"], Flags.IN_COMBAT) and not has(evs[0]["flags"], Flags.DROP_ACTIVE)
     assert h.char_db()["done"]["zone:1429"]["how"] == "played"   # cancel keeps done
     assert h.music()[-1] == ["stop"]
@@ -240,7 +272,7 @@ def test_short_combat_does_not_cancel(h):
 
 
 def test_combat_fade_zero_never_cancels():
-    h = AddonHarness(map=MAP, settings={"combatFadeSec": 0})
+    h = make(settings={"combatFadeSec": 0})
     h.set_location(1429, "Northshire Valley")
     h.advance(11)
     h.combat(True)
@@ -264,7 +296,7 @@ def test_entering_instance_cancels_active_zone_drop(h):
     m = h.mark()
     h.set_location(9100, "", instance={"id": 99, "name": "Somewhere Else"})
     evs = h.events_since(m)
-    assert names(evs)[0] == "CANCEL" and evs[0]["n"] == h.n_of("zone:1429")
+    assert names(evs)[0] == "CANCEL" and evs[0]["dropId"] == "zone:1429"
     assert has(evs[0]["flags"], Flags.IN_INSTANCE)
 
 
@@ -312,7 +344,7 @@ def test_discovery_message_shortens_dwell_to_min_dwell(h):
     assert names(h.events()[1:]) == ["ARM"]
     h.advance(3.0)                       # 3.6 s after arrival, far below dwellSec=10
     fires = h.events_of(ET.FIRE)
-    assert len(fires) == 1 and fires[0]["n"] == h.n_of("zone:1429")
+    assert len(fires) == 1 and fires[0]["dropId"] == "zone:1429"
 
 
 def test_discovery_via_chat_backup_only(h):
@@ -340,13 +372,13 @@ def test_landmark_beats_zone(h):
     h.set_location(1429, "Goldshire")
     h.advance(1.5)                       # respect-history check for the landmark
     arms = h.events_of(ET.ARM)
-    assert [a["n"] for a in arms] == [h.n_of("area:87")]
+    assert ids(arms) == ["area:87"]
     h.advance(3)                          # landmarkDwellSec = 4
     fires = h.events_of(ET.FIRE)
-    assert [f["n"] for f in fires] == [h.n_of("area:87")]
+    assert ids(fires) == ["area:87"]
     assert "zone:1429" not in h.char_db()["done"]
     # the zone drop is pending next, held by the cooldown
-    assert h.events()[-1]["type"] == ET.ARM and h.events()[-1]["n"] == h.n_of("zone:1429")
+    assert h.events()[-1]["type"] == ET.ARM and h.events()[-1]["dropId"] == "zone:1429"
     h.advance(60)
     assert len(h.events_of(ET.FIRE)) == 1
 
@@ -356,20 +388,20 @@ def test_landmark_discovery_fires_without_landmark_dwell(h):
     h.discover("Goldshire")
     h.advance(2.0)
     fires = h.events_of(ET.FIRE)
-    assert [f["n"] for f in fires] == [h.n_of("area:87")]
+    assert ids(fires) == ["area:87"]
 
 
 def test_landmark_by_subzone_name_and_area_name():
     drops = [{"id": "area:88", "kind": "subzone", "areaID": 88, "label": "Lion's Pride Inn"}]
-    h = AddonHarness(map=make_map(drops), settings={"historyMode": "fresh"})
+    h = AddonHarness(sets=[make_set(drops)], settings={"historyMode": "fresh"})
     h.set_location(1429, "Lion's Pride Inn")      # no mapID in the drop: matched by area name
-    assert [a["id"] for a in h.events_of(ET.ARM)] == ["area:88"]
+    assert ids(h.events_of(ET.ARM)) == ["area:88"]
 
 
 def test_micro_map_normalizes_to_zone(h):
     h.set_location(9002, "Fargodeep Mine")          # micro -> micro -> Elwynn Forest
     assert h.ns.Location.state.zoneMapID == 1429
-    assert [a["id"] for a in h.events_of(ET.ARM)] == ["zone:1429"]
+    assert ids(h.events_of(ET.ARM)) == ["zone:1429"]
 
 
 def test_continent_map_has_no_zone_key(h):
@@ -381,7 +413,7 @@ def test_continent_map_has_no_zone_key(h):
 # -------------------------------------------------------------- cooldown --
 
 def test_cooldown_blocks_second_drop_then_allows_it_while_still_there():
-    h = AddonHarness(map=MAP, settings={"cooldownMin": 2})
+    h = make(settings={"cooldownMin": 2})
     h.set_location(1429, "Northshire Valley")
     h.advance(11)
     first = h.events_of(ET.FIRE)
@@ -390,7 +422,7 @@ def test_cooldown_blocks_second_drop_then_allows_it_while_still_there():
     assert h.events()[-1]["type"] == ET.HELLO
     h.set_location(1429, "Goldshire")
     h.advance(10)
-    arms = [a for a in h.events_of(ET.ARM) if a["n"] == h.n_of("area:87")]
+    arms = [a for a in h.events_of(ET.ARM) if a["dropId"] == "area:87"]
     assert len(arms) == 1
     assert len(h.events_of(ET.FIRE)) == 1
     h.advance(40)                          # ~115 s after the first FIRE: still cooling down
@@ -399,20 +431,20 @@ def test_cooldown_blocks_second_drop_then_allows_it_while_still_there():
     assert any("cooldown" in line and "left" in line for line in lines)
     h.advance(20)                          # > 120 s
     fires = h.events_of(ET.FIRE)
-    assert len(fires) == 2 and fires[1]["n"] == h.n_of("area:87")
+    assert len(fires) == 2 and fires[1]["dropId"] == "area:87"
 
 
 def test_cooldown_persists_across_reload():
-    h = AddonHarness(map=MAP)
+    h = make()
     h.set_location(1429, "Northshire Valley")
     h.advance(11)
-    h2 = AddonHarness(map=MAP, db=h.account_db(), char_db=h.char_db(), location=(1436, ""))
+    h2 = make(db=h.account_db(), char_db=h.char_db(), location=(1436, ""))
     h2.advance(30)
     assert len(h2.events_of(ET.ARM)) == 1 and not h2.events_of(ET.FIRE)
 
 
 def test_one_active_drop_at_a_time():
-    h = AddonHarness(map=MAP, settings={"cooldownMin": 0})
+    h = make(settings={"cooldownMin": 0})
     h.set_location(1429, "Northshire Valley")
     h.advance(11)
     h.set_location(1436, "")
@@ -420,13 +452,13 @@ def test_one_active_drop_at_a_time():
     assert len(h.events_of(ET.FIRE)) == 1
     h.advance(42)                          # first drop ended at +60 s; the pending one follows
     fires = h.events_of(ET.FIRE)
-    assert len(fires) == 2 and fires[1]["n"] == h.n_of("zone:1436")
+    assert len(fires) == 2 and fires[1]["dropId"] == "zone:1436"
 
 
 # --------------------------------------------------------------- history --
 
 def test_respect_history_marks_explored_zone_done():
-    h = AddonHarness(map=MAP, state={"exploredTextures": {1429: 3}})
+    h = make(state={"exploredTextures": {1429: 3}})
     cdb = h.char_db()
     assert cdb["done"]["zone:1429"]["how"] == "history"
     assert cdb["scanned"]["zone:1429"] is True and cdb["scanned"]["zone:1436"] is True
@@ -437,16 +469,16 @@ def test_respect_history_marks_explored_zone_done():
 
 
 def test_history_scan_happens_once_per_drop():
-    h = AddonHarness(map=MAP)                       # nothing explored yet: all scanned as new
+    h = make()                       # nothing explored yet: all scanned as new
     assert h.char_db()["scanned"]["zone:1429"] is True
     # later the character explores Elwynn (drop pending) and logs out; on the next login
     # the scan must not turn the pending drop into "history".
-    h2 = AddonHarness(map=MAP, db=h.account_db(), char_db=h.char_db(), state={"exploredTextures": {1429: 2}})
+    h2 = make(db=h.account_db(), char_db=h.char_db(), state={"exploredTextures": {1429: 2}})
     assert "zone:1429" not in h2.char_db()["done"]
 
 
 def test_zone_does_not_arm_before_history_scan():
-    h = AddonHarness(map=MAP, state={"exploredTextures": {1429: 1}}, location=(1429, "Northshire Valley"),
+    h = make(state={"exploredTextures": {1429: 1}}, location=(1429, "Northshire Valley"),
                      settle=0)
     h.advance(2)
     assert not h.events_of(ET.ARM)
@@ -455,7 +487,7 @@ def test_zone_does_not_arm_before_history_scan():
 
 
 def test_unexplored_zone_at_login_arms_after_scan():
-    h = AddonHarness(map=MAP, location=(1429, "Northshire Valley"), settle=0)
+    h = make(location=(1429, "Northshire Valley"), settle=0)
     h.advance(2)
     assert not h.events_of(ET.ARM)
     h.advance(2)
@@ -465,40 +497,40 @@ def test_unexplored_zone_at_login_arms_after_scan():
 
 
 def test_respect_history_marks_explored_landmark_done():
-    h = AddonHarness(map=MAP, state={"exploredAreas": {1429: [12, 87]}})
+    h = make(state={"exploredAreas": {1429: [12, 87]}})
     h.set_location(1429, "Goldshire")
     assert not h.events_of(ET.ARM)            # checking history first
     h.advance(1.5)
     assert h.char_db()["done"]["area:87"]["how"] == "history"
-    assert [a["id"] for a in h.events_of(ET.ARM)] == ["zone:1429"]
+    assert ids(h.events_of(ET.ARM)) == ["zone:1429"]
 
 
 def test_fresh_discovery_of_landmark_is_not_history():
-    h = AddonHarness(map=MAP, state={"exploredAreas": {1429: [87]}})
+    h = make(state={"exploredAreas": {1429: [87]}})
     h.set_location(1429, "Goldshire", settle=False)
     h.discover("Goldshire")                   # just explored -> it shows up as explored
     h.advance(2)
     assert "history" not in str(h.char_db()["done"].get("area:87"))
-    assert [f["id"] for f in h.events_of(ET.FIRE)] == ["area:87"]
+    assert ids(h.events_of(ET.FIRE)) == ["area:87"]
 
 
 def test_fresh_mode_ignores_history():
-    h = AddonHarness(map=MAP, settings={"historyMode": "fresh"},
+    h = make(settings={"historyMode": "fresh"},
                      state={"exploredTextures": {1429: 5}, "exploredAreas": {1429: [87]}})
     assert h.char_db()["done"] == {}
     h.set_location(1429, "Northshire Valley")
     h.advance(11)
-    assert [f["id"] for f in h.events_of(ET.FIRE)] == ["zone:1429"]
+    assert ids(h.events_of(ET.FIRE)) == ["zone:1429"]
 
 
 def test_new_level_one_character_ignores_history():
-    h = AddonHarness(map=MAP, state={"level": 1, "exploredTextures": {1429: 1}})
+    h = make(state={"level": 1, "exploredTextures": {1429: 1}})
     assert "zone:1429" not in h.char_db()["done"]
     assert h.char_db()["scanned"]["zone:1429"] is True
 
 
 def test_switching_to_respect_rescans():
-    h = AddonHarness(map=MAP, settings={"historyMode": "fresh"}, state={"exploredTextures": {1436: 2}})
+    h = make(settings={"historyMode": "fresh"}, state={"exploredTextures": {1436: 2}})
     assert "zone:1436" not in h.char_db()["done"]
     h.slash("set historyMode respect")
     h.advance(1.1)
@@ -509,7 +541,7 @@ def test_switching_to_respect_rescans():
 
 def test_scope_account_uses_account_done():
     db = {"settings": {"scope": "account"}, "accountDone": {"zone:1429": {"t": 5, "how": "played"}}}
-    h = AddonHarness(map=MAP, db=db)
+    h = make(db=db)
     h.set_location(1429, "Northshire Valley")
     h.advance(15)
     assert not h.events_of(ET.ARM)
@@ -517,19 +549,19 @@ def test_scope_account_uses_account_done():
 
 def test_scope_account_ignores_character_done_and_records_account():
     char = {"done": {"zone:1429": {"t": 5, "how": "played"}}}
-    h = AddonHarness(map=MAP, settings={"scope": "account"}, char_db=char)
+    h = make(settings={"scope": "account"}, char_db=char)
     h.set_location(1429, "Northshire Valley")
     h.advance(11)
-    assert [f["id"] for f in h.events_of(ET.FIRE)] == ["zone:1429"]
+    assert ids(h.events_of(ET.FIRE)) == ["zone:1429"]
     assert h.account_db()["accountDone"]["zone:1429"]["how"] == "played"
 
 
 def test_scope_character_ignores_account_done():
     db = {"accountDone": {"zone:1429": {"t": 5, "how": "played"}}}
-    h = AddonHarness(map=MAP, db=db)
+    h = make(db=db)
     h.set_location(1429, "Northshire Valley")
     h.advance(11)
-    assert [f["id"] for f in h.events_of(ET.FIRE)] == ["zone:1429"]
+    assert ids(h.events_of(ET.FIRE)) == ["zone:1429"]
 
 
 # --------------------------------------------------------- manual plays --
@@ -545,25 +577,25 @@ def test_replay_play_and_test_do_not_change_done_and_set_test_flag(h):
     h.slash("replay")
     evs = h.events_since(m)
     assert names(evs) == ["FIRE"]
-    assert evs[0]["n"] == h.n_of("zone:1429") and has(evs[0]["flags"], Flags.TEST)
+    assert evs[0]["dropId"] == "zone:1429" and has(evs[0]["flags"], Flags.TEST)
     h.slash("stop")
     assert has(h.last_event()["flags"], Flags.TEST) and h.last_event()["type"] == ET.CANCEL
 
     m = h.mark()
     h.slash("play zone:1436")
     evs = h.events_since(m)
-    assert names(evs) == ["FIRE"] and evs[0]["n"] == h.n_of("zone:1436") and has(evs[0]["flags"], Flags.TEST)
+    assert names(evs) == ["FIRE"] and evs[0]["dropId"] == "zone:1436" and has(evs[0]["flags"], Flags.TEST)
 
     m = h.mark()
     h.slash("play westfall")            # by place name, replaces the playing one
     evs = h.events_since(m)
-    assert names(evs) == ["FIRE"] and evs[0]["n"] == h.n_of("zone:1436")
+    assert names(evs) == ["FIRE"] and evs[0]["dropId"] == "zone:1436"
 
     m = h.mark()
     h.slash("test")
     evs = h.events_since(m)
     assert names(evs) == ["FIRE"]
-    assert evs[0]["n"] == 0 and evs[0]["id"] == "test" and has(evs[0]["flags"], Flags.TEST)
+    assert evs[0]["dropId"] == "test" and evs[0].get("artist") is None and has(evs[0]["flags"], Flags.TEST)
     assert h.toast_texts() == ["N E E D L E D R O P P E R", "Test drop"]  # SPEC-v1.1 B test card
 
     after = h.char_db()
@@ -583,10 +615,10 @@ def test_manual_play_ends_with_hello(h):
 def test_replay_given_id_and_unknown(h):
     m = h.mark()
     h.slash("replay area:87")
-    assert h.events_since(m)[0]["n"] == h.n_of("area:87")
+    assert h.events_since(m)[0]["dropId"] == "area:87"
     out = h.slash("play nowhere-at-all")
     assert any("no drop matches" in line for line in out)
-    h2 = AddonHarness(map=MAP)
+    h2 = make()
     out = h2.slash("replay")
     assert any("nothing to replay" in line for line in out)
 
@@ -596,17 +628,17 @@ def test_manual_play_does_not_start_cooldown(h):
     h.slash("stop")
     h.set_location(1429, "Northshire Valley")
     h.advance(11)
-    assert [f["id"] for f in h.events_of(ET.FIRE) if not f["flags"] & int(Flags.TEST)] == ["zone:1429"]
+    assert [f["dropId"] for f in h.events_of(ET.FIRE) if not f["flags"] & int(Flags.TEST)] == ["zone:1429"]
 
 
 # -------------------------------------------------------- local playback --
 
 def test_local_file_drop_sets_local_playback_and_calls_play_sound_file():
-    h = AddonHarness(map=MAP, state={"playableFiles": {LOCAL_FILE: True}, "soundLengths": {LOCAL_FILE: 20}})
+    h = make(state={"playableFiles": {LOCAL_FILE: True}, "soundLengths": {LOCAL_FILE: 20}})
     h.set_location(1436, "Sentinel Hill")
     h.advance(5)
     fires = h.events_of(ET.FIRE)
-    assert [f["id"] for f in fires] == ["sub:1436:sentinel-hill"]
+    assert ids(fires) == ["sub:1436:sentinel-hill"]
     assert has(fires[0]["flags"], Flags.LOCAL_PLAYBACK) and has(fires[0]["flags"], Flags.DROP_ACTIVE)
     sounds = h.sounds()
     assert sounds[0]["path"] == LOCAL_FILE and sounds[0]["channel"] == "Music" and sounds[0]["willPlay"]
@@ -618,7 +650,7 @@ def test_local_file_drop_sets_local_playback_and_calls_play_sound_file():
 
 
 def test_will_play_nil_falls_back_to_companion():
-    h = AddonHarness(map=MAP, settings={"maxDropSec": 40})
+    h = make(settings={"maxDropSec": 40})
     h.set_location(1436, "Sentinel Hill")
     h.advance(5)
     fire = h.events_of(ET.FIRE)[0]
@@ -632,7 +664,7 @@ def test_will_play_nil_falls_back_to_companion():
 
 
 def test_local_playback_disabled_leaves_it_to_companion():
-    h = AddonHarness(map=MAP, settings={"localPlayback": False}, state={"playableFiles": {LOCAL_FILE: True}})
+    h = make(settings={"localPlayback": False}, state={"playableFiles": {LOCAL_FILE: True}})
     h.set_location(1436, "Sentinel Hill")
     h.advance(5)
     assert not has(h.events_of(ET.FIRE)[0]["flags"], Flags.LOCAL_PLAYBACK)
@@ -640,7 +672,7 @@ def test_local_playback_disabled_leaves_it_to_companion():
 
 
 def test_cancel_local_drop_stops_sound_with_fade():
-    h = AddonHarness(map=MAP, state={"playableFiles": {LOCAL_FILE: True}})
+    h = make(state={"playableFiles": {LOCAL_FILE: True}})
     h.set_location(1436, "Sentinel Hill")
     h.advance(5)
     h.slash("stop")
@@ -654,15 +686,15 @@ def test_cancel_local_drop_stops_sound_with_fade():
 def test_instance_drop_fires_after_min_dwell_with_instance_flag(h):
     h.set_location(291, "", instance={"id": 36, "name": "The Deadmines"})
     arms = h.events_of(ET.ARM)
-    assert [a["id"] for a in arms] == ["inst:36"]
+    assert ids(arms) == ["inst:36"]
     assert has(arms[0]["flags"], Flags.IN_INSTANCE)
     h.advance(3)
     fires = h.events_of(ET.FIRE)
-    assert [f["id"] for f in fires] == ["inst:36"] and has(fires[0]["flags"], Flags.IN_INSTANCE)
+    assert ids(fires) == ["inst:36"] and has(fires[0]["flags"], Flags.IN_INSTANCE)
 
 
 def test_instance_drops_setting_off():
-    h = AddonHarness(map=MAP, settings={"instanceDrops": False})
+    h = make(settings={"instanceDrops": False})
     h.set_location(291, "", instance={"id": 36, "name": "The Deadmines"})
     h.advance(10)
     assert not h.events_of(ET.ARM)
@@ -677,7 +709,7 @@ def test_zone_drop_not_armed_inside_instance(h):
 # ------------------------------------------------------- login / reload --
 
 def test_map_api_nil_at_login_is_retried():
-    h = AddonHarness(map=MAP, state={"mapNilCalls": 3}, location=(1429, "Northshire Valley"), settle=0)
+    h = make(state={"mapNilCalls": 3}, location=(1429, "Northshire Valley"), settle=0)
     h.advance(6)
     assert h.ns.Location.state.zoneMapID == 1429
     assert len(h.events_of(ET.ARM)) == 1
@@ -686,32 +718,32 @@ def test_map_api_nil_at_login_is_retried():
 
 
 def test_reload_keeps_done_and_continues_seq():
-    h = AddonHarness(map=MAP)
+    h = make()
     h.set_location(1429, "Northshire Valley")
     h.advance(11)
     last_seq = h.last_event()["seq"]
-    h2 = AddonHarness(map=MAP, db=h.account_db(), char_db=h.char_db(), location=(1429, "Northshire Valley"))
+    h2 = make(db=h.account_db(), char_db=h.char_db(), location=(1429, "Northshire Valley"))
     h2.advance(15)
     assert h2.events()[0]["type"] == ET.HELLO and h2.events()[0]["seq"] == (last_seq + 1) % 256
     assert not h2.events_of(ET.ARM)
 
 
 def test_reset_char_allows_drop_again():
-    h = AddonHarness(map=MAP, settings={"cooldownMin": 0})
+    h = make(settings={"cooldownMin": 0})
     h.set_location(1429, "Northshire Valley")
     h.advance(11)
     h.advance(61)
     assert len(h.char_db()["journal"]) == 1
     h.slash("reset char")                  # still standing in Elwynn: it plays again right away
     fires = h.events_of(ET.FIRE)
-    assert len(fires) == 2 and fires[1]["id"] == "zone:1429"
+    assert len(fires) == 2 and fires[1]["dropId"] == "zone:1429"
     assert len(h.char_db()["journal"]) == 1
 
 
 def test_reset_account_and_all():
     db = {"accountDone": {"zone:1436": {"t": 5, "how": "played"}}}
     char = {"done": {"zone:1429": {"t": 5, "how": "played"}}, "journal": [{"id": "zone:1429", "t": 5}]}
-    h = AddonHarness(map=MAP, db=db, char_db=char)
+    h = make(db=db, char_db=char)
     h.slash("reset account")
     assert h.account_db()["accountDone"] == {} and "zone:1429" in h.char_db()["done"]
     h.slash("reset all")

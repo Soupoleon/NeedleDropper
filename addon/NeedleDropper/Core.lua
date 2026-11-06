@@ -1,12 +1,20 @@
 local ADDON, ns = ...
--- NeedleDropper Core: namespace, SavedVariables, map indexes, event dispatch, printing,
--- CVar helpers and slash commands. Loaded right after Protocol.lua and Map.lua.
+-- NeedleDropper Core: namespace, settings, SavedVariables (schema 2) and their migration, event
+-- dispatch, printing, CVar helpers, slash commands and the add-on compartment entry points.
+--
+-- Loaded after Locale.lua, Json.lua, Base64.lua and Protocol2.lua and before everything else
+-- (CONTRACTS-v1.2 2.1). Later modules (Soundtracks, Director, UI ...) are only reached at call
+-- time, never while this file loads.
+--
+-- What plays comes from the soundtrack model: Soundtracks.Init() runs on ADDON_LOADED, right
+-- before ND_INIT is fired, and builds ns.Map from the active soundtracks (built-in Sets\*.lua
+-- plus the player's own). Until then ns.Map is an empty map of the same shape.
 
 ns.ADDON = ADDON or "NeedleDropper"
-ns.SCHEMA = 1
+ns.SCHEMA = 2
 ns.PREFIX = "|cff9fd3ffNeedleDropper|r:"
 ns.SILENCE = "Interface\\AddOns\\NeedleDropper\\media\\silence.mp3"
-ns.VERSION = "1.0.0"
+ns.VERSION = "1.2.0"
 do
   local getMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
   if getMeta then
@@ -14,6 +22,8 @@ do
     if ok and type(v) == "string" and v ~= "" then ns.VERSION = v end
   end
 end
+
+local L = ns.L or setmetatable({}, { __index = function(_, k) return k end })
 
 -- ------------------------------------------------------------------ utils ----
 
@@ -76,6 +86,14 @@ local function isInt(v)
 end
 ns.IsInt = isInt
 
+-- Text from players, imports or the app before it reaches chat or a FontString (Locale.lua
+-- defines it; this fallback keeps Core usable on its own).
+local function esc(s)
+  if ns.EscapeText then return ns.EscapeText(s) end
+  if type(s) ~= "string" then return "" end
+  return (string.gsub(s, "|", "||"))
+end
+
 -- "1m 05s" style duration.
 function ns.FormatSeconds(sec)
   sec = floor((sec or 0) + 0.5)
@@ -103,13 +121,23 @@ local function safeFormat(fmt, ...)
 end
 ns.Format = safeFormat
 
-function ns.Print(msg, ...)
-  local line = ns.PREFIX .. " " .. safeFormat(msg, ...)
+local function addMessage(line)
   if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then
     DEFAULT_CHAT_FRAME:AddMessage(line)
   else
     print(line)
   end
+end
+
+function ns.Print(msg, ...)
+  addMessage(ns.PREFIX .. " " .. safeFormat(msg, ...))
+end
+
+-- A chat line that names the addon itself ("NeedleDropper 1.2: ..."): no second prefix.
+function ns.PrintLine(text)
+  text = tostring(text or "")
+  local colored = string.gsub(text, "^NeedleDropper", "|cff9fd3ffNeedleDropper|r", 1)
+  addMessage(colored)
 end
 
 function ns.Debug(msg, ...)
@@ -134,19 +162,22 @@ ns.DEFAULTS = {
   maxDropSec = 300,
   duckMethod = "silence",
   kickZoneMusic = true,
+  duckWithoutApp = false,
   localPlayback = true,
   toast = true,
   toastScale = 1.0,
   toastY = 0.22,
   toastSeconds = 7,
   beacon = true,
-  beaconCellPx = 4,
+  beaconCellPx = 3,
+  beaconCorner = "topleft",
   chatlog = false,
   chatlogPadBytes = 50000,
   debug = false,
 }
 
--- Ordered setting descriptions: validation, /needle set, and the options panel.
+-- Ordered setting descriptions: validation, /needle set, and the options panel. Entries with
+-- advanced = true are left out of the Settings panel (/needle set still takes them).
 ns.SETTINGS = {
   { key = "enabled", type = "boolean", label = "Enable needle drops",
     tip = "Play a curated song the first time you arrive in a zone or landmark." },
@@ -161,7 +192,7 @@ ns.SETTINGS = {
   { key = "historyMode", type = "string", label = "Exploration history",
     options = { { "respect", "Respect: skip places this character already explored" },
                 { "fresh", "Fresh: ignore exploration history" } },
-    tip = "Respect uses the world map's exploration data so veterans don't get every song at once." },
+    tip = "Respect uses the world map's exploration data so veterans don't get every song of the built-in soundtracks at once. Drops you add yourself always play on your next visit." },
   { key = "scope", type = "string", label = "Play each drop once per",
     options = { { "character", "Character" }, { "account", "Account" } },
     tip = "Whether each song plays once per character or once per account." },
@@ -179,6 +210,8 @@ ns.SETTINGS = {
     tip = "How the in-game zone music is faded out while a drop plays." },
   { key = "kickZoneMusic", type = "boolean", label = "Restart zone music afterwards",
     tip = "Briefly toggle music off/on after a drop so zone music resumes right away." },
+  { key = "duckWithoutApp", type = "boolean", label = "Fade zone music without the app",
+    tip = "Also fade the zone music for Spotify and YouTube songs when the NeedleDropper app has never reported in. Off: such drops show their title card and the zone music keeps playing, because nothing would play the song." },
   { key = "localPlayback", type = "boolean", label = "Play in-game files",
     tip = "Play drops that have an in-game audio file inside WoW instead of via the companion." },
   { key = "toast", type = "boolean", label = "Title card",
@@ -192,9 +225,13 @@ ns.SETTINGS = {
   { key = "toastSeconds", type = "number", min = 3, max = 15, step = 1, integer = true,
     label = "Title card time (s)", tip = "Seconds the title card stays fully visible, between its fade-in and fade-out." },
   { key = "beacon", type = "boolean", label = "Pixel beacon",
-    tip = "Tiny colour strip in the top-left corner that the companion app reads." },
-  { key = "beaconCellPx", type = "number", min = 1, max = 16, step = 1, integer = true, label = "Beacon cell size (px)",
-    tip = "Physical pixels per beacon cell. Match the companion's setting." },
+    tip = "Tiny colour strip in the top-left corner that the NeedleDropper app reads." },
+  { key = "beaconCellPx", type = "number", min = 2, max = 4, step = 1, integer = true, label = "Beacon cell size (px)",
+    tip = "Physical pixels per beacon cell. The strip is never taller than 9 pixels; the app reads the size from the strip itself." },
+  { key = "beaconCorner", type = "string", advanced = true, label = "Beacon corner",
+    options = { { "topleft", "Top left" }, { "topright", "Top right" }, { "bottomleft", "Bottom left" },
+                { "bottomright", "Bottom right" } },
+    tip = "Advanced: the screen corner that holds the beacon. The app looks in the top-left corner." },
   { key = "chatlog", type = "boolean", label = "Chat-log channel",
     tip = "Also report events through WoWChatLog.txt (turns on chat logging; lines are hidden)." },
   { key = "chatlogPadBytes", type = "number", min = 0, max = 200000, step = 1000, integer = true,
@@ -282,6 +319,7 @@ end
 local ACCOUNT_DEFAULTS = { schema = ns.SCHEMA, settings = ns.DEFAULTS, accountDone = {}, lastSeq = 0 }
 local CHAR_DEFAULTS = { schema = ns.SCHEMA, done = {}, scanned = {}, journal = {}, lastFireAt = 0 }
 local JOURNAL_MAX = 200
+ns.JOURNAL_MAX = JOURNAL_MAX
 
 -- Recursively fills missing / wrongly typed fields of dst from defaults.
 local function mergeDefaults(dst, defaults)
@@ -325,11 +363,28 @@ local function normalizeJournal(j)
   for i = 1, #clean do j[i] = clean[i] end
 end
 
+-- The drop that was playing when the UI reloaded (Director, baseline finding ND-DIR-01).
+local function normalizePlaying(c)
+  local p = c.playing
+  if p == nil then return end
+  if type(p) ~= "table" or type(p.id) ~= "string" or type(p.endsAtWall) ~= "number" then c.playing = nil end
+end
+
 local function initDB()
-  if type(NeedleDropperDB) ~= "table" then NeedleDropperDB = {} end
+  local fresh = type(NeedleDropperDB) ~= "table"
+  if fresh then NeedleDropperDB = {} end
   local db = NeedleDropperDB
-  if type(db.schema) ~= "number" then db.schema = ns.SCHEMA end
+  -- A table without a usable schema predates schema numbers: treat it as v1.
+  if type(db.schema) ~= "number" or db.schema ~= db.schema then db.schema = fresh and ns.SCHEMA or 1 end
   if db.schema > ns.SCHEMA then ns.newerSchema = true end
+  ns.freshAccount = fresh
+  -- Schema 1 -> 2 before the settings are validated (Soundtracks.MigrateAccount: a v1
+  -- beaconCellPx of 4 becomes 3 and other values are clamped into 2..4 first).
+  local S = ns.Soundtracks
+  if S and S.MigrateAccount and not ns.newerSchema then
+    local ok, from = pcall(S.MigrateAccount, db)
+    if ok then ns.migratedFrom = from end
+  end
   mergeDefaults(db, ACCOUNT_DEFAULTS)
   validateSettings(db.settings)
   normalizeDone(db.accountDone)
@@ -341,7 +396,7 @@ local function initDB()
     ns.charDBCreated = true
   end
   local c = NeedleDropperCharDB
-  if type(c.schema) ~= "number" then c.schema = ns.SCHEMA end
+  if type(c.schema) ~= "number" or c.schema ~= c.schema then c.schema = ns.charDBCreated and ns.SCHEMA or 1 end
   mergeDefaults(c, CHAR_DEFAULTS)
   normalizeDone(c.done)
   for id, v in pairs(c.scanned) do
@@ -349,16 +404,44 @@ local function initDB()
   end
   normalizeJournal(c.journal)
   if type(c.lastFireAt) ~= "number" or c.lastFireAt ~= c.lastFireAt then c.lastFireAt = 0 end
+  normalizePlaying(c)
 
   ns.db = db
   ns.cdb = c
   ns.settings = db.settings
 end
 
+local function nonEmpty(v)
+  if type(v) == "string" and v ~= "" then return v end
+  return nil
+end
+
+local function positiveInt(v)
+  if isInt(v) and v > 0 then return v end
+  return nil
+end
+
+-- Bare file name of an in-game drop file (map drops carry the full path in `file` and the bare
+-- name in `fileName`).
+local function bareFile(drop)
+  local name = nonEmpty(drop.fileName)
+  if name then return name end
+  local path = nonEmpty(drop.file)
+  if not path then return nil end
+  return string.match(path, "([^\\/]+)$") or path
+end
+
+-- Journal entry for a drop that fired (DESIGN-v1.2 4.6): the place and the song itself, so a
+-- replay still works after the drop was edited or deleted.
 function ns.AddJournal(drop)
-  if not ns.cdb then return end
+  if not ns.cdb or type(drop) ~= "table" then return end
   local j = ns.cdb.journal
-  j[#j + 1] = { id = drop.id, t = time(), label = drop.label, title = drop.title, artist = drop.artist }
+  j[#j + 1] = {
+    id = drop.id, t = time(), label = drop.label, title = nonEmpty(drop.title), artist = nonEmpty(drop.artist),
+    spotify = nonEmpty(drop.spotify), youtube = nonEmpty(drop.youtube), file = bareFile(drop),
+    startMs = positiveInt(drop.startMs), durationMs = positiveInt(drop.durationMs),
+    volume = isInt(drop.volume) and drop.volume or nil, setId = nonEmpty(drop.setId),
+  }
   while #j > JOURNAL_MAX do table.remove(j, 1) end
 end
 
@@ -457,132 +540,17 @@ end
 
 -- ---------------------------------------------------------------- the map ----
 
-local KINDS = { zone = true, subzone = true, instance = true }
-local ID_KIND = { zone = "zone", area = "subzone", sub = "subzone", inst = "instance" }
-
-local function posInt(v)
-  if isInt(v) and v > 0 then return v end
-  return nil
-end
-
-local function str(v)
-  if type(v) == "string" then return v end
-  return nil
-end
-
--- Returns a clean drop table, or nil and a reason.
-local function validateDrop(d)
-  if type(d) ~= "table" then return nil, "entry is not a table" end
-  local n = d.n
-  if not isInt(n) or n < 1 or n > 65535 then return nil, "bad n" end
-  local id = str(d.id)
-  if not id or id == "" or #id > 200 then return nil, "bad id" end
-  local drop = {
-    n = n, id = id,
-    mapID = posInt(d.mapID), areaID = posInt(d.areaID), instanceID = posInt(d.instanceID),
-    subzone = str(d.subzone),
-    title = str(d.title) or "", artist = str(d.artist) or "",
-    durationMs = (type(d.durationMs) == "number" and d.durationMs > 0 and d.durationMs < 86400000) and d.durationMs or 0,
-    startMs = (type(d.startMs) == "number" and d.startMs > 0) and d.startMs or 0,
-    file = str(d.file),
+-- The map shape Soundtracks.BuildActiveMap produces (CONTRACTS-v1.2 2.5), empty. Used until the
+-- soundtrack model has run, so nothing ever indexes a missing map.
+function ns.EmptyMap()
+  return {
+    loaded = false, version = 2, hash = 0, generated = "", packs = {}, refs = {}, drops = {}, byId = {}, byN = {},
+    zoneDrops = {}, subDrops = {}, looseSubDrops = {}, areaDrops = {}, instanceDrops = {}, problems = {},
+    invalid = 0, overridden = 0, disabled = 0, drafts = 0,
   }
-  if drop.subzone == "" then drop.subzone = nil end
-  if drop.file == "" then drop.file = nil end
-  local kind = str(d.kind)
-  if not KINDS[kind] then
-    kind = ID_KIND[string.match(id, "^(%a+):") or ""]
-    if not kind then
-      if drop.instanceID then kind = "instance"
-      elseif drop.areaID or drop.subzone then kind = "subzone"
-      else kind = "zone" end
-    end
-  end
-  drop.kind = kind
-  if kind == "zone" and not drop.mapID then return nil, "zone drop without mapID" end
-  if kind == "subzone" and not (drop.areaID or (drop.mapID and drop.subzone)) then
-    return nil, "landmark drop without areaID or mapID+subzone"
-  end
-  if kind == "instance" and not drop.instanceID then return nil, "instance drop without instanceID" end
-  if drop.subzone then drop.subzoneLower = string.lower(drop.subzone) end
-  local label = str(d.label)
-  if not label or label == "" then label = drop.subzone or id end
-  drop.label = label
-  return drop
 end
 
--- Builds the validated map plus lookup indexes from a raw NeedleDropper_Map value.
-function ns.BuildMap(raw)
-  local M = {
-    loaded = false, version = 0, hash = 0, generated = "", packs = {}, drops = {},
-    byId = {}, byN = {}, zoneDrops = {}, subDrops = {}, looseSubDrops = {}, areaDrops = {},
-    instanceDrops = {}, invalid = 0, problems = {},
-  }
-  local function problem(msg)
-    if #M.problems < 20 then M.problems[#M.problems + 1] = msg end
-  end
-  if raw == nil then
-    problem("no map loaded (Map.lua missing or empty)")
-    return M
-  end
-  if type(raw) ~= "table" then
-    problem("NeedleDropper_Map is not a table")
-    return M
-  end
-  M.loaded = true
-  if type(raw.version) == "number" then M.version = raw.version end
-  if isInt(raw.hash) and raw.hash >= 0 and raw.hash <= 65535 then
-    M.hash = raw.hash
-  else
-    problem("map hash missing or invalid")
-  end
-  if type(raw.generated) == "string" then M.generated = raw.generated end
-  if type(raw.packs) == "table" then
-    for i = 1, #raw.packs do
-      if type(raw.packs[i]) == "string" then M.packs[#M.packs + 1] = raw.packs[i] end
-    end
-  end
-  if type(raw.drops) ~= "table" then
-    problem("map has no drops table")
-    return M
-  end
-  -- collect entries in index order (tolerates holes and stray keys)
-  local keys = {}
-  for k in pairs(raw.drops) do
-    if isInt(k) then keys[#keys + 1] = k else M.invalid = M.invalid + 1 end
-  end
-  table.sort(keys)
-  for i = 1, #keys do
-    local drop, why = validateDrop(raw.drops[keys[i]])
-    if not drop then
-      M.invalid = M.invalid + 1
-      problem("drop #" .. keys[i] .. ": " .. why)
-    elseif M.byId[drop.id] or M.byN[drop.n] then
-      M.invalid = M.invalid + 1
-      problem("drop #" .. keys[i] .. ": duplicate id or n")
-    else
-      M.drops[#M.drops + 1] = drop
-      M.byId[drop.id] = drop
-      M.byN[drop.n] = drop
-      if drop.kind == "zone" then
-        if not M.zoneDrops[drop.mapID] then M.zoneDrops[drop.mapID] = drop end
-      elseif drop.kind == "subzone" then
-        if drop.mapID then
-          local list = M.subDrops[drop.mapID]
-          if not list then list = {}; M.subDrops[drop.mapID] = list end
-          list[#list + 1] = drop
-        else
-          M.looseSubDrops[#M.looseSubDrops + 1] = drop
-        end
-        if drop.areaID and not M.areaDrops[drop.areaID] then M.areaDrops[drop.areaID] = drop end
-      elseif drop.kind == "instance" then
-        if not M.instanceDrops[drop.instanceID] then M.instanceDrops[drop.instanceID] = drop end
-      end
-    end
-  end
-  return M
-end
-
-ns.Map = ns.BuildMap(NeedleDropper_Map)
+ns.Map = ns.EmptyMap()
 
 ns.TEST_DROP = {
   n = 0, id = "test", kind = "test", label = "NeedleDropper Test",
@@ -681,31 +649,90 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
   dispatch(event, ...)
 end)
 
-ns.On("ADDON_LOADED", function(_, name)
-  if name ~= ns.ADDON or ns.initialized then return end
+-- --------------------------------------------------------- in the world ----
+
+-- Real-client finding 1 (2026-11-05): while the loading screen is up the unit APIs can answer
+-- wrongly (the first HELLO after login said DEAD for a living character). Live flags are only
+-- computed in the world: after PLAYER_ENTERING_WORLD once the loading screen is gone.
+ns.world = { entered = false, loading = true, token = 0 }
+local WORLD_FALLBACK = 3.0   -- seconds after PLAYER_ENTERING_WORLD if LOADING_SCREEN_DISABLED never comes
+
+function ns.InWorld()
+  return ns.world.entered and not ns.world.loading
+end
+
+ns.On("PLAYER_ENTERING_WORLD", function()
+  local w = ns.world
+  w.entered = true
+  w.token = w.token + 1
+  local mine = w.token
+  if C_Timer and C_Timer.After then
+    C_Timer.After(WORLD_FALLBACK, function()
+      if w.token == mine and w.entered and w.loading then w.loading = false end
+    end)
+  end
+end)
+ns.On("PLAYER_LEAVING_WORLD", function() ns.world.entered = false end)
+ns.On("LOADING_SCREEN_ENABLED", function() ns.world.loading = true end)
+ns.On("LOADING_SCREEN_DISABLED", function() ns.world.loading = false end)
+
+-- ---------------------------------------------------------------- startup ----
+
+local function initialize()
   initDB()
   ns.initialized = true
+  -- ns.Map comes from the soundtrack model from here on (idempotent; Soundtracks also listens
+  -- to ND_INIT itself).
+  local S = ns.Soundtracks
+  if S and S.Init then
+    local ok, err = pcall(S.Init)
+    if not ok then onError(err) end
+  end
   ns.Fire("ND_INIT")
+end
+
+ns.On("ADDON_LOADED", function(_, name)
+  if name ~= ns.ADDON or ns.initialized then return end
+  initialize()
 end)
 
 ns.On("PLAYER_LOGIN", function()
   if not ns.initialized then
     -- ADDON_LOADED was missed (should not happen); initialize anyway.
-    initDB()
-    ns.initialized = true
-    ns.Fire("ND_INIT")
+    initialize()
   end
   ns.RepairCVars()
-  local M = ns.Map
-  if not M.loaded then
-    ns.Print("no song map loaded. Run the companion's |cffffffffbuild-map|r, then /reload.")
-  elseif M.invalid > 0 then
-    ns.Print("ignored %d malformed entr%s in Map.lua (regenerate it with the companion).",
-      M.invalid, M.invalid == 1 and "y" or "ies")
-    for i = 1, #M.problems do ns.Debug("map: %s", M.problems[i]) end
+  local S = ns.Soundtracks
+  if ns.newerSchema or (S and S.newerData) then
+    ns.Print(L["saved data comes from a newer NeedleDropper version; some of it may be ignored."])
   end
-  if ns.newerSchema then
-    ns.Print("saved data comes from a newer NeedleDropper version; some history may be ignored.")
+  local M = ns.Map
+  if type(M) == "table" and type(M.invalid) == "number" and M.invalid > 0 then
+    ns.Debug("map: %d drop%s of your soundtracks could not be used", M.invalid, M.invalid == 1 and "" or "s")
+    for i = 1, #(M.problems or {}) do ns.Debug("map: %s", M.problems[i]) end
+  end
+  -- DESIGN-v1.2 4.8: one line on the first login with 1.2 (an upgraded or a fresh account).
+  if (ns.migratedFrom or ns.freshAccount) and not ns.welcomed and S and S.WelcomeLine then
+    ns.welcomed = true
+    local ok, line = pcall(S.WelcomeLine)
+    if ok and type(line) == "string" and line ~= "" then ns.PrintLine(line) end
+  end
+end)
+
+-- DESIGN-v1.2 4.2: soundtracks the NeedleDropper app converted from its v1.1 packs are offered
+-- once (Companion.Imports); /needle import opens the next one.
+local importsAnnounced = false
+ns.On("ND_COMPANION_DATA", function()
+  if importsAnnounced then return end
+  local C = ns.Companion
+  if not (C and C.Imports) then return end
+  local ok, list = pcall(C.Imports)
+  if not ok or type(list) ~= "table" or #list == 0 then return end
+  importsAnnounced = true
+  if #list == 1 then
+    ns.Print(L["1 soundtrack from your NeedleDropper app is ready to import: type /needle import to review it."])
+  else
+    ns.Print(L["%d soundtracks from your NeedleDropper app are ready to import: type /needle import to review them."], #list)
   end
 end)
 
@@ -720,24 +747,29 @@ local function onOff(arg, current)
 end
 
 local COMMANDS
-local ORDER = { "help", "status", "where", "journal", "replay", "play", "test", "toast", "stop", "skip", "reset",
-                "beacon", "chatlog", "selftest", "debug", "set", "settings", "options" }
+local ORDER = { "help", "add", "soundtracks", "journal", "import", "share", "status", "where", "replay", "play",
+                "test", "toast", "stop", "skip", "reset", "beacon", "chatlog", "selftest", "debug", "set",
+                "settings", "options" }
 
 local USAGE = {
-  help = "this list",
-  status = "settings, transports, map, pending/playing drop, cooldown",
+  help = "this list (/needle on its own opens or closes the window)",
+  add = "[Artist - Title | link] - add a needle drop where you stand",
+  soundtracks = "open the window on the Soundtracks tab",
+  journal = "[print [count]] - open the Journal tab (print: list the songs you heard in chat)",
+  import = "paste a share code to import a soundtrack",
+  share = "[name] - share one of your soundtracks as a code",
+  status = "settings, transports, soundtracks, pending/playing drop, cooldown",
   where = "current zone key, uiMapID, subzone, instance and matching drop ids",
-  journal = "songs you have heard",
   replay = "[id] - replay the last (or given) drop",
   play = "<id|place name> - play a drop now (test, does not mark it heard)",
-  test = "fire the test drop",
+  test = "send a test signal to the NeedleDropper app and show the test card",
   toast = "[on|off] - preview the title card where you are (or turn title cards on/off)",
-  stop ="stop the playing drop (or let the pending one go for now)",
+  stop = "stop the playing drop (or let the pending one go for now)",
   skip = "stop / skip the current drop and keep it marked as heard",
   reset = "char|account|all|settings - forget history (or reset settings)",
   beacon = "on|off - pixel beacon for the companion",
   chatlog = "on|off - chat-log channel for the companion",
-  selftest = "[beacon|chatlog|discovery|music] - check your client setup",
+  selftest = "[beacon|chatlog|discovery|music|share] - check your client setup",
   debug = "on|off - diagnostic messages",
   set = "<setting> <value> - change a setting",
   settings = "list all settings",
@@ -760,12 +792,124 @@ local function toggleSetting(key, arg, onMsg, offMsg)
   ns.Print(v and onMsg or offMsg)
 end
 
+-- The window (UI\*.lua); nil when it is not loaded.
+local function ui()
+  local U = ns.UI
+  if type(U) == "table" and type(U.Open) == "function" then return U end
+  return nil
+end
+
+local function printJournal(arg)
+  local j = ns.cdb and ns.cdb.journal or {}
+  if #j == 0 then
+    ns.Print("your journal is empty - no needle drops heard on this character yet.")
+    return
+  end
+  local count = tonumber(arg) or 15
+  ns.Print("journal (%d drop%s, newest last):", #j, #j == 1 and "" or "s")
+  for i = math.max(1, #j - count + 1), #j do
+    local e = j[i]
+    local when = (e.t and e.t > 0 and date) and date("%Y-%m-%d %H:%M", e.t) or "?"
+    ns.Print("  %s  %s - %s \194\183 %s  |cff8a8a8a[%s]|r", when, esc(tostring(e.label or e.id)),
+      esc(tostring(e.artist or "?")), esc(tostring(e.title or "?")), esc(e.id))
+  end
+  ns.Print("replay one with /needle replay <id>.")
+end
+
+-- Soundtrack ref for a name or id typed after /needle share (case-insensitive; yours first).
+local function findSoundtrack(name)
+  local S = ns.Soundtracks
+  if not (S and S.List) then return nil end
+  local want = string.lower(ns.Trim(name))
+  local list = S.List()
+  local best
+  for i = 1, #list do
+    local e = list[i]
+    if string.lower(e.name or "") == want or string.lower(e.id or "") == want or string.lower(e.ref or "") == want then
+      if not e.builtin then return e.ref end
+      best = best or e.ref
+    end
+  end
+  return best
+end
+
 COMMANDS = {
   help = function()
-    ns.Print("v%s commands (/needle or /nd):", ns.VERSION)
+    ns.Print("v%s commands (/needle or /nd; /needle on its own opens the window):", ns.VERSION)
     for i = 1, #ORDER do
       ns.Print("  |cffffffff/needle %s|r - %s", ORDER[i], USAGE[ORDER[i]])
     end
+  end,
+  add = function(arg)
+    local text = ns.Trim(arg)
+    local U = ui()
+    if U and U.AddHere then
+      U.AddHere(text ~= "" and text or nil)
+      return
+    end
+    local S = needModule("Soundtracks")
+    if not S then return end
+    local fields, perr = S.ParseSongText(text)
+    if not fields then
+      ns.Print("%s", perr)
+      return
+    end
+    local ref, id = S.AddHere(nil, fields)
+    if not ref then
+      ns.Print("%s", tostring(id))
+      return
+    end
+    ns.Print("added %s to %s.", esc(id), esc(ref))
+  end,
+  soundtracks = function()
+    local U = ui()
+    if U then U.Open("soundtracks") else ns.Print("the NeedleDropper window is not available.") end
+  end,
+  journal = function(arg)
+    local word, rest = string.match(ns.Trim(arg), "^(%S*)%s*(.-)$")
+    word = ns.Lower(word or "")
+    local U = ui()
+    if word == "print" then return printJournal(rest) end
+    if tonumber(word) or not U then return printJournal(word) end
+    U.Open("journal")
+  end,
+  import = function()
+    local U = ui()
+    if not (U and U.OpenImport) then
+      ns.Print("the NeedleDropper window is not available.")
+      return
+    end
+    local C = ns.Companion
+    local offers = (C and C.Imports) and C.Imports() or {}
+    local offer = offers[1]
+    if offer and type(offer.code) == "string" then
+      -- Offered once (DESIGN-v1.2 4.2): handled as soon as its preview is on screen, not before.
+      if not U.OpenImport(offer.code) then return end
+      if C.MarkImportHandled then C.MarkImportHandled(offer) end
+      if #offers > 1 then
+        ns.Print("%d more soundtracks from your NeedleDropper app wait: type /needle import again.", #offers - 1)
+      end
+      return
+    end
+    U.OpenImport()
+  end,
+  share = function(arg)
+    local U = ui()
+    if not (U and U.OpenShare) then
+      ns.Print("the NeedleDropper window is not available.")
+      return
+    end
+    local name = ns.Trim(arg)
+    if name == "" then
+      U.OpenShare()
+      return
+    end
+    local ref = findSoundtrack(name)
+    if not ref then
+      ns.Print("no soundtrack is called '%s'. Open the Soundtracks tab with /needle soundtracks.", esc(name))
+      return
+    end
+    U.OpenShare(ref)
   end,
   status = function()
     local D = needModule("Director")
@@ -774,29 +918,15 @@ COMMANDS = {
       for i = 1, #lines do ns.Print(lines[i]) end
     end
     if ns.Toast and ns.Toast.StatusLine then ns.Print("%s", ns.Toast.StatusLine()) end
+    local C = ns.Companion
+    if C and C.StatusLine then ns.Print("app: %s", esc(C.StatusLine())) end
   end,
   where = function()
-    local L = needModule("Location")
-    if L then
-      local lines = L.Describe()
+    local Loc = needModule("Location")
+    if Loc then
+      local lines = Loc.Describe()
       for i = 1, #lines do ns.Print(lines[i]) end
     end
-  end,
-  journal = function(arg)
-    local j = ns.cdb and ns.cdb.journal or {}
-    if #j == 0 then
-      ns.Print("your journal is empty - no needle drops heard on this character yet.")
-      return
-    end
-    local count = tonumber(arg) or 15
-    ns.Print("journal (%d drop%s, newest last):", #j, #j == 1 and "" or "s")
-    for i = math.max(1, #j - count + 1), #j do
-      local e = j[i]
-      local when = (e.t and e.t > 0 and date) and date("%Y-%m-%d %H:%M", e.t) or "?"
-      ns.Print("  %s  %s - %s \194\183 %s  |cff8a8a8a[%s]|r", when, tostring(e.label or e.id),
-        tostring(e.artist or "?"), tostring(e.title or "?"), e.id)
-    end
-    ns.Print("replay one with /needle replay <id>.")
   end,
   replay = function(arg)
     local D = needModule("Director")
@@ -836,9 +966,9 @@ COMMANDS = {
       ns.Print("the title card could not be shown on this client.")
       return
     end
-    local place = string.gsub(info.place or "", "|", "||")
+    local place = esc(info.place or "")
     if info.drop then
-      ns.Print("title card preview: %s |cff8a8a8a[%s]|r", place, info.drop.id)
+      ns.Print("title card preview: %s |cff8a8a8a[%s]|r", place, esc(info.drop.id))
     else
       ns.Print("title card preview: %s - no needle drop is mapped here.", place)
     end
@@ -874,7 +1004,7 @@ COMMANDS = {
       ns.Print("settings reset to defaults.")
     end
     if arg ~= "settings" and ns.settings.historyMode == "respect" then
-      ns.Print("history mode is 'respect': places this character already explored stay skipped. " ..
+      ns.Print("history mode is 'respect': places this character already explored stay skipped for the built-in soundtracks. " ..
         "Use /needle set historyMode fresh to hear them again.")
     end
   end,
@@ -905,7 +1035,7 @@ COMMANDS = {
       if string.lower(k) == string.lower(key) then real = k end
     end
     if not real then
-      ns.Print("unknown setting '%s' (see /needle settings).", key)
+      ns.Print("unknown setting '%s' (see /needle settings).", esc(key))
       return
     end
     local v, err = ns.SetSetting(real, ns.Trim(value))
@@ -945,10 +1075,19 @@ function ns.HandleSlash(msg)
   msg = ns.Trim(ns.SafeString(msg) or "")
   local cmd, rest = string.match(msg, "^(%S*)%s*(.-)$")
   cmd = ns.Lower(cmd or "")
-  if cmd == "" or cmd == "?" then cmd = "help" end
+  if cmd == "" then
+    -- DESIGN-v1.2 4.8: bare /needle and /nd open and close the window.
+    local U = ui()
+    if U and U.Toggle then
+      xpcall(function() U.Toggle() end, onError)
+      return
+    end
+    cmd = "help"
+  end
+  if cmd == "?" then cmd = "help" end
   local fn = COMMANDS[cmd]
   if not fn then
-    ns.Print("unknown command '%s'. Type /needle help.", cmd)
+    ns.Print("unknown command '%s'. Type /needle help.", esc(cmd))
     return
   end
   xpcall(function() fn(rest or "") end, onError)
@@ -963,6 +1102,112 @@ function ns.OpenOptions()
   ns.Print("the options panel is not available; use /needle settings and /needle set <setting> <value>.")
 end
 
-function NeedleDropper_OnAddonCompartmentClick()
-  ns.OpenOptions()
+-- ------------------------------------------------------- add-on compartment ----
+-- Blizzard_Minimap AddonCompartment.lua (forever; the camelot file only changes the art) calls
+-- _G[AddonCompartmentFunc](addonName, menuInputData.buttonName) on a click and
+-- _G[...FuncOnEnter / ...FuncOnLeave](addonName, menuButton) on hover (DESIGN-v1.2 4.8).
+
+-- Names of the active soundtracks, in priority order.
+local function activeNames()
+  local S = ns.Soundtracks
+  local names = {}
+  if not (S and S.List) then return names end
+  local ok, list = pcall(S.List)
+  if not ok or type(list) ~= "table" then return names end
+  local byPrio = {}
+  for i = 1, #list do
+    local e = list[i]
+    if e.active and e.priority then byPrio[#byPrio + 1] = e end
+  end
+  table.sort(byPrio, function(a, b) return a.priority < b.priority end)
+  for i = 1, #byPrio do names[#names + 1] = byPrio[i].name or byPrio[i].id end
+  return names
+end
+ns.ActiveSoundtrackNames = activeNames
+
+-- One line about what the Director is doing (playing / waiting / cooldown / idle), plain text.
+function ns.PlaybackSummary()
+  local D = ns.Director
+  if not ns.settings then return L["NeedleDropper is still loading."] end
+  if not ns.settings.enabled then return L["Needle drops are off (Settings: Enable needle drops)."] end
+  if type(D) ~= "table" then return "" end
+  local Toast = ns.Toast
+  local function song(d)
+    local credit = Toast and Toast.Subtitle and Toast.Subtitle(d) or ""
+    local place = (Toast and Toast.PlaceName and Toast.PlaceName(d)) or d.label or d.id or ""
+    if credit ~= "" then return place .. " \194\183 " .. credit end
+    return place
+  end
+  if D.active and D.active.drop then
+    return safeFormat(L["Playing: %s"], song(D.active.drop))
+  end
+  if D.armed and D.armed.drop then
+    local d = D.armed.drop
+    local reasons = D.GateReasons and D.GateReasons(d) or {}
+    local place = (Toast and Toast.PlaceName and Toast.PlaceName(d)) or d.label or d.id or ""
+    if #reasons > 0 then
+      return safeFormat(L["Waiting for a calm moment: %s (%s)"], place, reasons[1])
+    end
+    local cd = D.CooldownLeft and D.CooldownLeft() or 0
+    if cd > 0 then return safeFormat(L["Next needle drop in %s: %s"], ns.FormatSeconds(cd), place) end
+    return safeFormat(L["Arriving: %s"], place)
+  end
+  local cd = D.CooldownLeft and D.CooldownLeft() or 0
+  if cd > 0 then return safeFormat(L["Next needle drop possible in %s"], ns.FormatSeconds(cd)) end
+  return L["Nothing playing. Explore somewhere new!"]
+end
+
+function ns.FillCompartmentTooltip(tooltip)
+  if type(tooltip) ~= "table" then return end
+  local function line(text, r, g, b, wrap)
+    tooltip:AddLine(esc(text), r, g, b, wrap)
+  end
+  if GameTooltip_SetTitle then
+    GameTooltip_SetTitle(tooltip, "NeedleDropper")
+  else
+    tooltip:SetText("NeedleDropper")
+  end
+  line(ns.PlaybackSummary(), 1, 1, 1, true)
+  local names = activeNames()
+  if #names > 0 then
+    line(safeFormat(L["Soundtracks: %s"], table.concat(names, ", ")), 1, 0.82, 0, true)
+  else
+    line(L["No soundtrack is on."], 1, 0.82, 0, true)
+  end
+  local C = ns.Companion
+  if C and C.StatusLine then
+    local ok, status = pcall(C.StatusLine)
+    if ok and type(status) == "string" and status ~= "" then line(status, 0.75, 0.75, 0.75, true) end
+  end
+  local hint = L["Left-click: open \194\183 Right-click: settings"]
+  if GameTooltip_AddInstructionLine then
+    GameTooltip_AddInstructionLine(tooltip, hint)
+  else
+    line(hint, 0.1, 1, 0.1)
+  end
+end
+
+function NeedleDropper_OnAddonCompartmentClick(addonName, buttonName)
+  if buttonName == "RightButton" then
+    ns.OpenOptions()
+    return
+  end
+  local U = ui()
+  if U and U.Toggle then
+    U.Toggle()
+  else
+    ns.OpenOptions()
+  end
+end
+
+function NeedleDropper_OnAddonCompartmentEnter(addonName, button)
+  if not (GameTooltip and GameTooltip.SetOwner) then return end
+  local ok = pcall(GameTooltip.SetOwner, GameTooltip, button, "ANCHOR_LEFT")
+  if not ok then return end
+  ns.FillCompartmentTooltip(GameTooltip)
+  GameTooltip:Show()
+end
+
+function NeedleDropper_OnAddonCompartmentLeave(addonName, button)
+  if GameTooltip and GameTooltip.Hide then GameTooltip:Hide() end
 end

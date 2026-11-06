@@ -59,19 +59,30 @@ end
 
 -- Live flags (as v1's Director.ComputeFlags): combat, instance, taxi, dead from the unit
 -- APIs; DROP_ACTIVE / LOCAL_PLAYBACK / TEST from the Director's active drop; plus every
--- known bit of `extra`.
-function ns.ComputeFlags(extra)
+-- known bit of `extra`. The unit-API bits are only read in the world (ns.InWorld, Core.lua):
+-- during the loading screen the real client reported DEAD for a living character (real-client
+-- finding 1, 2026-11-05). `drop`: the drop the event is about. LOCAL_PLAYBACK and TEST describe
+-- the drop that plays, so an ARM or CANCEL of another place during a Test does not carry them
+-- (the app would show "Test signal received" and skip its pre-warm: journey review F11);
+-- DROP_ACTIVE always does.
+function ns.ComputeFlags(extra, drop)
   local f = 0
-  if ns.SafeBool(UnitAffectingCombat, "player") then f = addFlag(f, FLAG.IN_COMBAT) end
-  if ns.SafeBool(IsInInstance) then f = addFlag(f, FLAG.IN_INSTANCE) end
-  if ns.SafeBool(UnitOnTaxi, "player") then f = addFlag(f, FLAG.ON_TAXI) end
-  if ns.SafeBool(UnitIsDeadOrGhost, "player") then f = addFlag(f, FLAG.DEAD) end
+  local inWorld = type(ns.InWorld) ~= "function" or ns.InWorld()
+  if inWorld then
+    if ns.SafeBool(UnitAffectingCombat, "player") then f = addFlag(f, FLAG.IN_COMBAT) end
+    if ns.SafeBool(IsInInstance) then f = addFlag(f, FLAG.IN_INSTANCE) end
+    if ns.SafeBool(UnitOnTaxi, "player") then f = addFlag(f, FLAG.ON_TAXI) end
+    if ns.SafeBool(UnitIsDeadOrGhost, "player") then f = addFlag(f, FLAG.DEAD) end
+  end
   local D = ns.Director
   local a = type(D) == "table" and D.active or nil
   if a then
     f = addFlag(f, FLAG.DROP_ACTIVE)
-    if a.isLocal then f = addFlag(f, FLAG.LOCAL_PLAYBACK) end
-    if a.isTest then f = addFlag(f, FLAG.TEST) end
+    local about = type(drop) == "table" and drop.id or nil
+    if about == nil or (type(a.drop) == "table" and a.drop.id == about) then
+      if a.isLocal then f = addFlag(f, FLAG.LOCAL_PLAYBACK) end
+      if a.isTest then f = addFlag(f, FLAG.TEST) end
+    end
   end
   if isnum(extra) then
     for i = 1, #FLAG_BITS do
@@ -242,7 +253,7 @@ function ns.Emit(evType, drop, extraFlags, opts)
   E.seq = seq
   if type(db) == "table" then db.lastSeq = seq end
   ev.seq = seq
-  ev.flags = ns.ComputeFlags(extraFlags)
+  ev.flags = ns.ComputeFlags(extraFlags, drop)
   ev.t = GetTime()
   ns.LastEvent = ev
   local evs = ns.Events

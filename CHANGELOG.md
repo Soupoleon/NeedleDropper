@@ -17,12 +17,14 @@ app together.
   and closes it. Three tabs: **Drops**, **Soundtracks** and **Journal**. It moves, resizes, closes with
   Escape, hides during combat and comes back afterwards.
 - **Add drop here** (a button, `/needle add [Artist - Title | link]` and a key binding): adds the place
-  where you stand (a zone, a landmark, a dungeon or raid) and puts the cursor in Artist. Paste a Spotify
-  song link or a YouTube link, or type the artist and title. ▶ **Test** plays any drop at once, even
-  an unfinished one, without marking it as heard. **Delete** is instant, with **Undo**.
+  where you stand (a zone, a landmark, a dungeon or raid) and puts the cursor in Artist. Type the
+  artist and title, and paste a Spotify song link or a YouTube link for the exact recording (a drop
+  without artist and title is an unfinished draft that never plays on arrival; the form says so).
+  **Test** plays any drop at once, even an unfinished one, without marking it as heard. **Delete** is
+  instant, with **Undo**.
 - **Drops tab**: **Showing:** (what plays from all active soundtracks, or one soundtrack), search,
   **Filter** (*Here*, *Not heard yet (this character)*, *Needs a song*, *Changed by you*, *In-game
-  files*, *Turned off*), source letters **S Y F**, *heard ✓*, a right-click menu, and a form with
+  files*, *Turned off*), source letters **S Y F**, *heard* (with a tick), a right-click menu, and a form with
   place, artist, title, Spotify, YouTube, in-game file, start, length, volume, tags and note.
 - **Azeroth Mixtape**, the new default soundtrack: 38 needle drops at the places every player
   remembers, half fitting and half funny. **Azeroth Unbound** (62 drops) stays built in as the optional
@@ -31,17 +33,21 @@ app together.
   layer at the top of your list; **Revert to Azeroth Mixtape** brings the original back. Later fixes
   to the built-in soundtracks still reach every place you didn't change.
 - **Your own soundtracks**: **New**, **Duplicate**, **Rename**, **Delete**, an **On** box for each
-  and ↑ / ↓ to order them; the one higher in the list wins. **Use different soundtracks on this
+  and **Move up** / **Move down** to order them; the one higher in the list wins. **Use different soundtracks on this
   character** gives one character its own list.
-- **Share codes** (`!NeedleDropper:1!…!`): **Share…** gives you a soundtrack as one piece of text for
-  Discord or a forum; **Import…** shows a preview with warnings, never overwrites anything, and
+- **Share codes** (`!NeedleDropper:1!…!`): **Share...** gives you a soundtrack as one piece of text for
+  Discord or a forum; **Import...** shows a preview with warnings, never overwrites anything, and
   imports turned off. **Update <name>** for newer versions from the same author. Commands
   `/needle share [name]` and `/needle import`.
-- **Journal tab** with ▶ **Replay**, **Play again next visit** and **Show drop**.
+- **Journal tab** with **Replay**, **Play again next visit** and **Show drop**.
 - **Spotify match**: after a Spotify search, the drop's form shows the song the app found
-  (*Spotify match: … [Use this exact song]*) at the next login.
+  (*Spotify match: …* with **Use this exact song**) at the next login.
 - **Save now (reloads UI)** appears after 10 edits, so a game crash can't cost you a long session.
-- **Settings panel**: an **Open NeedleDropper** button and **Send a test signal**.
+- **Settings panel**: an **Open NeedleDropper** button, **Send a test signal**, and *Fade zone music
+  without the app* (`duckWithoutApp`, off by default).
+- **Gamepad**: the window and its dialogs register with Forever's gamepad cursor, and text boxes are
+  never focused by themselves while the gamepad UI is on. **Copy or move to...** under the form's
+  **More...** offers the right-click menu's **Copy to** / **Move to**, which a gamepad can't reach.
 - **Add-on compartment**: left-click opens the window, right-click opens the settings, hovering
   shows what is playing or waiting, your soundtracks and the app's status.
 - **Key bindings** (*Options → Keybindings → NeedleDropper*): *Open or close the NeedleDropper
@@ -57,8 +63,10 @@ app together.
 - An optional daily check for a new version, shown as a notification (nothing is installed without
   your click). It is off until an update address is set (`updates.releasesUrl` in `config.json`).
 - `NeedleDropper.exe packs validate`, `encode`, `decode` and `convert-legacy` for soundtrack authors.
-- **Moving from 1.1**: your 1.1 packs are offered in game as share codes; the Connect page offers to
-  copy your 1.1 audio files into `NeedleDropper_Local\media`.
+- **Moving from 1.1**: `NeedleDropper.exe packs convert-legacy` offers your 1.1 packs in game as
+  share codes (*… ready to import: type /needle import to review them.* at the next login). Copy your
+  1.1 audio files into `NeedleDropper_Local\media` yourself.
+- The app keeps 10 backup copies of the addon's saved data in `%APPDATA%\NeedleDropper\backups`.
 
 ### Changed
 
@@ -75,9 +83,81 @@ app together.
 - **Spotify search happens as you approach a place**, for songs without a Spotify link.
 - **In-game audio files are the only local files**: WoW plays them from
   `Interface\AddOns\NeedleDropper_Local\media`, and the Drops tab tells you whether each file is found.
-- The app runs without a console window. Its log moved to `%APPDATA%\NeedleDropper\logs`.
+- The app runs without a console window. Its log moved to `%APPDATA%\NeedleDropper\logs`. Started
+  from a command prompt (`--version`, `diag`, `packs`), it prints into that window.
 - The app writes a small data addon, `NeedleDropper_Companion`, which tells the game at login whether
   the app and Spotify are connected.
+- `/needle stop` keeps the place quiet until you move on to another zone, landmark or instance.
+- Spotify sign-in also asks for the account's plan and country: the Connect page shows a real
+  Premium check and the country. A 1.1 sign-in shows **Sign in again**.
+
+### Fixed
+
+Found on a live client before the release:
+
+- The first signal after logging in could say the character was dead; the addon now reads combat,
+  instance, flight and death only once the loading screen is gone.
+- A Spotify or YouTube drop no longer fades the zone music when no 1.2 app has reported in (nothing
+  would play it, so the result was silence); in-game files always fade it. The *Fade zone music
+  without the app* option brings the old behaviour back.
+- The app no longer latches onto a passing "World of Warcraft" window at game start: it wants the
+  game's own window and checks it again every few seconds. Its capture switches to the slower
+  window method sooner when the screen method sees nothing.
+- Spotify searches failed with "Insufficient client scope" and were taken for a missing Premium. The
+  sign-in asks for the missing permission now, and refusals are told apart (Premium needed, account
+  not on the developer app's list, sign in again).
+- A Spotify desktop app that accepts a song but never starts it (Spotify's Windows app on the test
+  PC, from the Microsoft Store and from spotify.com alike; its Web Player works): the app sees it within
+  about 1.5 seconds, plays the drop on YouTube, says *Spotify isn't
+  starting songs — restart the Spotify app* once, and plays YouTube first for the rest of the session
+  without sending Spotify anything more. As you approach the next places it checks Spotify quietly
+  and uses it again once it plays; a new game session also gives it another chance. The game is told
+  too, so its beacon keeps the YouTube video when only one link fits.
+- The YouTube player window took the game's focus and started late. It is now made once, hidden,
+  when the app starts (never while the game is in front), shown only while a YouTube song plays,
+  always on top in the top-right corner (`deck.playerCorner`), never activated, and hidden again
+  afterwards. The video is loaded, paused and silent, as you approach the place. The default
+  browser is never used for playback any more.
+- The player window did not start on the test PC: Edge was redirected to another program there, and
+  the app now notices that and uses Chrome. A browser that exits at once is logged (its own messages
+  go to `logs\browser.log`) and the other browser is tried at once; programs the app starts no longer
+  inherit its packaging's environment.
+- The Spotify app is never started (it can come in front) while the game is the foreground window.
+- A Spotify sign-in is no longer lost when Windows refuses to replace the token file (seen when the
+  app was started by a packaged host); the app keeps it in memory and saves it again later.
+- A song that plays during a `/reload` keeps playing, and the zone music is faded again afterwards.
+- Closing the app's console, logging off or shutting Windows down stops a playing Spotify drop and
+  gives you your own music back, also while a song is just being started.
+
+Found in the review of the window and the app:
+
+- Editing the drop of the place where you stand (**Change song here**, a field, **Turn off here**,
+  **Revert**, **Delete**, **Move to**) no longer makes it play in the middle of the edit with a
+  half-typed song and then count it as heard: like **Add drop here**, the place waits for your next
+  visit (**Test** plays it now).
+- **Add drop here** and `/needle add` no longer fail with *You already have a soundtrack called My
+  Drops* after you imported a friend's shared *My Drops*: yours becomes *My Drops (2)*.
+- The *Deleted X. [Undo]* bar brings back that drop even after other edits (it used to undo the newest
+  edit instead).
+- One drag of the volume slider is one change (it was 20, which filled the undo history).
+- Opening the window (or Import / Share) in combat waits until combat ends, as hiding it in combat
+  always did; with the gamepad UI a window opened in combat could not be used or closed.
+- Without the app, a first visit only shows the title card: such places are no longer counted as
+  heard, so they play their song once the app is there (the chat says so once).
+- The footer's buttons no longer overlap at the narrowest window, and the Drops tab no longer shows two
+  **Stop** buttons.
+- The beacon also measures the target frame when you target something.
+- A damaged saved drop without an id no longer keeps the window from opening.
+- **Zephras Isle** is in the form's zone list.
+- While a **Test** plays, signals about other places no longer carry the test mark.
+- A link pasted into **Artist** or **Title** moves into the Spotify or YouTube field.
+- After a game crash, the app still stops the drop that played (the crashed session's numbering no
+  longer hides the new session's signals), and it stops a drop when the game closes.
+- A Spotify start that fails after Spotify accepted the song (a resend or a check that fails) no
+  longer leaves Spotify playing under the next provider.
+- The Connect page says *Restart World of Warcraft once* when the app made its data addon while the
+  game was running, and warns when the app runs from a temporary folder (inside the zip), where
+  **Start with Windows** stays off.
 
 ### Removed
 
@@ -102,7 +182,21 @@ app together.
   `/needle selftest share` checks it on your client.
 - The beacon's measured clearance above the player frame on unusual layouts and screen sizes;
   `/needle selftest beacon` prints the measurement.
-- The in-game check in `docs/FIRST-TEST.md` covers both, and the window itself, before release.
+- The window with Forever's gamepad UI, and the song surviving a `/reload`.
+- The Spotify recovery for a desktop app that doesn't start songs (tested against a simulated
+  Spotify only).
+- The YouTube player window's focus behaviour and placement (tested against a simulated desktop):
+  the game must stay the foreground window across the approach, the song and its end.
+- The in-game check in `docs/FIRST-TEST.md` covers all of these, and the window itself, before
+  release.
+
+### Known issues
+
+- The player window is made when the app starts: while it is missing (closed, or no Edge or Chrome),
+  YouTube songs show their title card only; it is made again a few minutes later, when the game is
+  not in front. Keeping it costs a few hundred MB of memory while the app runs.
+- A YouTube song starts about half a second after the drop: the video is cued (loaded, not played)
+  as you approach, which YouTube's player allows; starting it faster would mean playing it hidden.
 
 ## [1.1.0] - 2026-11-05
 

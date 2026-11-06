@@ -318,8 +318,12 @@ function W.OpenImport(prefillText)
   local f = buildImport()
   I.pack, I.warnings, I.imported, I.updateRef, I.turnedOn, I.lastText = nil, nil, nil, nil, nil, nil
   f.Name:SetText("")
-  f:Show()
-  f:Raise()
+  if f:IsShown() or not W.InCombat() then
+    f:Show()
+    f:Raise()
+  else
+    W.OpenAfterCombat(f)          -- dialogs stay hidden in combat; this one opens when it ends
+  end
   if type(prefillText) == "string" and prefillText ~= "" then
     f.Code:SetText(prefillText)
     I.lastText = prefillText
@@ -327,7 +331,7 @@ function W.OpenImport(prefillText)
   else
     f.Code:SetText("")
     I.ShowEmpty()
-    f.Code:SetFocus()       -- ready for Ctrl+V
+    W.FocusBox(f.Code)      -- ready for Ctrl+V (mouse and keyboard; see W.FocusBox)
   end
   return true
 end
@@ -369,7 +373,7 @@ function Sd.Generate()
   else
     f.Omitted:SetText("")
   end
-  f.Code:SetFocus()
+  W.FocusBox(f.Code)
   f.Code:GetEditBox():HighlightText()
 end
 
@@ -457,8 +461,12 @@ function W.OpenShare(ref)
   f.Author:SetText(author)
   f.Author.ndValue = author
   W.SetEnabled(f.Author, not builtin, L["A built-in soundtrack keeps its own author."])
-  f:Show()
-  f:Raise()
+  if f:IsShown() or not W.InCombat() then
+    f:Show()
+    f:Raise()
+  else
+    W.OpenAfterCombat(f)          -- dialogs stay hidden in combat; this one opens when it ends
+  end
   Sd.Generate()
   return true
 end

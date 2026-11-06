@@ -2,18 +2,10 @@
 
 Two runtimes, because binary data cannot cross a UTF-8 lupa runtime intact:
 
-* :class:`ModelHarness` subclasses ``addon_harness.AddonHarness`` (UTF-8 runtime, the full WoW
-  shim) and loads the addon files in the final v1.2 TOC order (CONTRACTS-v1.2 section 2.1)
-  plus ``tests/lua/shim_encoding.lua``. zlib crosses as hex from Lua to Python; Python always
-  answers with ``bytes``, which lupa hands to Lua as raw strings.
-
-  ``profile="model"`` loads only what the model needs (Locale ... Companion); ``profile="full"``
-  adds Location, Discovery, Audio, Toast and Director so drops really arm and fire. Files owned
-  by builders working concurrently (A3: Beacon, ChatLink, Emit; A2: UI\\*; the integrator's
-  Options and SelfTest) are left out on purpose: the Director only reaches the transports
-  through ``if ns.Beacon`` / ``if ns.ChatLink``. While Director.lua still uses the v1
-  ``ns.Protocol``, ``Protocol.lua`` is loaded first. ``NeedleDropper_Map`` is nil, so Core's
-  v1 map is empty until ``Soundtracks.Init`` (on ND_INIT) replaces ``ns.Map``.
+* :class:`ModelHarness` is the unified ``addon_harness.AddonHarness`` (UTF-8 runtime, every
+  shim, zlib through the hex bridge of ``tests/lua/shim_encoding.lua``) with the A1 helpers.
+  ``profile="full"`` (default) loads the whole addon in the real TOC order (CONTRACTS-v1.2 2.1);
+  ``profile="model"`` loads only the TOC prefix the model needs (Locale ... Companion).
 
 * :class:`BytesRuntime` is a ``LuaRuntime(encoding=None)``: wow_shim + shim_encoding (bytes
   bridge) + the model files, driven directly (no AddonHarness, whose helpers pass ``str``). Used
@@ -35,86 +27,30 @@ from typing import Any, Iterable, Optional
 
 import lupa.lua51 as lua51
 
-from addon_harness import ADDON_DIR, ADDON_NAME, SHIM_PATH, AddonHarness, lua_literal
+from addon_harness import (ADDON_DIR, ADDON_NAME, SHIM_ENCODING_PATH, SHIM_PATH, UNSET, AddonHarness,  # noqa: F401
+                           lua_literal, lua_to_py, make_bridge, toc_files)
 
 ROOT = Path(__file__).resolve().parents[1]
-ENCODING_SHIM_PATH = Path(__file__).resolve().parent / "lua" / "shim_encoding.lua"
+ENCODING_SHIM_PATH = SHIM_ENCODING_PATH
 VECTORS_DIR = Path(__file__).resolve().parent / "vectors" / "share"
 
-#: CONTRACTS-v1.2 section 2.1, the final TOC written by the integrator.
-FINAL_TOC = [
-    "Locale.lua", "Json.lua", "Base64.lua", "Protocol2.lua", "Core.lua", "Sets.lua",
-    "Sets/AzerothMixtape.lua", "Sets/AzerothUnbound.lua", "Soundtracks.lua", "Share.lua", "Companion.lua",
-    "Emit.lua", "Location.lua", "Discovery.lua", "Audio.lua", "Beacon.lua", "ChatLink.lua", "Toast.lua",
-    "Director.lua", "Options.lua", "UI/Window.lua", "UI/Drops.lua", "UI/Soundtracks.lua", "UI/Journal.lua",
-    "UI/ShareDialogs.lua", "SelfTest.lua",
-]
-#: The model and what it needs at load time.
-MODEL_FILES = FINAL_TOC[:11]
-#: Enough of the rest for drops to arm and fire (no transports, UI, options or self-test).
-RUNTIME_FILES = ["Location.lua", "Discovery.lua", "Audio.lua", "Toast.lua", "Director.lua"]
+#: CONTRACTS-v1.2 section 2.1: the final TOC (read from NeedleDropper.toc).
+FINAL_TOC = toc_files()
+#: The model and what it needs at load time: the TOC up to Companion.lua.
+MODEL_FILES = FINAL_TOC[:FINAL_TOC.index("Companion.lua") + 1]
 #: My own modules (A1).
 A1_FILES = ["Locale.lua", "Sets.lua", "Soundtracks.lua", "Share.lua", "Companion.lua"]
 
 DECOMPRESS_LIMIT = 104857600  # EncodingUtilConstantsDocumentation.lua: EncodingDecompressSizeLimit
-_LEVELS = {0: 6, 1: 1, 2: 9}  # Default, OptimizeForSpeed, OptimizeForSize
-_WBITS = {0: -15, 1: 15, 2: 31}  # Deflate (raw), Zlib, Gzip
 
 
 def files_for(profile: str) -> list[str]:
-    """Addon files (TOC order) for a harness profile: "model" or "full"."""
+    """Addon files (TOC order) for a harness profile: "model" or "full" (the whole TOC)."""
     if profile == "model":
         return list(MODEL_FILES)
     if profile != "full":
         raise ValueError(f"unknown profile {profile!r}")
-    files = list(MODEL_FILES) + list(RUNTIME_FILES)
-    director = (ADDON_DIR / "Director.lua").read_text(encoding="utf-8")
-    if (ADDON_DIR / "Protocol.lua").is_file() and re.search(r"ns\.Protocol(?![0-9A-Za-z_])", director):
-        files.insert(0, "Protocol.lua")
-    if "function ns.Emit(" not in director and (ADDON_DIR / "Emit.lua").is_file():
-        files.insert(files.index("Companion.lua") + 1, "Emit.lua")  # after the integration (CONTRACTS 2.8)
-    return files
-
-
-# ------------------------------------------------------------------ zlib bridge --
-
-def make_bridge(mode: str):
-    """Python halves of the C_EncodingUtil shim. mode "hex": data arrives as hex text."""
-
-    def unwrap(data) -> bytes:
-        if mode == "hex":
-            if isinstance(data, bytes):
-                data = data.decode("ascii")
-            return bytes.fromhex(data)
-        return bytes(data)
-
-    def compress(data, method, level):
-        try:
-            raw = unwrap(data)
-            lvl = _LEVELS.get(int(level), 6)
-            wbits = _WBITS[int(method)]
-            if wbits == 15:
-                return zlib.compress(raw, lvl)
-            c = zlib.compressobj(lvl, zlib.DEFLATED, wbits)
-            return c.compress(raw) + c.flush()
-        except Exception as exc:  # noqa: BLE001 - reported to Lua like a failing C call
-            return None, ("compress failed: %s" % exc).encode()
-
-    def decompress(data, method, limit):
-        try:
-            raw = unwrap(data)
-            d = zlib.decompressobj(_WBITS[int(method)])
-            limit = int(limit)
-            out = d.decompress(raw, limit + 1)
-            if len(out) > limit:
-                return None, b"decompressed data exceeds the size limit"
-            if not d.eof:
-                return None, b"failed to decompress: incomplete stream"
-            return out
-        except Exception as exc:  # noqa: BLE001
-            return None, ("failed to decompress: %s" % exc).encode()
-
-    return compress, decompress
+    return list(FINAL_TOC)
 
 
 # ------------------------------------------------------------------- converters --
@@ -130,37 +66,16 @@ def canon(v: Any) -> Any:
     return v
 
 
-def _lua_to_py(v: Any, decode: bool, depth: int = 0) -> Any:
-    if depth > 40:
-        raise RecursionError("Lua value nested too deeply")
-    if isinstance(v, bytes) and decode:
-        return v.decode("utf-8", errors="surrogateescape")
-    if lua51.lua_type(v) == "table":
-        items = list(v.items())
-        conv = []
-        for k, x in items:
-            if isinstance(k, bytes) and decode:
-                k = k.decode("utf-8", errors="surrogateescape")
-            if isinstance(k, float) and k.is_integer():
-                k = int(k)
-            conv.append((k, _lua_to_py(x, decode, depth + 1)))
-        keys = [k for k, _ in conv]
-        if conv and all(isinstance(k, int) for k in keys) and sorted(keys) == list(range(1, len(keys) + 1)):
-            d = dict(conv)
-            return [d[i] for i in range(1, len(keys) + 1)]
-        return {k: x for k, x in conv}
-    if isinstance(v, float) and v.is_integer() and abs(v) < 2 ** 53:
-        return int(v)
-    return v
+_lua_to_py = lua_to_py
 
 
 # ===================================================================== harness ==
 
 class ModelHarness(AddonHarness):
-    """AddonHarness running the v1.2 model (see the module docstring).
+    """The unified AddonHarness for the model tests (see the module docstring).
 
     Extra keyword arguments:
-      profile          "full" (default) or "model"
+      profile          "full" (default: the whole TOC) or "model"
       companion_data   value for NeedleDropper_CompanionData (set before the files load), or
                        the string "unset" to leave it absent
       fail_mode        C_EncodingUtil failure style: "error" (raise) or "nil" (return nothing)
@@ -172,105 +87,9 @@ class ModelHarness(AddonHarness):
                  encoding_absent: bool = False, extra_files: Optional[Iterable[str]] = None,
                  before_load=None, settle: float = 1.0, **kw) -> None:
         files = files_for(profile) + list(extra_files or [])
-        compress, decompress = make_bridge("hex")
-
-        def setup(h: "AddonHarness") -> None:
-            h.g.SHIM_ENCODING_BRIDGE = h.rt.table_from({"mode": "hex", "compress": compress,
-                                                         "decompress": decompress})
-            h.rt.execute("SHIM.encoding = { failMode = %s, absent = %s }"
-                         % (lua_literal(fail_mode), "true" if encoding_absent else "false"))
-            h._run(ENCODING_SHIM_PATH.read_text(encoding="utf-8"), "@shim_encoding.lua")
-            if companion_data != "unset":
-                h.rt.execute("NeedleDropper_CompanionData = " + lua_literal(companion_data))
-            if before_load:
-                before_load(h)
-
-        super().__init__(None, files=files, before_load=setup, settle=settle, **kw)
-
-    # ------------------------------------------------------------- plumbing --
-
-    def to_lua(self, v: Any) -> Any:
-        if isinstance(v, (dict, list, tuple)):
-            return self.rt.execute("return " + lua_literal(v))
-        return v
-
-    def to_py(self, v: Any) -> Any:
-        return _lua_to_py(v, decode=False)
-
-    def fn(self, path: str):
-        target = self.ns
-        for part in path.split("."):
-            target = target[part]
-            if target is None:
-                raise AttributeError(f"ns.{path} is nil")
-        return target
-
-    def call(self, path: str, *args) -> tuple:
-        """Calls ns.<path>(*args) (dicts / lists become Lua tables); returns every result,
-        converted to Python, as a tuple."""
-        res = self.fn(path)(*[self.to_lua(a) for a in args])
-        self.check_errors()
-        if not isinstance(res, tuple):
-            res = (res,)
-        return tuple(self.to_py(r) for r in res)
-
-    def call1(self, path: str, *args) -> Any:
-        return self.call(path, *args)[0]
-
-    def get(self, path: str) -> Any:
-        """ns.<path> converted to Python."""
-        return self.to_py(self.fn(path))
-
-    def run(self, src: str, *args) -> Any:
-        """Executes Lua source with ``args`` as ``...`` (Python values converted) and returns the
-        raw result."""
-        res = self.rt.execute(src, *[self.to_lua(a) for a in args])
-        self.check_errors()
-        return res
-
-    # ------------------------------------------------------------- shortcuts --
-
-    def rebuild(self) -> None:
-        """Let the debounced rebuild run (0.25 s)."""
-        self.advance(0.3)
-
-    def map_ids(self) -> list[str]:
-        return [str(d["id"]) for d in self.ns.Map.drops.values()]
-
-    def map_drop(self, drop_id: str) -> Optional[dict]:
-        d = self.ns.Map.byId[drop_id]
-        return None if d is None else self.to_py(d)
-
-    def active(self) -> list[str]:
-        return list(self.call1("Soundtracks.ActiveRefs") or [])
-
-    def user_set(self, set_id: str) -> Optional[dict]:
-        db = self.g.NeedleDropperDB
-        s = db.soundtracks[set_id]
-        return None if s is None else self.to_py(s)
-
-    def fired(self, message: str) -> list[tuple]:
-        """Arguments of every ns.Fire(message, ...) since record_fires() was called."""
-        log = self.g.SHIM_FIRES
-        if log is None:
-            return []
-        out = []
-        for e in log.values():
-            if e[1] == message:
-                out.append(tuple(self.to_py(e[i]) for i in range(2, int(e.n) + 1)))
-        return out
-
-    def record_fires(self) -> None:
-        """Starts logging every internal message (ns.Fire) into SHIM_FIRES."""
-        self.rt.execute("""
-          local ns = ...
-          SHIM_FIRES = {}
-          local fire = ns.Fire
-          ns.Fire = function(msg, ...)
-            SHIM_FIRES[#SHIM_FIRES + 1] = { msg, n = select('#', ...) + 1, ... }
-            return fire(msg, ...)
-          end
-        """, self.ns)
+        super().__init__(files=files, companion_data=UNSET if companion_data == "unset" else companion_data,
+                         fail_mode=fail_mode, encoding_absent=encoding_absent, before_load=before_load,
+                         settle=settle, **kw)
 
 
 # =============================================================== bytes runtime ==

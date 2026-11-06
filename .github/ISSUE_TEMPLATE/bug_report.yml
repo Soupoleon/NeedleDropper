@@ -1,0 +1,255 @@
+name: Bug report
+description: Something in NeedleDropper (the addon or the app) didn't work as it should.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing NeedleDropper! One problem per report, please.
+
+        **Two things make a report far more useful:**
+        1. In the game, type `/needle status` where the problem happened and take a screenshot of the chat window (WoW can't copy chat text): attach it, or type its lines into the box further down.
+        2. The app's log: right-click the NeedleDropper icon in the tray, next to the clock (maybe under the **^** arrow), choose **Open log folder** and attach `needledropper.log`.
+
+        Everyone who can see this repository can read what you post here. The log never contains passwords or tokens, but file paths in it can show your Windows user name: edit them out if you like.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: >-
+        What you saw, in your own words. Screenshots or a short video help a lot: drag them into
+        this box.
+      placeholder: >-
+        I rode into Razor Hill. The title card showed up, but no music played and the zone music
+        stayed off.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: What you did, in order. Say where you were in the game and what you clicked or typed.
+      placeholder: |
+        1. Logged in a level 4 orc in Durotar
+        2. Typed /needle set cooldownMin 0
+        3. Rode into Razor Hill
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part is it about?
+      multiple: true
+      options:
+        - "A needle drop: didn't start, started at the wrong time or played the wrong song"
+        - The title card
+        - The NeedleDropper window (Drops, Soundtracks, Journal)
+        - Spotify playback
+        - The YouTube player window
+        - In-game audio files
+        - Share codes (Share and Import)
+        - "The app: Connect page, tray icon or notifications"
+        - The game lost focus, or a window popped up over it
+        - The zone music didn't fade out or didn't come back
+        - Playing with a controller
+        - Installing or updating
+        - Something else
+    validations:
+      required: true
+
+  - type: input
+    id: release
+    attributes:
+      label: Release you installed
+      description: The tag of the GitHub release you downloaded, shown on the Releases page.
+      placeholder: v1.2.0-beta.1
+    validations:
+      required: true
+
+  - type: input
+    id: addon-version
+    attributes:
+      label: NeedleDropper addon version
+      description: In the game, type `/needle status`. The version is in its first line.
+      placeholder: v1.2.0-beta.1
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: NeedleDropper app version
+      description: >-
+        At the bottom of the Connect page (tray icon, then **Open setup…**). Write "not running"
+        if you play without the app.
+      placeholder: "1.2.0"
+    validations:
+      required: true
+
+  - type: input
+    id: wow-build
+    attributes:
+      label: "WoW: Forever build"
+      description: >-
+        Shown in the bottom-left corner of the login screen. Or type `/dump GetBuildInfo()` in the
+        game: the first two values.
+      placeholder: 1.60.1.70790
+    validations:
+      required: true
+
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Windows version
+      options:
+        - Windows 11
+        - Windows 10
+        - Something else (say which under "Anything else?")
+    validations:
+      required: true
+
+  - type: input
+    id: resolution
+    attributes:
+      label: Screen resolution
+      description: >-
+        Of the screen the game runs on (Windows Settings, System, Display). Say if you use more
+        than one monitor, and which one has the game.
+      placeholder: 2560 × 1440, one monitor
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scaling
+    attributes:
+      label: Windows display scaling
+      description: Windows Settings, System, Display, Scale.
+      options:
+        - 100 %
+        - 125 %
+        - 150 %
+        - 175 %
+        - 200 %
+        - 225 % or more
+        - Custom, or not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: hdr
+    attributes:
+      label: Windows HDR
+      description: Windows Settings, System, Display, Use HDR.
+      options:
+        - "Off"
+        - "On"
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: display-mode
+    attributes:
+      label: WoW display mode
+      description: In the game, Options, Graphics, Display Mode.
+      options:
+        - Windowed
+        - Windowed (Fullscreen), also called borderless
+        - Fullscreen
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: ui-scale
+    attributes:
+      label: WoW UI scale
+      description: >-
+        The UI Scale setting in the game's Options, or type `/dump UIParent:GetEffectiveScale()`
+        in the game. Write "default" if you never changed it.
+      placeholder: "0.71"
+
+  - type: dropdown
+    id: controls
+    attributes:
+      label: How do you play?
+      options:
+        - Keyboard and mouse
+        - Controller (gamepad)
+        - Both
+    validations:
+      required: true
+
+  - type: dropdown
+    id: music
+    attributes:
+      label: Music service
+      description: How NeedleDropper played the song, or should have.
+      multiple: true
+      options:
+        - Spotify Premium, through the owner's developer app
+        - Spotify Premium, through my own developer app
+        - YouTube
+        - In-game audio files
+        - "No app: title cards only"
+    validations:
+      required: true
+
+  - type: textarea
+    id: report
+    attributes:
+      label: "Output of /needle status"
+      description: >-
+        Type `/needle status` in the game, where the problem happened, and type its lines here, or
+        attach a screenshot of the chat under "Anything else?" (WoW can't copy chat text).
+      render: text
+
+  - type: upload
+    id: app-log
+    attributes:
+      label: App log
+      description: >-
+        Tray icon, **Open log folder**, then `needledropper.log` (zip the folder if there are
+        several log files). It never contains passwords or tokens; file paths can show your
+        Windows user name.
+    validations:
+      required: false
+
+  - type: upload
+    id: taint-log
+    attributes:
+      label: taint.log (only if the game blocked an action)
+      description: >-
+        Only if the game said NeedleDropper was blocked from an action: type `/console taintLog 1`,
+        do the same thing again, log out, then attach
+        `World of Warcraft\_forever_\Logs\taint.log`. Turn it off again with `/console taintLog 0`.
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: >-
+        How long the music took to start, other addons you use, a share code of the soundtrack
+        involved, screenshots, anything odd. You can drag files here too.
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before you send it
+      options:
+        - label: I looked through what I attached and removed anything I don't want to share.
+          required: true

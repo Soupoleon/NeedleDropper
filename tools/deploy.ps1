@@ -1,18 +1,17 @@
 <#
 .SYNOPSIS
-  Copy the NeedleDropper addon from this repo into WoW: Forever's AddOns folder.
+  Copy the NeedleDropper addon from this repo into WoW: Forever's AddOns folder (developer deploy).
 
 .DESCRIPTION
-  Copies addon\NeedleDropper into <WowRoot>\_forever_\Interface\AddOns\NeedleDropper.
+  Copies addon\NeedleDropper (Sets\ included) into <WowRoot>\_forever_\Interface\AddOns\NeedleDropper.
 
   * Refuses while <WowRoot>\_forever_\Wow.exe is running (new addon files are only
     picked up after a client restart) unless -Force is given.
-  * Never touches Interface\AddOns\NeedleDropper_Local (your own media files).
-  * Keeps an installed Map.lua / Map.json (generated from your packs by
-    `needledropper build-map`) unless -ReplaceMap is given; on a first install the
-    bundled placeholder map is copied.
-  * Never deletes anything: files removed from the repo stay in the installed copy
-    until you remove them yourself.
+  * Never touches Interface\AddOns\NeedleDropper_Local (your own media files) or
+    NeedleDropper_Companion (the companion app's data addon).
+  * Removes the files v1.2 retired from an older installed copy (Map.lua, Map.json,
+    Protocol.lua): the soundtracks ship as Sets\*.lua and every beacon frame carries its
+    song, so there is no map to keep any more. Nothing else is ever deleted.
 
 .PARAMETER WowRoot
   World of Warcraft install folder (default: C:\Program Files (x86)\World of Warcraft).
@@ -21,7 +20,7 @@
   Copy even while the game is running.
 
 .PARAMETER ReplaceMap
-  Overwrite the installed Map.lua / Map.json with the repo's placeholder.
+  Accepted for old scripts and ignored: the v1.1 Map.lua / Map.json no longer exist.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File tools\deploy.ps1
@@ -49,9 +48,16 @@ if (-not (Test-Path -LiteralPath (Join-Path $source "NeedleDropper.toc") -PathTy
     Write-Error "Addon sources not found: $source (expected NeedleDropper.toc)."
     exit 1
 }
+if (-not (Test-Path -LiteralPath (Join-Path $source "Sets") -PathType Container)) {
+    Write-Error "The addon has no Sets\ folder: run 'python tools\gen_sets.py' first."
+    exit 1
+}
 if (-not (Test-Path -LiteralPath $flavorRoot -PathType Container)) {
     Write-Error "WoW: Forever not found at $flavorRoot. Pass -WowRoot <your WoW folder>."
     exit 1
+}
+if ($ReplaceMap) {
+    Write-Host "-ReplaceMap is ignored: NeedleDropper 1.2 has no Map.lua / Map.json any more."
 }
 
 # --- refuse while this install's Wow.exe runs ---------------------------------
@@ -73,10 +79,9 @@ if ($running.Count -gt 0 -and -not $Force) {
 }
 
 # --- copy ----------------------------------------------------------------------
-$preserve = @("Map.lua", "Map.json")
+$retired = @("Map.lua", "Map.json", "Protocol.lua")
 $skipNames = @("__pycache__", ".git", ".DS_Store", "Thumbs.db")
 $copied = 0
-$kept = 0
 
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
 $sourceFull = (Resolve-Path -LiteralPath $source).Path.TrimEnd('\')
@@ -90,10 +95,6 @@ Get-ChildItem -LiteralPath $sourceFull -Recurse -File | ForEach-Object {
     if ($_.Name -like "*.bak" -or $_.Name -like "*.tmp" -or $_.Name -like "*.orig") { return }
 
     $target = Join-Path $dest $rel
-    if (($preserve -contains $rel) -and (Test-Path -LiteralPath $target) -and -not $ReplaceMap) {
-        $script:kept++
-        return
-    }
     $targetDir = Split-Path -Parent $target
     if (-not (Test-Path -LiteralPath $targetDir)) {
         New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
@@ -102,9 +103,18 @@ Get-ChildItem -LiteralPath $sourceFull -Recurse -File | ForEach-Object {
     $script:copied++
 }
 
+$removed = @()
+foreach ($name in $retired) {
+    $old = Join-Path $dest $name
+    if ((Test-Path -LiteralPath $old -PathType Leaf) -and -not (Test-Path -LiteralPath (Join-Path $sourceFull $name))) {
+        Remove-Item -LiteralPath $old -Force
+        $removed += $name
+    }
+}
+
 Write-Host "Deployed NeedleDropper: $copied file(s) -> $dest"
-if ($kept -gt 0) {
-    Write-Host "Kept the installed Map.lua/Map.json (use -ReplaceMap to overwrite, or run 'needledropper build-map')."
+if ($removed.Count -gt 0) {
+    Write-Host ("Removed the files retired in 1.2: " + ($removed -join ", "))
 }
 if ($running.Count -gt 0) {
     Write-Host "WoW is running: type /reload in game (restart the client if you added new files)."

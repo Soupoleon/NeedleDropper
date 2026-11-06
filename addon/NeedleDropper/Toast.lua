@@ -440,11 +440,40 @@ local function fadeOut(len)
   apply(c, alpha, lift)
 end
 
+-- --------------------------------------------------- Blizzard's banner ----
+
+-- Blizzard shows "Zone / Subzone" in the same band of the screen (ZoneText.xml: ZoneTextFrame
+-- at y = -128, SubZoneTextString under it; FadingFrame 0.5 s in, 1 s hold, 2 s out). A card
+-- for a discovered landmark would fire 1.5 s into that banner (baseline ND-DIR-06), so the
+-- card's timeline starts when the banner is gone: the longest FadingFrame_GetRemainingTime of
+-- the two frames that are shown (Blizzard_FrameXMLUtil/FadingFrame.lua), all guarded.
+local BANNER_FRAMES = { "SubZoneTextFrame", "ZoneTextFrame" }
+local MAX_BANNER_WAIT = 4.0
+
+function T.BannerWait()
+  if type(FadingFrame_GetRemainingTime) ~= "function" then return 0 end
+  local wait = 0
+  for i = 1, #BANNER_FRAMES do
+    local f = _G[BANNER_FRAMES[i]]
+    if type(f) == "table" and type(f.IsShown) == "function" then
+      local ok, shown = pcall(f.IsShown, f)
+      if ok and shown and not ns.IsSecret(shown) then
+        local ok2, left = pcall(FadingFrame_GetRemainingTime, f)
+        left = ok2 and ns.SafeNumber(left) or nil
+        if left and left == left and left > wait then wait = left end
+      end
+    end
+  end
+  if wait > MAX_BANNER_WAIT then wait = MAX_BANNER_WAIT end
+  return wait
+end
+
 -- ------------------------------------------------------------------ API ----
 
 -- Shows the card for `drop` ({kind, label, title, artist, mapID / areaID / instanceID ...}),
 -- replacing (restarting) a card that is showing. opts: { preview = true (show even while
--- title cards are off), line1 = place text, line3 = credit text }. Returns true if shown.
+-- title cards are off; no wait for Blizzard's banner), line1 = place text, line3 = credit
+-- text }. Returns true if shown.
 function T.Show(drop, opts)
   if type(drop) ~= "table" then return false end
   if type(opts) ~= "table" then opts = nil end
@@ -456,8 +485,9 @@ function T.Show(drop, opts)
   local credit = (opts and type(opts.line3) == "string") and opts.line3 or nil
   if credit == nil then credit = isTest and T.TEST_CREDIT or T.Subtitle(drop, true) end
   local now = GetTime()
-  T.card = { start = now, hold = holdSeconds(), id = drop.id, kind = drop.kind, preview = preview,
-             place = place, line1 = T.SpacedCaps(place), line3 = credit }
+  local wait = preview and 0 or T.BannerWait()
+  T.card = { start = now + wait, wait = wait, hold = holdSeconds(), id = drop.id, kind = drop.kind,
+             preview = preview, place = place, line1 = T.SpacedCaps(place), line3 = credit }
   placeFS:SetText(escapeText(T.card.line1))
   creditFS:SetText(escapeText(credit))
   layout()

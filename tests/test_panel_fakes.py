@@ -291,6 +291,7 @@ class FakeTrayIcon:
         self.tooltip = tooltip
         self.on_notification_click = on_notification_click
         self.on_close = on_close
+        self.kw = dict(kw)  # e.g. on_session_end (the synchronous log-off / shut-down clean-up)
         self.notes: list[tuple[str, str, str]] = []
         self.tooltips: list[str] = []
         self.icons: list[Any] = []

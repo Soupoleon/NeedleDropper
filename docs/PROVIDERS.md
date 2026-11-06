@@ -26,7 +26,7 @@ You don't set an order; for every drop NeedleDropper uses the best source it has
 3. **YouTube**: the drop's YouTube video.
 
 The letters next to each drop in the window's Drops tab show what it has: **S** Spotify, **Y**
-YouTube, **F** in-game file. ▶ **Test** plays any drop right away, without marking it as heard.
+YouTube, **F** in-game file. **Test** plays any drop right away, without marking it as heard.
 
 ---
 
@@ -77,17 +77,23 @@ to Spotify directly from your PC.
 1. Open the Connect page (it opens by itself the first time you start the app; later, left-click the
    tray icon). On the **Spotify** card, paste the **Client ID**.
 2. Click **Sign in**. Spotify's consent page opens in your browser. It shows the app name you chose
-   and asks to let it *see what is playing on your devices* and *control playback on your devices*.
-   Click **Agree**.
-3. The browser tab says you can close it. The Spotify card now shows your account, whether it has
-   Premium, and **Play on**, the device that plays.
+   and asks to let it *see what is playing on your devices*, *control playback on your devices* and
+   see your account's subscription and country (so the app can check Premium and search the songs
+   available where you live). Click **Agree**.
+3. The browser tab says you can close it. The Spotify card now shows your account, its **Premium**
+   check (for example *✓ Yes: this account has Spotify Premium.*), its **Country** (when Spotify
+   reports the plan and the country), and **Play on**, the device that plays.
+
+Signed in with NeedleDropper 1.1? The card then shows **Sign in again**: 1.1 didn't ask for the
+plan and country, so the app can't check Premium or search your country's catalogue (it searches
+without it meanwhile). Click it and approve once more.
 
 The game learns that Spotify is connected at your next login: the NeedleDropper window's footer then
 says, for example, *App seen 2 min before login · Spotify connected*.
 
 NeedleDropper keeps the login in `%APPDATA%\NeedleDropper\spotify_token.bin`, encrypted with Windows
 DPAPI so that only your Windows account on this PC can read it ([privacy](PRIVACY.md)).
-**Disconnect** on the Spotify card deletes it.
+Disconnect with **Sign out of Spotify** on the Spotify card: it deletes the login.
 
 ### Signing in with a different Spotify account (User Management)
 
@@ -100,9 +106,9 @@ account), add it first:
 2. Enter the person's name and the **email address of their Spotify account**, and save.
 
 Up to 5 accounts per app. Spotify lets an account that isn't on this list sign in, but then refuses
-every request with error 403, which the Spotify card shows as **Premium required**. The app's owner
-must have Premium as well, or the app stops working (a Spotify rule for Development Mode apps since
-February 2026).
+every request with error 403, which the Spotify card shows as **Account not allowed**. The app's
+owner must have Premium as well, or the app stops working (a Spotify rule for Development Mode apps
+since February 2026).
 
 ### Devices: Play on
 
@@ -127,8 +133,8 @@ starts and stops without fading.
 - **If nothing matches,** a notification says *song not found on Spotify*, and the drop plays on
   YouTube if it has a video.
 - **After your next login,** the drop's form in the window shows what the app found, for example
-  *Spotify match: Africa · Toto (4:55) [Use this exact song]*. One click saves that exact recording
-  in the drop (for a built-in drop, in My Drops).
+  *Spotify match: Africa · Toto (4:55)* with a **Use this exact song** button. One click saves that
+  exact recording in the drop (for a built-in drop, in My Drops).
 - **If the wrong version plays,** paste the right song's link into the drop's **Spotify** field: in
   the Spotify app, right-click the song → **Share** → **Copy Song Link**.
 
@@ -147,7 +153,10 @@ starts and stops without fading.
 |---|---|---|
 | Spotify's page says **INVALID_CLIENT: Invalid redirect URI** | The redirect URI in your app doesn't match exactly | In the dashboard, open your app → **Settings** → **Edit**, and make the redirect URI exactly `http://127.0.0.1:8321/callback` |
 | Spotify's page says **INVALID_CLIENT: Invalid client** | The Client ID is wrong or the app was deleted | Copy the Client ID again from the dashboard and paste it on the Spotify card |
-| **Premium required**, or error **403** | The account isn't Premium, isn't on your app's User Management list, or the app's owner lost Premium | Use a Premium account; add the account under [User Management](#signing-in-with-a-different-spotify-account-user-management) |
+| **Premium needed**, or error **403** | The account isn't Premium (the card's **Premium** line names its plan), or the app's owner lost Premium | Use a Premium account |
+| **Account not allowed** | The account isn't on your app's User Management list | Add it under [User Management](#signing-in-with-a-different-spotify-account-user-management) |
+| **Sign in again** | The sign-in comes from NeedleDropper 1.1 and lacks the plan-and-country permission | Click **Sign in again** and approve |
+| Notification: *Spotify isn't starting songs — restart the Spotify app* | Spotify accepted the song but didn't start it (the app's buttons often look greyed out). On the test PC, Spotify's Windows app did this with every song, in both its Microsoft Store and its spotify.com version, while Spotify's **Web Player** played them. That drop played on YouTube, if it has a video, and for the rest of the session YouTube plays first without asking Spotify again. As you approach the next places the app checks Spotify quietly and uses it again once it plays | Quit the Spotify app completely, start it again, and play and pause any song once. If it keeps happening, open Spotify's Web Player (`open.spotify.com`) in a browser, play and pause a song there, and pick it under **Play on** |
 | Error **404** / "no active device" | Spotify has no device that is online right now | Open the Spotify app on this PC (play and pause any song once), then pick it under **Play on** |
 | Error **429** / "rate limited" | Too many requests in a short time; Spotify may also report `QUOTA_EXCEEDED` | Wait a few minutes and try again; NeedleDropper already waits when Spotify asks it to |
 | **Sign in** never finishes | The consent page wasn't completed in time (the sign-in link expires after a few minutes), or another program uses port 8321 | Click **Sign in** again and finish the consent page; close other apps that might use port 8321 |
@@ -160,24 +169,36 @@ More in [Troubleshooting](TROUBLESHOOTING.md#spotify).
 
 ## YouTube
 
-No account needed. YouTube songs play in a **small player window** that the NeedleDropper app opens
-when such a drop starts: a Microsoft Edge (or Google Chrome) app window of about 420 × 380 pixels
-with the video, the place name and the song. It is the only window NeedleDropper opens while you
-play (the in-game title card is the only other "popup"). The **YouTube** card on the Connect page
-needs no setup.
+No account needed. YouTube songs play in a **small player window**: a Microsoft Edge (or Google
+Chrome) app window of about 420 × 380 pixels with the video, the place name and the song. It is the
+only window NeedleDropper shows while you play (the in-game title card is the only other "popup"). The
+**YouTube** card on the Connect page needs no setup.
+
+- The app makes the window **once, hidden, when it starts** (normally when Windows starts), because a
+  browser window takes the keyboard focus at the moment it is created.
+- While a YouTube song plays, the window shows **on top of the game in the top-right corner** of the
+  screen the game is on, and it **never takes the focus**: your keys and mouse stay in the game.
+  When the song ends it hides again. Another corner: set `deck.playerCorner` in `config.json` to
+  `topleft`, `bottomright` or `bottomleft` (or `deck.playerPosition` to `"x,y"`).
+- When a drop is about to fire (as you approach the place) the app already loads the video, paused
+  and silent, so the song starts quickly.
+- NeedleDropper never opens a tab in your default browser for a song: that would take you out of the
+  game. Without Edge or Chrome, YouTube songs show their title card only.
+- If the window is closed, the app makes it again a few minutes later, but **never while the game is
+  in front**; until then YouTube songs show their title card only.
 
 ### The player window must stay visible
 
 YouTube's rules don't allow hidden or background players or audio-only playback, and an embedded
-player must be at least 200 × 200 pixels. So while a song plays, **keep the player window where you
-can see it**: on a second monitor, or next to a windowed game. Don't minimize it or cover it with the
-game. When the song is over the window shows *Drop finished* and stays open; close it whenever you
-like and it reopens for the next YouTube song.
+player must be at least 200 × 200 pixels. While a song plays the window therefore stays visible on
+top of the game, in its corner. Run the game in *Fullscreen (Windowed)* or *Windowed* mode (the two
+display modes Forever offers), don't cover the window with other always-on-top windows, and don't
+minimize it.
 
 ### Good to know
 
-- **First click:** browsers block sound until you click a page once. If the player shows *Click to
-  enable sound*, click once anywhere in it.
+- **First click:** the player window's own browser profile allows sound without a click. If the
+  player ever shows *Click to enable sound*, click once anywhere in it (the game keeps the focus).
 - **Ads:** YouTube may show ads before or during a song, as with any embedded video, unless you have
   YouTube Premium (and are signed in to YouTube in the browser that shows the player). NeedleDropper
   never blocks or skips ads; that would break YouTube's rules.
@@ -207,8 +228,8 @@ window and no streaming.
 2. **Restart the game completely.** WoW only notices new files when it starts; `/reload` is not
    enough.
 3. In the NeedleDropper window, select the drop (or stand there and press **Add drop here**) and type
-   the file name into **In-game file**, for example `goldshire.mp3`. The form says *found ✓*; ▶
-   **Test** plays it.
+   the file name into **In-game file**, for example `goldshire.mp3`. The form says *found* (with a
+   tick); **Test** plays it.
 
 - Use plain file names (letters, digits, spaces and `._-()`), directly in the `media` folder, without
   subfolders.
@@ -219,9 +240,9 @@ window and no streaming.
   ([pack format](PACKS.md#drops)).
 
 **Coming from 1.1:** the app no longer plays files itself, so its media folder,
-`%APPDATA%\NeedleDropper\media`, isn't used any more. The Connect page offers to copy the .mp3 and
-.ogg files from it into `NeedleDropper_Local\media` (restart the game afterwards). Convert other
-formats (.flac, .wav, .m4a) to .mp3 or .ogg first.
+`%APPDATA%\NeedleDropper\media`, isn't used any more. Copy the .mp3 and .ogg files from it into
+`NeedleDropper_Local\media` yourself, then restart the game. Convert other formats (.flac, .wav,
+.m4a) to .mp3 or .ogg first.
 
 ---
 

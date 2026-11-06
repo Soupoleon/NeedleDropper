@@ -126,7 +126,8 @@ end)
 
 ns.On("CHAT_MSG_SYSTEM", function(_, msg)
   if ns.IsSecret(msg) or type(msg) ~= "string" then return end
-  if string.sub(msg, 1, 7) == "NDROP1 " or string.sub(msg, 1, 6) == "NDPAD " then return end
+  local head = string.sub(msg, 1, 7)
+  if head == "NDROP2 " or head == "NDROP1 " or string.sub(msg, 1, 6) == "NDPAD " then return end
   local name = Dsc.ParseName(msg)
   if name then Dsc.Record(name, "chat") end
 end)
@@ -185,16 +186,21 @@ function Dsc.ExploredZone(mapID)
   return #textures > 0
 end
 
--- Set { [areaID] = true } of explored areas at the player's position in `mapID`, or nil.
+-- Set { [areaID] = true } of explored areas at the player's position in `mapID` (empty when
+-- the game answers with nothing explored there), or false when the answer is unknown: no
+-- position (Nilable in MapDocumentation), a failed call, a secret value, or no API. Callers
+-- must not treat false as "nothing explored" (baseline ND-DIR-08).
 function Dsc.ExploredAreasHere(mapID)
   local api = C_MapExplorationInfo
   if not (api and api.GetExploredAreaIDsAtPosition and C_Map and C_Map.GetPlayerMapPosition and mapID) then
-    return nil
+    return false
   end
   local ok, pos = pcall(C_Map.GetPlayerMapPosition, mapID, "player")
-  if not ok or pos == nil or ns.IsSecret(pos) then return nil end
+  if not ok or pos == nil or ns.IsSecret(pos) then return false end
   local ok2, list = pcall(api.GetExploredAreaIDsAtPosition, mapID, pos)
-  if not ok2 or ns.IsSecret(list) or type(list) ~= "table" then return nil end
+  if not ok2 or ns.IsSecret(list) then return false end
+  if list == nil then return {} end
+  if type(list) ~= "table" then return false end
   local set = {}
   for i = 1, #list do
     local id = ns.SafeNumber(list[i])

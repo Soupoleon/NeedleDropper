@@ -2,16 +2,28 @@
 ## Title: NeedleDropper
 ## Notes: Kojima-style needle drops: curated songs the first time you arrive somewhere.
 ## Author: NeedleDropper
-## Version: 1.0.0
+## Version: 1.2.0
 ## X-License: MIT
+## X-Curse-Project-ID: 1786392
 ## Category: Audio & Video
 ## IconTexture: Interface\Icons\INV_Misc_Drum_01
 ## SavedVariables: NeedleDropperDB
 ## SavedVariablesPerCharacter: NeedleDropperCharDB
 ## AddonCompartmentFunc: NeedleDropper_OnAddonCompartmentClick
-Protocol.lua
-Map.lua
+## AddonCompartmentFuncOnEnter: NeedleDropper_OnAddonCompartmentEnter
+## AddonCompartmentFuncOnLeave: NeedleDropper_OnAddonCompartmentLeave
+Locale.lua
+Json.lua
+Base64.lua
+Protocol2.lua
 Core.lua
+Sets.lua
+Sets\AzerothMixtape.lua
+Sets\AzerothUnbound.lua
+Soundtracks.lua
+Share.lua
+Companion.lua
+Emit.lua
 Location.lua
 Discovery.lua
 Audio.lua
@@ -20,4 +32,9 @@ ChatLink.lua
 Toast.lua
 Director.lua
 Options.lua
+UI\Window.lua
+UI\Drops.lua
+UI\Soundtracks.lua
+UI\Journal.lua
+UI\ShareDialogs.lua
 SelfTest.lua

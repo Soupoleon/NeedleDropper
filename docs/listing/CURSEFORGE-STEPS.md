@@ -1,0 +1,187 @@
+# Putting NeedleDropper on CurseForge
+
+A click-by-click guide: create the CurseForge project, then upload the first **Beta** file by hand.
+After that, every version tag uploads by itself through the Release workflow. Wago Addons is optional
+and comes at the end. This is Phase 1 (public beta) of [RELEASING.md](../RELEASING.md).
+
+You do every step on the websites yourself: the account, the project, the API token and the GitHub
+secret are yours. Nothing in this repository uploads anything until you add that token.
+
+Values marked *(verify)* weren't confirmed on the live site yet. Check them on screen as you go.
+
+## What you need
+
+| What | File |
+|---|---|
+| Logo (CurseForge wants exactly 400 × 400) | [`assets/logo/needledropper-logo-400.png`](../../assets/logo/needledropper-logo-400.png) |
+| Lead screenshot | [`assets/screenshots/title-card-razor-hill.png`](../../assets/screenshots/title-card-razor-hill.png) |
+| Summary, description, categories | [LISTING.md](LISTING.md) |
+| Screenshot caption | [screenshots.md](screenshots.md), shot 1 (the same picture; the shot list calls the file `01-title-card-razor-hill.png`) |
+| The addon zip | `dist\NeedleDropper-<version>-addon.zip`, built fresh in step 0 |
+
+## 0. Before you start
+
+1. **Make the GitHub repository public** (*Settings → General → Danger Zone → Change repository
+   visibility*). The listing links to the source, the issues and the app download, and moderators
+   click those links.
+2. **Build a fresh addon zip.** The one in `dist\` is older than the latest addon changes. In
+   PowerShell, in the repository folder:
+
+   ```powershell
+   .\tools\build_release.ps1 -OutDir dist
+   ```
+
+   Open `dist\NeedleDropper-1.2.0-addon.zip` and check that it holds one `NeedleDropper` folder, and
+   that its `NeedleDropper.toc` says `## Version: 1.2.0` (a real number, not `@project-version@`).
+3. **A CurseForge account.** Sign in at <https://www.curseforge.com>, or create an account there.
+
+## 1. Create the project
+
+1. Open <https://authors.curseforge.com/#/projects/create/choose-game> (or
+   <https://authors.curseforge.com> → **Create project**).
+2. Choose **World of Warcraft**, then **Addons** if it asks for a class.
+3. Fill in the form:
+
+| Field | Value |
+|---|---|
+| Name | `NeedleDropper` |
+| Summary | `One hand-picked song and a cinematic title card, the first time you arrive somewhere new.` (89 characters; the field's limit *(verify)*. If LISTING.md's summary has changed since, use that one.) |
+| Main category | **Audio & Video** |
+| Additional categories | Optional (up to 4). **Roleplay** fits, because NeedleDropper is about immersion. Leave out anything that doesn't really fit: moderators send projects back for unrelated categories. |
+| License | **MIT License** |
+| Logo | `assets/logo/needledropper-logo-400.png` |
+| Description | The **Long description** box in [LISTING.md](LISTING.md) (pick Markdown if the editor asks). Replace `{{CURSEFORGE_URL}}` with the project's address, probably `https://www.curseforge.com/wow/addons/needledropper` *(verify)*, and delete the Wago line unless you set up Wago. |
+| Source | `https://github.com/Soupoleon/NeedleDropper` |
+| Issues | `https://github.com/Soupoleon/NeedleDropper/issues` |
+| Wiki, donation | Leave them empty |
+
+4. Save. The project now exists but isn't public yet. It goes to the moderators once it has a file
+   (step 3).
+
+## 2. Add the screenshot
+
+In the project, open **Images** (or **Gallery**) *(verify)* and upload:
+
+- **File:** `assets/screenshots/title-card-razor-hill.png`
+- **Title:** `Razor Hill`
+- **Description:** `The first time you arrive somewhere, the zone music fades, a song starts and the title card drifts in.`
+- Tick **Featured** if the form offers it, so this picture leads the page.
+
+## 3. Upload the first Beta file (by hand)
+
+In the project, open **Files** → **Upload file**:
+
+| Field | Value |
+|---|---|
+| File | `dist\NeedleDropper-1.2.0-addon.zip` (from step 0) |
+| Display name | `v1.2.0-beta.1` |
+| Release type | **Beta** |
+| Game version | **WoW: Forever 1.60.1** (client 1.60.1.70790, TOC `## Interface: 16001`). The exact name in the list *(verify)* |
+| Changelog | The text below. Pick Markdown if the form asks. |
+| Release options | Publish as soon as it's approved |
+| Related projects | None |
+
+```markdown
+First public beta of NeedleDropper 1.2.0.
+
+- One hand-picked song and a cinematic title card, the first time you arrive somewhere new.
+- Everything happens in game: type /needle for the Drops, Soundtracks and Journal tabs. Add drop here, paste a Spotify or YouTube link, and Test it.
+- Two built-in soundtracks, Azeroth Mixtape and Azeroth Unbound, plus your own. Share them with a code.
+- Spotify and YouTube songs need the free NeedleDropper app for Windows, a separate download: https://github.com/Soupoleon/NeedleDropper/releases/latest
+- This is a beta. Please report bugs at https://github.com/Soupoleon/NeedleDropper/issues
+
+Full notes: https://github.com/Soupoleon/NeedleDropper/blob/main/CHANGELOG.md
+```
+
+Click **Upload**. The file shows **Under review** and the project is now in the moderators' queue.
+That can take a few days *(verify)*. If they ask for changes, they'll message you.
+
+> **Beta-only projects don't reach the CurseForge App yet.** CurseForge's help pages say a project
+> needs at least one **Release** file before it syncs to the CurseForge App *(verify)*. Until then,
+> testers download the zip from the project's **Files** tab (or from GitHub). The first Release
+> file (`v1.2.0`) brings the project into the app.
+
+## 4. After approval: connect the Release workflow
+
+1. **Project ID.** The **About Project** box on the project page shows **Project ID**, a number. It
+   may show up before approval too *(verify)*. Add one line to
+   `addon/NeedleDropper/NeedleDropper.toc`, under `## X-License: MIT`, using your own number:
+
+   ```
+   ## X-Curse-Project-ID: 123456
+   ```
+
+   Other people are editing `addon/` right now, so add the line once their changes are in. Then
+   commit and push to `main`.
+2. **API token.** Open <https://authors.curseforge.com/#/settings/api-tokens>, name the token
+   `NeedleDropper GitHub`, generate it and copy it. It may be shown only once *(verify)*.
+3. **GitHub secret.** In the repository, open *Settings → Secrets and variables → Actions → New
+   repository secret*. Name it `CF_API_KEY`, exactly that: the workflow hands it to the packager as
+   `CF_API_TOKEN`. Paste the token as the secret and click **Add secret**.
+
+The token belongs only in that secret. Never put it in the TOC, a file, an issue or a chat.
+
+## 5. From then on, one tag uploads everything
+
+The Release workflow ([release.yml](../../.github/workflows/release.yml), the source of truth)
+runs on every version tag:
+
+| Tag | GitHub | CurseForge |
+|---|---|---|
+| `v1.2.0-alpha.N` | pre-release | Alpha |
+| `v1.2.0-beta.N` | pre-release | Beta |
+| `v1.2.0` | latest release | Release |
+
+It refuses any other tag (`v1.2.0-rc.1`, `v1.2`). For the next beta:
+
+```powershell
+git tag -a v1.2.0-beta.2 -m "NeedleDropper 1.2.0 beta 2"
+git push origin v1.2.0-beta.2
+```
+
+- **Start at beta.2.** You uploaded beta.1 by hand, so tagging it again would put it on CurseForge
+  twice.
+- The workflow checks the tag against `__version__` in `companion/needledropper/__init__.py` and the
+  TOC's `## Version:`, and says what to fix when they don't match.
+- It builds the app and the GitHub release first. Then the BigWigs packager zips the addon and
+  uploads it. The packager reads the game version from the TOC's `## Interface: 16001`; check that
+  the first automatic file lands on WoW: Forever 1.60.x *(verify)*. The changelog it sends is the
+  whole of CHANGELOG.md.
+- The run's **Summary** page has a table. *CurseForge: upload to project 123456 (beta)* means the
+  upload is on. *skipped: no CF_API_KEY secret* or *skipped: no ## X-Curse-Project-ID in the TOC*
+  tells you what's missing. A skipped site doesn't fail the run.
+- To keep tags GitHub-only for a while (a friends-only build, say), add the repository **variable**
+  `ADDON_SITE_UPLOADS` with the value `off` (*Settings → Secrets and variables → Actions →
+  Variables*). Delete it to turn the uploads back on.
+- WoWInterface stays off, because it has no WoW: Forever versions yet.
+
+## Optional: Wago Addons
+
+1. Sign in at <https://addons.wago.io> and create the addon from the developer dashboard *(verify
+   the menu names)*. Use the same name, summary, description, logo and screenshot, with category
+   **Audio & Video**.
+2. Check that Wago offers **WoW: Forever** as a game version *(verify)*. If it doesn't, skip Wago for
+   now.
+3. If Wago wants a first file before review, upload the same zip as a Beta *(verify)*.
+4. Copy the Wago project ID (a short code) into the TOC as `## X-Wago-ID: <id>`.
+5. Create an API key in your Wago account settings *(verify where)* and add it to GitHub as the
+   secret `WAGO_API_TOKEN`.
+
+From then on, the same tags upload to Wago too.
+
+## About the files
+
+- **Logo.** `assets/logo/make_logo.py` draws it in plain Python, with the same palette and shape as
+  the app icon (`assets/make_icon.py`). To redraw it, run `python assets\logo\make_logo.py`. It
+  writes `needledropper-logo-400.png` (the one to upload) and a 1024 px master
+  (`needledropper-logo-1024.png`) next to the script in a few seconds.
+- **Screenshot.** It's cropped from the 2000 × 1126 copy of your Razor Hill screenshot: the box from
+  (416, 160) to (1584, 817), 1168 × 657 (16:9), saved as PNG with only its sRGB colour profile. The
+  crop leaves out the chat (other players' names), another player's name and guild tag, your player
+  frame, the minimap and coordinates, the quest tracker, the gamepad hints, the action buttons and
+  the beacon corner. Three NPC names ("Razor Hill Grunt") stay next to the title card; NPC names are
+  fine. The crop was done with Pillow from the system Python, because the project's `.venv` has no
+  image library.
+- **Sharper version.** The 4K original (3840 × 2160) gives the same framing at about (799, 307) to
+  (3041, 1567); scale that crop to 1920 × 1080. For a cleaner retake, turn off NPC names in the
+  game's settings first *(verify where)*, and follow [screenshots.md](screenshots.md).

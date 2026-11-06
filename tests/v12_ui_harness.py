@@ -1,19 +1,15 @@
-"""Loader for the NeedleDropper window tests (A2, DESIGN-v1.2 §4.3-4.10).
+"""Loader for the NeedleDropper window tests (A2, DESIGN-v1.2 4.3-4.10).
 
-Runs the addon in lupa's Lua 5.1 like ``tests/addon_harness.py`` does, with two additions:
-
-* ``tests/lua/shim_ui.lua`` is loaded right after ``wow_shim.lua``: a recording frame mock of the
-  Blizzard widget kit (template allowlist enforced by ``CreateFrame``), ScrollBox / Blizzard_Menu
-  / StaticPopup / GameTooltip / UISpecialFrames, and input helpers (``SHIM.ui.Click``, ``Type``,
-  ``Paste``, ``PressEscape`` ...);
-* the A1 model (``ns.Soundtracks`` / ``ns.Share`` / ``ns.Companion``) is either the stand-in in
-  ``SHIM.uiFakes`` (exactly the CONTRACTS 2.5-2.7 signatures; the default) or, with
-  ``real=True``, the real ``Locale.lua`` / ``Sets.lua`` / ``Soundtracks.lua`` / ``Share.lua`` /
-  ``Companion.lua`` once they exist.
-
-The v1.2 TOC is the integrator's, so the file list is spelled out here: today's v1 core files
-(``Protocol.lua`` is still needed by ``Director.lua``), ``Protocol2.lua`` for the link parsers, then
-the five ``UI/*.lua`` files in CONTRACTS 2.1 order.
+A thin wrapper over the unified :class:`addon_harness.AddonHarness`, which loads
+``tests/lua/shim_ui.lua`` (a recording frame mock of the Blizzard widget kit the window is built
+from: template allowlist enforced by ``CreateFrame``, ScrollBox / Blizzard_Menu / StaticPopup /
+GameTooltip / UISpecialFrames, and input helpers ``SHIM.ui.Click``, ``Type``, ``Paste``,
+``PressEscape`` ...) and the addon in the real TOC order. The A1 model (``ns.Soundtracks`` /
+``ns.Share`` / ``ns.Companion``) is either the stand-in in ``SHIM.uiFakes`` (exactly the
+CONTRACTS 2.5-2.7 signatures; the default: the model files are not loaded) or, with
+``real=True``, the real ``Sets.lua`` / ``Soundtracks.lua`` / ``Share.lua`` / ``Companion.lua``.
+``SHIM.uiFakes.InstallDirector`` records the window's Director calls (PlayTest, SuppressHere) and
+passes them on to the real Director.
 """
 from __future__ import annotations
 
@@ -23,23 +19,13 @@ from typing import Any, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from addon_harness import ADDON_DIR, AddonHarness, lua_literal  # noqa: E402
+from addon_harness import (ADDON_DIR, MODEL_FILES, SHIM_ENCODING_PATH, AddonHarness, is_set_file,  # noqa: E402
+                           lua_literal, toc_files)
 
 SHIM_UI = Path(__file__).resolve().parent / "lua" / "shim_ui.lua"
-SHIM_ENCODING = Path(__file__).resolve().parent / "lua" / "shim_encoding.lua"
+SHIM_ENCODING = SHIM_ENCODING_PATH
 
-UI_FILES = ["UI/Window.lua", "UI/Drops.lua", "UI/Soundtracks.lua", "UI/Journal.lua", "UI/ShareDialogs.lua"]
-
-# Today's core (v1 Director needs v1 Protocol.lua); Map.lua is replaced by an injected value.
-# Beacon.lua / ChatLink.lua / Emit.lua belong to A3 and are being rewritten concurrently; the
-# Director reaches them only through `if ns.Beacon` / `if ns.ChatLink`, so they are left out.
-CORE_BEFORE = ["Protocol.lua", "Protocol2.lua", "Core.lua"]
-CORE_AFTER = ["Location.lua", "Discovery.lua", "Audio.lua", "Toast.lua", "Director.lua", "Options.lua"]
-
-# CONTRACTS 2.1 order of the A1 modules (used with real=True, when the files exist).
-A1_EARLY = ["Locale.lua", "Json.lua", "Base64.lua"]
-A1_MODEL = ["Sets.lua", "Sets/AzerothMixtape.lua", "Sets/AzerothUnbound.lua", "Soundtracks.lua", "Share.lua",
-            "Companion.lua"]
+UI_FILES = [f for f in toc_files() if f.startswith("UI/")]
 
 A1_REQUIRED = ["Locale.lua", "Sets.lua", "Soundtracks.lua", "Share.lua", "Companion.lua"]
 
@@ -59,49 +45,48 @@ class UIHarness(AddonHarness):
     def __init__(self, *, real: bool = False, builtins: Optional[list] = None,
                  location: Optional[tuple] = (1429, "Goldshire"), login: bool = True, settle: float = 5.0,
                  load_ui: bool = True, db: Optional[dict] = None, char_db: Optional[dict] = None,
-                 settings: Optional[dict] = None, known_files: Optional[list] = None, **kw: Any) -> None:
+                 settings: Optional[dict] = None, known_files: Optional[list] = None, before_load=None,
+                 **kw: Any) -> None:
         self.real = real
-        early, model = [], []
-        if real:
-            early = [f for f in A1_EARLY if (ADDON_DIR / f).exists()]
-            model = [f for f in A1_MODEL if (ADDON_DIR / f).exists()]
-        files = early + CORE_BEFORE + model + CORE_AFTER
-        dedup: list[str] = []
-        for f in files:
-            if f not in dedup:
-                dedup.append(f)
+        files = toc_files()
+        if not real:
+            files = [f for f in files if f not in MODEL_FILES and not is_set_file(f)]
+        if not load_ui:
+            files = [f for f in files if not f.startswith("UI/")]
+        self._builtins = builtins
+        self._ui_split = False
 
         def before(h: "UIHarness") -> None:
-            h._run(SHIM_UI.read_text(encoding="utf-8"), "@shim_ui.lua")
-            if real and SHIM_ENCODING.exists():
-                # A1's zlib bridge for C_EncodingUtil (tests/v12_model_harness.py), hex mode.
-                from v12_model_harness import make_bridge
-                compress, decompress = make_bridge("hex")
-                h.g.SHIM_ENCODING_BRIDGE = h.rt.table_from({"mode": "hex", "compress": compress,
-                                                             "decompress": decompress})
-                h.rt.execute('SHIM.encoding = { failMode = "error", absent = false }')
-                h._run(SHIM_ENCODING.read_text(encoding="utf-8"), "@shim_encoding.lua")
             for path in known_files or []:
                 h.shim.state.knownFiles[path] = True
+            if before_load:
+                before_load(h)
 
-        super().__init__(map=None, files=dedup, login=False, before_load=before, location=location,
+        super().__init__(files=files, login=False, before_load=before, location=location,
                          db=db, char_db=char_db, settings=settings, **kw)
-        self.ui_shim = self.g.SHIM.ui
-        self.fakes = self.g.SHIM.uiFakes
-        self._same = self.rt.execute("return function(a, b) return rawequal(a, b) end")
-        if not real:
-            opts = {"builtins": builtins} if builtins is not None else {}
-            self.fakes.Install(self.ns, self.rt.execute("return " + lua_literal(opts)))
-        self.frames_before_ui = len(list(self.shim.frames.values()))
-        self.created_before_ui = len(list(self.ui_shim.created.values()))
-        if load_ui:
-            for f in ui_files_present():
-                self.load_file(f)
+        if not self._ui_split:
+            self._split_point()
         self.frames_after_ui = len(list(self.shim.frames.values()))
         self.fakes.InstallDirector(self.ns)
         self.check_errors()
         if login:
             self.login(settle=settle)
+
+    def _split_point(self) -> None:
+        """Before the first UI file: count the frames so far, install the model stand-ins."""
+        self._ui_split = True
+        self.ui_shim = self.g.SHIM.ui
+        self.fakes = self.g.SHIM.uiFakes
+        if not self.real:
+            opts = {"builtins": self._builtins} if self._builtins is not None else {}
+            self.fakes.Install(self.ns, self.rt.execute("return " + lua_literal(opts)))
+        self.frames_before_ui = len(list(self.shim.frames.values()))
+        self.created_before_ui = len(list(self.ui_shim.created.values()))
+
+    def load_file(self, fname: str) -> None:
+        if fname.startswith("UI/") and not self._ui_split:
+            self._split_point()
+        super().load_file(fname)
 
     # ---------------------------------------------------------------- access --
 
@@ -136,18 +121,10 @@ class UIHarness(AddonHarness):
     def eval(self, expr: str):
         return self.rt.execute("return " + expr)
 
-    def table(self, value):
-        """A Python list / dict as a Lua table (lupa passes Python containers as userdata)."""
-        return self.rt.execute("return " + lua_literal(value))
-
     def set_active(self, refs: list[str]):
         res = self.S.SetActive(self.table(refs))
         self.check_errors()
         return res
-
-    def same(self, a, b) -> bool:
-        """Lua identity (lupa proxies do not compare with ==)."""
-        return bool(self._same(a, b))
 
     def focused(self):
         return self.ui_shim.focus
@@ -223,10 +200,6 @@ class UIHarness(AddonHarness):
 
     def set_slider(self, slider, value: float):
         return self._do(self.ui_shim.SetSlider, slider, value)
-
-    def flush(self):
-        """Run what is due on the next frame (C_Timer.After(0, ...))."""
-        self.advance(0)
 
     # ---------------------------------------------------------------- menus --
 

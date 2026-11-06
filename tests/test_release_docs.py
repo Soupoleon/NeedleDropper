@@ -237,14 +237,17 @@ def test_readme_pitch_diagram_quick_start_and_links():
 
 def test_install_guide_covers_the_public_release():
     text = flat("INSTALL")
+    # "Fullscreen (Windowed)" is the client's own label (GlobalStrings VIDEO_OPTIONS_WINDOWED_FULLSCREEN); the
+    # v1.1 docs had it backwards ("Windowed (Fullscreen)"), which this test used to require.
     for needed in ("NeedleDropper.exe", "-addon.zip", "-win64.zip", "Windows protected your PC", "More info",
-                   "Run anyway", "Windowed (Fullscreen)", "/reload", "restart the game", "Uninstalling",
+                   "Run anyway", "Fullscreen (Windowed)", "/reload", "restart the game", "Uninstalling",
                    "NeedleDropper_Local", "%APPDATA%\\NeedleDropper", "addon manager",
-                   "_forever_\\Interface\\AddOns"):
+                   "_forever_\\Interface\\AddOns", "NeedleDropper_Local\\media", "Start with Windows",
+                   "/needle test"):
         assert needed in text, needed
-    # the control panel's sections, by their SPEC-v1.1 C.2 names
-    for section in ("**Status**", "**Music services**", "**Soundtrack**", "**Game & addon**", "**Advanced**"):
-        assert section in text, section
+    # v1.2: the Connect page's four cards (DESIGN-v1.2 1.4) replaced the v1.1 control panel's sections
+    for card in ("**World of Warcraft**", "**Spotify**", "**YouTube**", "**Check the link**"):
+        assert card in text, card
 
 
 def test_providers_guide_covers_the_three_services():

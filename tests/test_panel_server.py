@@ -246,13 +246,18 @@ def test_open_player_builds_the_app_window_command(deck, monkeypatch, tmp_path):
     assert deck.open_player() == "none" and len(deck.launched) == 2
 
 
-def test_open_player_falls_back_to_the_default_browser(monkeypatch):
+def test_open_player_never_falls_back_to_the_default_browser(monkeypatch):
+    """Real-client finding #8: a tab in the default browser took the owner out of the game. Without
+    Edge or Chrome there is no player window (the drop plays on another provider or shows its
+    card). This test used to assert the default-browser fallback."""
     monkeypatch.setattr(server, "find_browser", lambda kind="edge": None)
     opened: list[str] = []
     d = Deck(port=0, launcher=lambda a: pytest.fail("no browser exe"), url_opener=lambda u: opened.append(u) or True)
     d.start()
     try:
-        assert d.open_player() == "default" and opened == [d.player_url]
+        assert d.open_player() == "none" and opened == []
+        d.configure_player(browser="default")             # an old config: Edge / Chrome, never a tab
+        assert d.open_player() == "none" and opened == []
     finally:
         d.stop()
 

@@ -80,8 +80,8 @@ flowchart LR
 - **First-arrival songs** for zones, capitals, landmarks and (optionally) dungeons and raids.
 - **One window, in game** (`/needle`, the add-on compartment or a key binding) with three tabs:
   **Drops**, **Soundtracks** and **Journal**. Settings live in the game's Settings panel.
-- **Add drop here**: stand anywhere, press one button, type a song or paste a Spotify or YouTube
-  link, ▶ **Test**. Done.
+- **Add drop here**: stand anywhere, press one button, type the artist and title (paste a Spotify or
+  YouTube link too, for the exact recording), **Test**. Done.
 - **Two built-in soundtracks:**
   - **Azeroth Mixtape** (the default): 38 iconic places, half the songs fitting, half funny
     ([liner notes](docs/MIXTAPE.md));
@@ -102,7 +102,8 @@ flowchart LR
 - **A tiny app**: a one-time Connect page, then just a tray icon that starts with Windows and stays
   quiet.
 - **Private and read-only**: nothing leaves your PC except what Spotify and YouTube need to play the
-  music, and an optional daily update check ([privacy](docs/PRIVACY.md), [policies](docs/POLICY.md)).
+  music, and an optional daily update check that is off unless you set it up
+  ([privacy](docs/PRIVACY.md), [policies](docs/POLICY.md)).
 
 ## Quick start
 
@@ -113,14 +114,16 @@ flowchart LR
    somewhere permanent and double-click **`NeedleDropper.exe`**. If Windows says *"Windows protected
    your PC"*, click **More info → Run anyway** ([why](docs/INSTALL.md#windows-protected-your-pc)).
    On its **Connect** page, sign in to **Spotify** (Premium) or simply use **YouTube**, which needs
-   no setup ([music services](docs/PROVIDERS.md)). Then, in the game, type `/needle test`: the page
-   ticks **Check the link**.
+   no setup ([music services](docs/PROVIDERS.md)). Start the app before the game the first time (or
+   restart the game once): the game finds the app's small data addon only when it starts. Then, in
+   the game, type `/needle test`: the page ticks **Check the link**.
 3. **Play.** Go somewhere your character has never been. The zone music fades, the title card drifts
-   in, and with the app running the song starts.
-4. **Type `/needle`** to open the window: see what plays where, press **Add drop here**, paste a link,
-   ▶ **Test** it ([soundtracks](docs/PACKS.md)).
-5. **Share.** On the Soundtracks tab, **Share…** gives you a code to paste into Discord; friends paste
-   it into **Import…** ([share codes](docs/PACKS.md#share-codes)).
+   in, and with the app running the song starts. (Without the app you see the title card only; those
+   places play their song once the app is installed.)
+4. **Type `/needle`** to open the window: see what plays where, press **Add drop here**, type the artist
+   and title (or paste a link as well), **Test** it ([soundtracks](docs/PACKS.md)).
+5. **Share.** On the Soundtracks tab, **Share...** gives you a code to paste into Discord; friends paste
+   it into **Import...** ([share codes](docs/PACKS.md#share-codes)).
 
 Full walk-through: [docs/INSTALL.md](docs/INSTALL.md).
 
@@ -134,7 +137,7 @@ Full walk-through: [docs/INSTALL.md](docs/INSTALL.md).
 | `/needle journal` | Open the Journal tab: the songs you have heard, with replay |
 | `/needle import` | Paste a share code |
 | `/needle status` | What is pending or playing, why a drop is waiting, the cooldown, the link to the app |
-| `/needle stop` | Stop the song that is playing |
+| `/needle stop` | Stop the song that is playing; nothing else starts here until you move on |
 | `/needle help` | Every command |
 
 The add-on compartment (the small numbered button by the minimap) opens the window with a left-click
@@ -167,12 +170,15 @@ python -m needledropper --help     # every command (diag, packs, ...)
 
 Run the tests with `python -m pytest tests -q` from the repository root. The built-in soundtracks are
 generated from `packs/*.json` with `python tools/gen_sets.py` (see [docs/SETS-FORMAT.md](docs/SETS-FORMAT.md)).
-Build a release (tests, `NeedleDropper.exe`, both zips and `SHA256SUMS.txt`) with:
+Build a release (tests, the soundtrack check, `NeedleDropper.exe`, the addon zip, the two Windows
+zips and `SHA256SUMS.txt`, all in `dist\`) with:
 
 ```
 .venv\Scripts\python.exe -m pip install -r companion\build-requirements.txt
 powershell -ExecutionPolicy Bypass -File tools\build_release.ps1
 ```
+
+Before a release, run the in-game check in [docs/FIRST-TEST.md](docs/FIRST-TEST.md) on a real client.
 
 The addon zip for CurseForge, Wago and WoWInterface can also be built by the
 [BigWigs packager](https://github.com/BigWigsMods/packager) from [`.pkgmeta`](.pkgmeta).

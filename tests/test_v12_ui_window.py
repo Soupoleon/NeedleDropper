@@ -62,9 +62,15 @@ def test_close_button_onclick_is_replaced_and_works_in_combat(h):
     assert not h.same(close.GetScript(close, "OnClick"), h.g.UIPanelCloseButton_OnClick)
     h.click(close)
     assert not h.UI.IsShown()
-    # In combat the window is hidden, but the player may open it again; X still closes it.
+    # In combat the window stays hidden (DESIGN 4.3): an open asked for in combat happens when
+    # combat ends -- shown in combat, Forever's gamepad UI could neither drive nor close it
+    # (UI review UI-OPEN-IN-COMBAT). This used to assert that it opened at once.
     h.combat(True)
+    before = len(h.prints())
     h.open()
+    assert not h.UI.IsShown()
+    assert h.prints()[before:] == ["NeedleDropper: NeedleDropper opens when combat ends."]
+    h.combat(False)
     assert h.UI.IsShown()
     h.click(close)
     assert not h.UI.IsShown()
@@ -186,6 +192,10 @@ def test_footer_status_line(h):
     w = h.window
     # The harness login fired the Goldshire drop: "Playing: <place> · <song> (<source>)" + [Stop].
     assert h.text(w.Status) == "Playing: Goldshire · Toto · Africa (YouTube)"
+    # The Drops tab's own button bar has Stop, so the window's Stop stays hidden there (two Stop
+    # buttons side by side before: UI review UI-FOOTER-OVERLAP); the other tabs show it.
+    assert not h.shown(w.StopButton) and h.enabled(h.buttons(1).Stop)
+    h.open("soundtracks")
     assert h.shown(w.StopButton)
     h.click(w.StopButton)
     assert h.ns.Director.active is None

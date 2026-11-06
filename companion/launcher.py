@@ -8,7 +8,8 @@ a GUI-subsystem program, which Windows starts without a console window:
   nothing is printed anywhere.
 * **A command** (``NeedleDropper.exe diag``, ``validate``, ``--version``, ...): the output
   needs a console. Started from a terminal, the launcher attaches to that terminal's
-  console (Windows does not wait for GUI programs, so the prompt may come back before
+  console -- for the one-file exe, the console of its bootloader's parent, see
+  :func:`terminal_pid` (Windows does not wait for GUI programs, so the prompt may come back before
   the output; ``start /wait NeedleDropper.exe diag`` in cmd, or piping the output, e.g.
   ``NeedleDropper.exe validate | Out-Host`` in PowerShell, keeps it in order). Started
   without one (a shortcut with arguments), it opens a console window of its own and
@@ -69,6 +70,12 @@ def owns_console() -> bool:
     console build / ``python launcher.py``) it was started by double-click, not from a terminal."""
     if console_mode == "allocated":
         return True
+    if console_mode == "attached":
+        # Attaching only works to a console another process owns (the player's terminal): never pause
+        # there -- "Press Enter" would block on the terminal's own input. (The process-count rule below
+        # would say "ours": a windowed one-file exe's bootloader holds no console, so the terminal and
+        # this process make 2.)
+        return False
     k32 = _kernel32()
     if k32 is None:
         return False
@@ -111,8 +118,72 @@ def _stream_usable(stream: Any) -> bool:
     return True
 
 
+def process_parents(k32: Any, pid: int) -> dict[int, tuple[int, str]]:
+    """``{pid: (parent pid, exe name)}`` of every process (Toolhelp snapshot); {} when unavailable."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class PROCESSENTRY32W(ctypes.Structure):
+            _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
+                        ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
+                        ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
+                        ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", ctypes.c_long),
+                        ("dwFlags", wintypes.DWORD), ("szExeFile", ctypes.c_wchar * 260)]
+
+        snapshot = k32.CreateToolhelp32Snapshot
+        snapshot.restype = wintypes.HANDLE
+        snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+        first, nxt = k32.Process32FirstW, k32.Process32NextW
+        for fn in (first, nxt):
+            fn.restype = wintypes.BOOL
+            fn.argtypes = [wintypes.HANDLE, ctypes.POINTER(PROCESSENTRY32W)]
+        h = snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
+        if not h or h == ctypes.c_void_p(-1).value:
+            return {}
+        out: dict[int, tuple[int, str]] = {}
+        try:
+            entry = PROCESSENTRY32W()
+            entry.dwSize = ctypes.sizeof(PROCESSENTRY32W)
+            ok = first(h, ctypes.byref(entry))
+            while ok:
+                out[int(entry.th32ProcessID)] = (int(entry.th32ParentProcessID), str(entry.szExeFile))
+                ok = nxt(h, ctypes.byref(entry))
+        finally:
+            k32.CloseHandle(h)
+        return out
+    except Exception:  # noqa: BLE001 - AttributeError (a fake), OSError, ctypes errors: no information
+        return {}
+
+
+def terminal_pid(k32: Any) -> Optional[int]:
+    """The process whose console a **one-file** exe should attach to: the parent of the bootloader.
+
+    PyInstaller's one-file exe runs as two processes: a bootloader that unpacks the app and then
+    starts the same exe again as the real Python process. Python's parent is therefore that
+    windowed bootloader, which has no console, so ``ATTACH_PARENT_PROCESS`` fails even when the
+    player typed the command in a terminal; the terminal is the bootloader's parent.
+    """
+    me = os.getpid()
+    table = process_parents(k32, me)
+    if me not in table:
+        return None
+    parent, _exe = table[me]
+    grand = table.get(parent)
+    if grand is None:
+        return None
+    own = os.path.basename(sys.executable).lower()
+    if grand[1].lower() != own:  # the parent is not our own bootloader: nothing more to try
+        return None
+    return grand[0] or None
+
+
 def attach_console(*, allow_alloc: bool = True) -> str:
-    """Give a windowed process a console for its output; returns the new :data:`console_mode`."""
+    """Give a windowed process a console for its output; returns the new :data:`console_mode`.
+
+    Order: the parent's console (the terminal that started a one-folder exe or ``python
+    launcher.py``), then the bootloader's parent's (a one-file exe, see :func:`terminal_pid`),
+    then -- started without a terminal, e.g. from a shortcut -- a console window of its own."""
     global console_mode
     if _stream_usable(sys.stdout):
         console_mode = "existing"
@@ -131,8 +202,12 @@ def attach_console(*, allow_alloc: bool = True) -> str:
         k32.AllocConsole.restype = wintypes.BOOL
         if k32.AttachConsole(ATTACH_PARENT_PROCESS):
             how = "attached"
-        elif allow_alloc and k32.AllocConsole():
-            how = "allocated"
+        else:
+            grand = terminal_pid(k32) if getattr(sys, "frozen", False) else None
+            if grand and k32.AttachConsole(grand):
+                how = "attached"
+            elif allow_alloc and k32.AllocConsole():
+                how = "allocated"
     except Exception:  # noqa: BLE001 - OSError, ctypes.ArgumentError, ...: stay without a console
         how = "none"
     if how != "none":

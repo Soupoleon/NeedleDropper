@@ -18,7 +18,6 @@ import json
 import logging
 import os
 import sys
-import tempfile
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -155,23 +154,18 @@ def unprotect(blob: bytes, *, entropy: bytes = DEFAULT_ENTROPY) -> bytes:
 
 
 def save_secret(path: PathLike, value: dict[str, Any]) -> None:
-    """Serialize ``value`` as JSON, protect it and write it atomically to ``path``."""
+    """Serialize ``value`` as JSON, protect it and write it atomically to ``path``.
+
+    The write goes through :func:`needledropper.atomicio.atomic_write_bytes`: retried while
+    the file is locked (antivirus, a backup tool), and written in place when Windows refuses
+    the rename across devices (WinError 17 under a virtualised ``%APPDATA%``). Anything else
+    raises ``OSError``; callers holding fresh credentials keep them in memory (TokenStore).
+    """
+    from . import atomicio
+
     target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
     blob = protect(json.dumps(value, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    fd, tmp = tempfile.mkstemp(prefix=target.name + ".", suffix=".tmp", dir=str(target.parent))
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(blob)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, target)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    atomicio.atomic_write_bytes(target, blob, prefix=target.name + ".")
 
 
 def load_secret(path: PathLike) -> Optional[dict[str, Any]]:

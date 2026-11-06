@@ -750,7 +750,8 @@ def validate_report(ps: PackSet) -> tuple[list[str], bool]:
     lines.append(f"Total: {len(ps.drops)} drop(s) after merge ({kind_s}); sources: {src_s}.")
     unresolved = sum(1 for d in ps.drops if not d.spotify and not d.youtube and not d.appleMusic and not d.file)
     if unresolved:
-        lines.append(f"{unresolved} drop(s) have no source yet -- `needledropper resolve` can find them on Spotify.")
+        lines.append(f"{unresolved} drop(s) have no source yet -- the NeedleDropper app searches Spotify for them "
+                     "by artist and title when the drop is armed in game.")
     ok = ps.ok
     lines.append("Packs are valid." if ok else f"{len(ps.errors)} error(s) -- fix them and run validate again.")
     return lines, ok

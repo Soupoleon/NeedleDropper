@@ -1,10 +1,14 @@
 local ADDON, ns = ...
 -- Options: a Settings API panel (Game Menu > Options > AddOns > NeedleDropper) for every
--- setting in ns.SETTINGS, grouped under section headers, with a "Preview" button for the
--- title card (its size / position sliders re-lay out a card that is showing, so the effect is
--- visible while dragging). Every Settings call is guarded; if the API is missing or changed,
--- the addon stays fully usable through /needle settings and /needle set, and a missing
--- header or button never costs a setting.
+-- setting in ns.SETTINGS except the advanced ones (beaconCorner: /needle set only), grouped
+-- under section headers (DESIGN-v1.2 4.7):
+--   * an "Open NeedleDropper" row at the top (the window is where soundtracks are edited);
+--   * a "Preview" button for the title card (its size / position sliders re-lay out a card
+--     that is showing, so the effect is visible while dragging);
+--   * "Send a test signal" under Companion link (PING + TEST: the app shows a notification).
+-- Every Settings call is guarded; if the API is missing or changed, the addon stays fully
+-- usable through /needle settings and /needle set, and a missing header or button never
+-- costs a setting.
 
 local O = {}
 ns.Options = O
@@ -25,6 +29,9 @@ local SECTIONS = {
   debug = "Troubleshooting",
 }
 local PREVIEW_AFTER = "toastSeconds"   -- the title card's Preview button follows this setting
+local SIGNAL_AFTER = "chatlogPadBytes" -- "Send a test signal" ends the Companion link section
+
+local L = ns.L or setmetatable({}, { __index = function(_, k) return k end })
 
 local function settingVarType(meta, default)
   local vt = Settings and Settings.VarType
@@ -112,29 +119,63 @@ function O.PreviewClicked()
   if ns.Toast and ns.Toast.Preview then ns.Toast.Preview() end
 end
 
-local function addPreviewButton()
+local function addButton(what, name, text, onClick, tip)
   if type(CreateSettingsButtonInitializer) ~= "function" then return false end
-  return addExtra("preview button", function()
-    return CreateSettingsButtonInitializer("Title card preview", "Preview", O.PreviewClicked,
-      "Shows the title card for where you are now, so you can try the size, position and time settings.", true)
+  return addExtra(what, function()
+    return CreateSettingsButtonInitializer(name, text, onClick, tip, true)
   end)
+end
+
+local function addPreviewButton()
+  return addButton("preview button", L["Title card preview"], L["Preview"], O.PreviewClicked,
+    L["Shows the title card for where you are now, so you can try the size, position and time settings."])
+end
+
+-- Opens the window from the Settings panel (DESIGN-v1.2 4.7: content is edited there, not here).
+-- Settings stays open underneath: the window's DIALOG strata is above it.
+function O.OpenWindowClicked()
+  local U = ns.UI
+  if type(U) == "table" and type(U.Open) == "function" then
+    U.Open()
+  else
+    ns.Print(L["the NeedleDropper window is not available."])
+  end
+end
+
+local function addOpenButton()
+  return addButton("open button", L["NeedleDropper window"], L["Open NeedleDropper"], O.OpenWindowClicked,
+    L["Your soundtracks and drops are edited in the NeedleDropper window (also /needle)."])
+end
+
+function O.SignalClicked()
+  local S = ns.SelfTest
+  if type(S) == "table" and type(S.Signal) == "function" then S.Signal() end
+end
+
+local function addSignalButton()
+  return addButton("signal button", L["Check the link"], L["Send a test signal"], O.SignalClicked,
+    L["Sends a test signal through the beacon (and the chat log when it is on). Your NeedleDropper app shows a notification within 2 seconds if it can see the game."])
 end
 
 local function build()
   local category, layout = Settings.RegisterVerticalLayoutCategory("NeedleDropper")
   if type(category) ~= "table" then error("RegisterVerticalLayoutCategory returned nothing") end
   O.layout = layout
+  addOpenButton()
   for i = 1, #ns.SETTINGS do
     local meta = ns.SETTINGS[i]
-    if SECTIONS[meta.key] then addHeader(SECTIONS[meta.key]) end
-    local ok, err = pcall(addControl, category, meta)
-    if ok then
-      O.controls = O.controls + 1
-    else
-      O.controlErrors = O.controlErrors + 1
-      ns.Debug("options: %s: %s", meta.key, tostring(err))
+    if not meta.advanced then
+      if SECTIONS[meta.key] then addHeader(SECTIONS[meta.key]) end
+      local ok, err = pcall(addControl, category, meta)
+      if ok then
+        O.controls = O.controls + 1
+      else
+        O.controlErrors = O.controlErrors + 1
+        ns.Debug("options: %s: %s", meta.key, tostring(err))
+      end
     end
     if meta.key == PREVIEW_AFTER then addPreviewButton() end
+    if meta.key == SIGNAL_AFTER then addSignalButton() end
   end
   Settings.RegisterAddOnCategory(category)
   O.category = category

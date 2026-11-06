@@ -479,22 +479,40 @@ def test_poll_ends_early_before_natural_track_end(tmp_path):
     assert 1.0 <= sum(rig.clock.sleeps) - slept <= 2.0             # ~1.7 s left before the end
 
 
-def test_poll_reports_error_after_persistent_failures(tmp_path):
-    rig, h = _playing_rig(tmp_path, durationMs=120_000)
+# SPOT-POLL-ERROR-FALLBACK (baseline-findings.md): these two tests used to expect "error" after a
+# few failed polls / a 403. "error" makes the engine start the next provider while Spotify -- which
+# the API outage also prevents us from pausing -- keeps playing the same drop (double audio, Spotify
+# left unmanaged). A poll that cannot read the state now keeps "playing" on the estimated position
+# and reports "ended" at the planned end point.
+
+def test_poll_keeps_playing_through_an_outage_and_ends_on_schedule(tmp_path):
+    rig, h = _playing_rig(tmp_path, durationMs=20_000)
     rig.http.set("GET", "/v1/me/player", ConnectionError("offline"))
     results = []
-    for _ in range(sp.MAX_POLL_FAILURES):
+    for _ in range(sp.MAX_POLL_FAILURES + 3):
         rig.clock.advance(2.1)
         results.append(rig.provider.poll(h))
-    assert results[:-1] == ["playing"] * (sp.MAX_POLL_FAILURES - 1) and results[-1] == "error"
-    assert rig.provider.poll(h) == "error"
+    assert results == ["playing"] * (sp.MAX_POLL_FAILURES + 3)      # never "error": no fallback over Spotify
+    rig.clock.advance(10.0)                                         # past the planned 20 s
+    assert rig.provider.poll(h) == "ended"
+    assert h.data["session"].outcome is None                        # nothing was decided from a failed read
+    rig.http.set("GET", "/v1/me/player", (200, player_state(DROP_TRACK, 20_500)))
+    before = len(rig.http.calls)
+    rig.provider.stop(h, fade_out_ms=0)                             # the API is back: pause + restore
+    assert [c.path for c in rig.http.calls[before:] if c.method == "PUT"][:1] == ["/v1/me/player/pause"]
 
 
-def test_poll_403_is_error(tmp_path):
+def test_poll_403_or_rate_limit_is_not_a_playback_error(tmp_path):
     rig, h = _playing_rig(tmp_path, durationMs=120_000)
     rig.clock.advance(2.1)
     rig.http.set("GET", "/v1/me/player", err(403, "PREMIUM_REQUIRED"))
-    assert rig.provider.poll(h) == "error"
+    assert rig.provider.poll(h) == "playing"
+    rig.clock.advance(2.1)
+    rig.http.set("GET", "/v1/me/player", (429, {"error": {"status": 429, "message": "rate"}}, {"Retry-After": "20"}))
+    assert rig.provider.poll(h) == "playing"
+    gets = len(rig.http.find("GET", "/v1/me/player"))
+    rig.clock.advance(5.0)
+    assert rig.provider.poll(h) == "playing" and len(rig.http.find("GET", "/v1/me/player")) == gets  # backs off
 
 
 # --------------------------------------------------------------- resolve ----

@@ -838,6 +838,7 @@ local rebuildToken = 0
 local rebuildPending = false
 local undoStack = {}
 local migratedFrom = nil
+local migratedFor = nil       -- the account table migratedFrom belongs to
 local initializedFor = nil
 
 local function touch(set)
@@ -869,8 +870,11 @@ end
 
 -- Records the state of the soundtracks `ids` (and, with withActive, both active lists) before
 -- an edit. full = restore the whole soundtrack on undo, not just its drops.
+local undoSerial = 0
+
 local function pushUndo(desc, ids, withActive, full)
-  local rec = { desc = desc, sets = {}, full = full and true or false }
+  undoSerial = undoSerial + 1
+  local rec = { desc = desc, sets = {}, full = full and true or false, token = undoSerial }
   for i = 1, #ids do
     local id = ids[i]
     if rec.sets[id] == nil then rec.sets[id] = snapshot(id) end
@@ -1270,16 +1274,59 @@ function S.UpdateDrop(ref, id, fields)
   return true, d.id
 end
 
+-- Deletes a drop. LastUndoToken() right after it names this deletion for UndoRemove (the
+-- "Deleted X. [Undo]" bar).
 function S.RemoveDrop(ref, id)
   local set, err = writableSet(ref)
   if not set then return nil, err end
   local i, d = findDrop(set, id)
   if not i then return nil, L["That needle drop no longer exists."] end
-  pushUndo(format(L["Delete %s"], d.label or id), { set.id })
+  local rec = pushUndo(format(L["Delete %s"], d.label or id), { set.id })
+  rec.removed = { setId = set.id, index = i, drop = copy(d) }
   tremove(set.drops, i)
   touch(set)
   commit("remove", ref)
   return true
+end
+
+-- Token of the newest undo step (nil when there is none): kept by the window right after an
+-- edit to undo exactly that edit later (UndoRemove).
+function S.LastUndoToken()
+  local rec = undoStack[#undoStack]
+  return rec and rec.token or nil
+end
+
+-- Undoes exactly the deletion RemoveDrop's `token` names, even when other edits came after it:
+-- the drop goes back to its place in its soundtrack and every later edit stays (Undo() would
+-- restore the whole soundtrack as it was before the deletion). Returns true, description; or
+-- nil plus a message ("gone" as a third value when the step is no longer in the undo stack).
+function S.UndoRemove(token)
+  if not ready() then return nil, L[NOT_READY] end
+  local pos
+  for i = #undoStack, 1, -1 do
+    if undoStack[i].token == token then
+      pos = i
+      break
+    end
+  end
+  local rec = pos and undoStack[pos]
+  if not (rec and rec.removed) then return nil, L["That deletion can no longer be undone."], "gone" end
+  local r = rec.removed
+  local u = userSets()
+  local set = u and u[r.setId]
+  if type(set) ~= "table" then return nil, L["That soundtrack no longer exists."] end
+  if findDrop(set, r.drop.id) then
+    return nil, format(L["%s already has a needle drop for %s."], set.name, r.drop.label or r.drop.id)
+  end
+  local ok, lerr = roomFor(set, 1)
+  if not ok then return nil, lerr end
+  tremove(undoStack, pos)
+  local index = r.index
+  if type(index) ~= "number" or index < 1 or index > #set.drops + 1 then index = #set.drops + 1 end
+  tinsert(set.drops, index, copy(r.drop))
+  touch(set)
+  commit("undo", "user:" .. r.setId)
+  return true, rec.desc
 end
 
 -- Copies a drop (from any soundtrack) into a soundtrack of your own. Returns the new id.
@@ -1400,6 +1447,25 @@ local function needSetSlot()
     return nil, format(L["You can have up to %d soundtracks of your own: delete one first."], S.Limits.sets)
   end
   return true
+end
+
+-- My Drops, the personal top layer every "Add drop here" writes to: created when missing (id
+-- my-drops, under a name no other soundtrack uses -- "My Drops (2)" when an imported friend's
+-- "My Drops" already has the name) and moved to priority 1 of the list in use, in one commit.
+-- Returns "user:my-drops", or nil plus a message.
+function S.EnsureMyDrops()
+  if not ready() then return nil, L[NOT_READY] end
+  if myDrops() then
+    if myDropsOnTop() then commit("mydrops", MY_DROPS_REF) end
+    return MY_DROPS_REF
+  end
+  local ok, err = needSetSlot()
+  if not ok then return nil, err end
+  purgeUndo(MY_DROPS)
+  createMyDrops()
+  myDropsOnTop()
+  commit("mydrops", MY_DROPS_REF)
+  return MY_DROPS_REF
 end
 
 -- Writes `d` (validated) into My Drops, creating it and moving it to the top (one undo step).
@@ -1992,6 +2058,13 @@ end
 function S.DoneCounts(drop, record)
   if record == nil or record == false then return false end
   if type(record) == "table" and record.how == "history" then return S.HistoryApplies(drop) end
+  if type(record) == "table" and record.how == "card" then
+    -- Only the title card showed: no NeedleDropper app had been seen (Director.Fire). Heard for
+    -- now, so the card does not repeat; once the app is there the place plays its song.
+    local C = ns.Companion
+    local st = type(C) == "table" and type(C.Status) == "function" and C.Status() or nil
+    return not (type(st) == "table" and st.present == true and not st.outdated)
+  end
   return true
 end
 
@@ -2032,6 +2105,9 @@ function S.MigrateAccount(db)
   end
   if type(db.active) ~= "table" then db.active = defaultRefs() end
   db.schema = S.SCHEMA
+  -- Core.lua migrates before it validates the settings; Init() then finds nothing to do but
+  -- MigratedFrom() still reports this migration.
+  migratedFrom, migratedFor = from, db
   return from
 end
 
@@ -2070,7 +2146,16 @@ local function normalizeSet(id, set)
   else
     local clean = {}
     for i = 1, #set.drops do
-      if type(set.drops[i]) == "table" then clean[#clean + 1] = set.drops[i] end
+      local d = set.drops[i]
+      if type(d) == "table" then
+        -- A drop without its id (hand-edited or damaged SavedVariables) gets it back from its
+        -- place when it has one; one that has no usable place stays, counted as unusable.
+        if type(d.id) ~= "string" or d.id == "" then
+          local v = S.Validate(d)
+          if v then d.id, d.kind = v.id, v.kind end
+        end
+        clean[#clean + 1] = d
+      end
     end
     if #clean ~= #set.drops then set.drops = clean end
   end
@@ -2099,7 +2184,7 @@ function S.Init()
   if initializedFor == db then return true end
   initializedFor = db
   S.newerData = nil
-  migratedFrom = S.MigrateAccount(db)
+  if S.MigrateAccount(db) == nil and migratedFor ~= db then migratedFrom = nil end
   S.MigrateCharacter(cdb)
   normalize(db, cdb)
   undoStack = {}

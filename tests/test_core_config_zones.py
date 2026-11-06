@@ -21,12 +21,18 @@ def test_default_config_matches_spec():
                     "restorePrevious": True, "volume": None},
         "local": {"enabled": True, "mediaDir": "%APPDATA%\\NeedleDropper\\media"},
         "youtube": {"enabled": True},
+        # playerCorner: where the YouTube player window shows (real-client #8: top-right by default)
         "deck": {"port": 8322, "autoOpen": "youtube", "browser": "edge", "playerPosition": "",
-                 "panelOnStart": "first-run"},
-        "transport": {"pixel": {"enabled": True, "method": "auto", "hz": 4, "regionW": 256, "regionH": 32},
+                 "playerCorner": "topright", "panelOnStart": "first-run"},
+        # v1.2: the capture region is the client area's top-left 512 x 48 px (DESIGN-v1.2 2.3)
+        "transport": {"pixel": {"enabled": True, "method": "auto", "hz": 4, "regionW": 512, "regionH": 48},
                       "chatlog": {"enabled": True, "pollMs": 250, "match": "strict"}},
         "fadeInMs": 2500, "fadeOutMs": 3000,
         "setupComplete": False,
+        # v1.2 shell (C2): three-state Start with Windows, the optional update check, the addon page link
+        "startWithWindows": None,
+        "updates": {"releasesUrl": "", "checkHours": 24},
+        "links": {"addonPage": "https://www.curseforge.com/wow/search?search=NeedleDropper"},
     }
     assert config.DEFAULT_CONFIG == expected
     assert Path(config.DEFAULT_CONFIG["packs"][0]).parent == Path(__file__).resolve().parents[1] / "packs"
@@ -63,7 +69,7 @@ def test_deep_merge_and_save_roundtrip(tmp_path):
     assert cfg["spotify"]["redirectPort"] == 8321  # default kept
     assert cfg["providers"] == ["local"]  # lists replace
     assert cfg["deck"] == {"port": 9000, "autoOpen": "youtube", "browser": "edge", "playerPosition": "",
-                           "panelOnStart": "first-run"}
+                           "playerCorner": "topright", "panelOnStart": "first-run"}
     cfg["fadeInMs"] = 100
     config.save_config(cfg)
     again = config.load_config()

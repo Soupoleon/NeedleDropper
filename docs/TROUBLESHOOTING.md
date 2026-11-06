@@ -38,10 +38,11 @@ changes those pixels breaks the link.
 1. **Is the app running?** Look for the NeedleDropper icon in the notification area of the taskbar
    (it may be under the **^** arrow). The app waits quietly until the World of Warcraft: Forever
    window exists and only then starts reading; give it a few seconds after the game opens.
-2. **Run `/needle selftest beacon`.** It shows the largest song strip for 10 seconds, sends a test
-   signal (the app shows its notification) and prints the beacon's cell size, rows, strip size and
-   the measured gap above your player frame. Settings → NeedleDropper → **Send a test signal** does
-   the same test without the big strip.
+2. **Run `/needle selftest beacon`.** It sends a test signal (the app shows its notification), shows
+   the largest song strip for 10 seconds and prints the beacon's cell size, rows, strip size and the
+   measured gap above your player frame. It waits while a song (or the `/needle test` card) is
+   playing: type `/needle stop` first. Settings → NeedleDropper → **Send a test signal** does the
+   same test without the big strip.
 3. **Don't minimize the game.** While WoW is minimized the app can't see the beacon. (A song that
    should have started begins once you bring the game back.) Both display modes the game offers,
    **Windowed** and **Fullscreen (Windowed)**, work.
@@ -60,8 +61,11 @@ changes those pixels breaks the link.
    squares mean fewer rows, so less fits into one signal: go back to 3 if the link was fine.
 9. **Still nothing?** Use the [chat-log link](#chat-log-link) instead, or watch the raw link: open a
    command prompt in the folder that holds `NeedleDropper.exe` (type `cmd` in File Explorer's address
-   bar and press Enter), run `NeedleDropper.exe diag`, then type `/needle selftest beacon` in the
-   game. `diag` prints every frame it decodes and should show `PING`.
+   bar and press Enter), run `start /wait NeedleDropper.exe diag` (the `start /wait` keeps its output
+   in order), then type `/needle selftest beacon` in the game. `diag` prints every frame it decodes
+   and plays nothing: it should show the `PING`, then the self-test's big strip as a `FIRE` of the
+   drop `test` (marked as a test and as an in-game song, so the app doesn't play it either). It can
+   run next to the app. Ctrl+C stops `diag`.
 
 Windows display scaling (125 %, 150 % and so on) is supported: the app measures the squares on
 screen.
@@ -87,29 +91,32 @@ warns: *the beacon overlaps your player frame: move the frame in Edit Mode or se
 
 `/needle status` usually says why: its `pending:` line lists what the drop is waiting for (arrival
 time, combat, flight path, cooldown, another drop playing). The window's Drops tab shows each place's
-state in words: *heard ✓*, *needs a song*, *off*, *overridden*.
+state in words: *heard* (with a tick), *needs a song*, *off*, *overridden*.
 
 | Reason | What to do |
 |---|---|
-| **This character already heard it.** Each place plays once per character | The Journal tab lists what you have heard; **Play again next visit** on a row lets that place play again, ▶ **Replay** plays it now |
+| **This character already heard it.** Each place plays once per character | The Journal tab lists what you have heard; **Play again next visit** on a row lets that place play again, **Replay** plays it now |
+| **You stopped a drop here.** After `/needle stop`, no needle drop starts at this place until you move on (`/needle status` says *quiet here until you move on*) | Leave the zone, landmark or instance and come back |
 | **The place counts as explored.** With *Exploration history: Respect* (the default), places from the **built-in** soundtracks that your character explored before NeedleDropper count as heard. Drops you add yourself always play on your next visit | `/needle set historyMode fresh`, and `/needle reset char` to forget this character's drops |
 | **Once per account.** With *Play each drop once per: Account*, another character already heard it | `/needle set scope character` |
 | **Cooldown.** After a drop, the next one waits 10 minutes by default | Wait, or `/needle set cooldownMin 5` |
 | **Arrival delay.** You must stay 10 s in a new zone (3 s after a "Discovered" message, 4 s in a landmark) | Stay a moment; the delays are options |
 | **Not calm yet.** In combat, on a flight path, dead, in a cinematic or loading screen, or in a boss encounter | It starts by itself when that ends (as long as you stay there) |
-| **No song for this place.** The Drops tab says *No needle drop for <place> yet* | Press **Add drop here**, then paste a Spotify or YouTube link ([how](PACKS.md#add-a-drop-where-you-stand)) |
-| **The drop is a draft** (*needs a song*) | Fill in **Artist** and **Title**: a drop without them never plays |
-| **You turned it off** (*off*), or a soundtrack higher in your list turned it off | Right-click the drop → **Turn on**, or **Revert** it |
+| **No song for this place.** The Drops tab says *No needle drop for <place> yet* | Press **Add drop here**, then type the artist and title, and paste a Spotify or YouTube link if you have one ([how](PACKS.md#add-a-drop-where-you-stand)) |
+| **The drop is a draft** (*needs a song*; the form says *Type the artist and title to finish this drop*) | Fill in **Artist** and **Title**: a drop without them never plays on arrival, even with a link (**Test** still plays it) |
+| **You turned it off** (*off*), or a soundtrack higher in your list turned it off | Right-click the drop → **Turn on here**, or **Revert** it |
 | **A soundtrack above has a song for this place** (*overridden*) | The higher one plays instead. Change the order on the Soundtracks tab ([priority](PACKS.md#which-song-plays-the-priority-order)) |
 | **The soundtrack isn't on.** | Soundtracks tab: tick **On** next to it |
 | **This character uses its own list.** *Use different soundtracks on this character* is ticked on the Soundtracks tab | Turn the soundtrack on in this character's list, or untick the box to use the account's list |
-| **You added it where you stand.** A drop you add with **Add drop here** doesn't start during that visit, so it can't interrupt your editing | ▶ **Test** plays it now; it plays by itself on your next arrival |
+| **You added or edited it where you stand.** A drop you add with **Add drop here**, or change, turn off, delete or move while you stand at its place, doesn't start during that visit, so it can't interrupt your editing (with a half-typed song) | **Test** plays it now; it plays by itself on your next arrival |
 | **Needle drops are switched off.** | `/needle set enabled on` (or the *Enable needle drops* option) |
 | **Dungeons and raids.** | Instance drops need the *Instance drops* option on |
 
 **The title card appears but no music plays:** the addon did its part.
 
 - Is the app running, and does `/needle test` reach it? See [Beacon not detected](#beacon-not-detected).
+- Places you visited before the app was installed (or seen by the game) showed their title card only;
+  they play their song the first time you come back with the app running.
 - Does the drop have a source? The letters next to it in the Drops tab show what it has: **S**
   Spotify, **Y** YouTube, **F** in-game file. A drop with only Artist and Title plays only through
   Spotify (the app searches for it), so without Spotify it stays silent.
@@ -117,6 +124,11 @@ state in words: *heard ✓*, *needs a song*, *off*, *overridden*.
   embedded*? See [Spotify](#spotify) and [YouTube](#youtube).
 - The footer says *Update the NeedleDropper app to 1.2 to play Spotify and YouTube songs*: the app
   on your PC is older than the addon. Update it ([how](INSTALL.md#updating)).
+- The zone music keeps playing under the title card, and `/needle status` says *card only (zone
+  music left on)*: when the game started, NeedleDropper had no word from a 1.2 app (the footer says
+  *NeedleDropper app not found*), so it doesn't fade the zone music for a song that nothing may
+  play. Start the app before the game, or turn on *Fade zone music without the app*
+  (`/needle set duckWithoutApp on`) if the app runs anyway.
 
 **Music plays but there is no title card:** title cards may be off (`/needle toast on`), or the
 game UI is hidden (Alt+Z hides the card with the rest of the UI). `/needle toast` shows a preview.
@@ -127,7 +139,7 @@ game UI is hidden (Alt+Z hides the card with the rest of the UI). `/needle toast
   `/needle set kickZoneMusic on`, or `/needle set duckMethod volume`. `/needle selftest music` fades
   the music out for 8 seconds and back, to test this.
 - If a drop's length is unknown, the game keeps the zone music faded for *Length when unknown*
-  (5 minutes by default), even when the song is shorter. Set **Play for** under **More…** in the
+  (5 minutes by default), even when the song is shorter. Set **Play for** under **More...** in the
   drop's form. (The built-in soundtracks already know every song's length.)
 - If the game closed during a drop, NeedleDropper puts your sound settings back at the next login
   (it says so in the chat).
@@ -137,19 +149,25 @@ game UI is hidden (Alt+Z hides the card with the rest of the UI). `/needle toast
 | You see | What it means |
 |---|---|
 | *needs a song* | The drop is a draft: it has no Artist or Title yet, so it never plays |
-| *That's an album or playlist link: in Spotify right-click the song, then Share, then Copy Song Link.* | Only links to single songs work. Copy the song's own link |
-| *That's a YouTube playlist link: open the video and copy its own link.* | Use the video's own link (`youtube.com/watch?v=…`, `youtu.be/…`, `/shorts/`, `/embed/`, `/live/`, `music.youtube.com`), not a playlist or channel |
+| *That's an album or playlist link: in Spotify right-click the song > Share > Copy Song Link* (in chat after `/needle add`: *…right-click the song, then Share, then Copy Song Link.*) | Only links to single songs work. Copy the song's own link |
+| *That's a playlist link: open the video itself and copy its link* (in chat: *That's a YouTube playlist link: open the video and copy its own link.*) | Use the video's own link (`youtube.com/watch?v=…`, `youtu.be/…`, `/shorts/`, `/embed/`, `/live/`, `music.youtube.com`), not a playlist or channel |
 | *not found: copy it there and restart WoW (a /reload is not enough)* | The in-game file isn't in `Interface\AddOns\NeedleDropper_Local\media`, or it was copied while the game was running. WoW only notices new files when it starts |
-| *landmark saved by name: works on <language> clients only* | NeedleDropper couldn't learn the landmark's area number, so it matches the name your game shows. Players with another game language won't trigger it. The number comes from the game's exploration map: stand inside the landmark (once your character has explored it) and press **Use my location** |
+| *Landmark saved by name: works on <language> clients only.* | NeedleDropper couldn't learn the landmark's area number, so it matches the name your game shows. Players with another game language won't trigger it. The number comes from the game's exploration map: stand inside the landmark (once your character has explored it) and press **Use my location** |
 | The fields of a drop are greyed out, with *From Azeroth Mixtape (built-in)* | Built-in soundtracks are read-only. Click **Change song here** to make your own version in My Drops ([how](PACKS.md#change-a-song-from-a-built-in-soundtrack)) |
 | **Save now (reloads UI)** in the footer | You made 10 or more changes since you logged in. WoW writes addon data to disk only when you log out, quit or reload, so a game crash would lose them. Click it to save now (the interface reloads; you stay in the game) |
 | The window vanished in a fight | It hides during combat and comes back afterwards. Text you were typing is kept |
-| *Deleted Goldshire. [Undo]* | Deleting is instant; **Undo** brings the drop back for 15 seconds |
+| *Deleted Goldshire.* with an **Undo** button | Deleting is instant; **Undo** brings the drop back for 15 seconds |
 
 Limits: 50 soundtracks of your own, 300 drops in each, 3,000 in total.
 
 Edits take effect at once, no `/reload`: the app learns the song from the beacon the next time
-the drop plays (or when you press ▶ **Test**).
+the drop plays (or when you press **Test**).
+
+**With a gamepad:** the window and its dialogs register with Forever's gamepad cursor, so it can
+reach the tabs, list rows, text boxes and buttons; text boxes are never focused by themselves while
+the gamepad UI is on. The right-click menu of a row can't be reached with a gamepad, and its **Copy
+to** and **Move to** exist only there. If the cursor can't reach something or gets stuck, please
+report it.
 
 ## Share codes
 
@@ -177,7 +195,8 @@ The preview can also show **warnings**. They don't stop the import:
 - **fields that were dropped**: values NeedleDropper doesn't accept (an unsafe file name, an
   unknown key) were left out.
 
-An import never overwrites anything and arrives **turned off** (*Imported <name> (off). [Turn on]*).
+An import never overwrites anything and arrives **turned off** (*Imported <name> (off).*, with a
+**Turn on** button).
 When you already have the same soundtrack from the same author and the code is newer, the dialog
 offers **Update <name>** instead, which keeps its on/off state and its place in your list. More
 in [Share codes](PACKS.md#share-codes).
@@ -188,14 +207,17 @@ Setup steps and details: [Music services → Spotify](PROVIDERS.md#spotify-premi
 
 | Error or notification | Meaning | Fix |
 |---|---|---|
-| **403** (*Premium required* on the Spotify card) | Not a Premium account; or the account isn't on your developer app's **User Management** list; or the app's owner no longer has Premium | Use Premium; [add the account](PROVIDERS.md#signing-in-with-a-different-spotify-account-user-management) to your app |
+| **403** (*Premium needed* on the Spotify card) | Not a Premium account, or the app's owner no longer has Premium. The card's **Premium** line says which plan the account has | Use Premium |
+| *Account not allowed* on the Spotify card | The account isn't on your developer app's **User Management** list | [Add the account](PROVIDERS.md#signing-in-with-a-different-spotify-account-user-management) to your app |
+| **Sign in again** on the Spotify card | Your sign-in comes from NeedleDropper 1.1, which didn't ask for the account's plan and country (Spotify then answers searches with "Insufficient client scope") | Click **Sign in again** and approve |
+| Notification: *Spotify isn't starting songs — restart the Spotify app* | Spotify accepted the song but never started it (its buttons often look greyed out). On the test PC Spotify's Windows app did this with every song, from the Microsoft Store and from spotify.com alike, while Spotify's Web Player played them. The drop then played on YouTube, if it has a video, and YouTube plays first for the rest of the session; the app checks Spotify quietly as you approach places and uses it again once it plays | Quit the Spotify app completely and start it again, play and pause any song once. If it keeps happening, open Spotify's Web Player (`open.spotify.com`) in a browser, play and pause a song there, and pick it under **Play on** on the Connect page. The notification comes at most every 30 minutes |
 | **404** / no active device | No Spotify device is online | Open the Spotify app on this PC, play and pause any song once, then pick it under **Play on** on the Spotify card |
 | **429** / rate limited | Too many requests in a short time, or Spotify's `QUOTA_EXCEEDED` | Wait a few minutes; NeedleDropper already waits when Spotify asks it to |
 | **INVALID_CLIENT: Invalid redirect URI** | The redirect URI in your developer app isn't exactly right | Set it to `http://127.0.0.1:8321/callback` (127.0.0.1, http, no `/` at the end) |
 | **INVALID_CLIENT: Invalid client** | Wrong Client ID, or the developer app was deleted | Copy it again from the [dashboard](https://developer.spotify.com/dashboard) |
 | Notification: Spotify sign-in expired | Spotify ended the login (password change, removed access, a long break) | Click the notification (or tray icon → **Open setup…**) and **Sign in** again on the Spotify card |
 | Notification: song not found on Spotify | The drop has no Spotify link, and searching for its artist and title found nothing close enough | Paste the song's Spotify link into the drop (for a built-in drop: **Change song here** first). Meanwhile it plays on YouTube if it has a YouTube link |
-| The wrong recording plays | The drop has no Spotify link and the search picked another version | Paste the exact song link. After the next login, the drop's form shows the match the app found (*Spotify match: … [Use this exact song]*) so you can keep it with one click |
+| The wrong recording plays | The drop has no Spotify link and the search picked another version | Paste the exact song link. After the next login, the drop's form shows the match the app found (*Spotify match: …* with **Use this exact song**) so you can keep it with one click |
 | The song starts on the wrong device | Another device was active | Choose the device under **Play on** |
 
 If Spotify can't play a drop, the app falls back to the drop's YouTube video, if it has one.
@@ -212,8 +234,12 @@ If Spotify can't play a drop, the app falls back to the drop's YouTube video, if
 
 - **No sound:** click once inside the player window (*Click to enable sound*), and check that
   Edge or Chrome isn't muted in the Windows volume mixer.
-- **The player window doesn't open:** it opens only for YouTube songs. Without Edge or Chrome,
-  NeedleDropper opens the player in your default browser instead.
+- **The player window doesn't show:** it shows only while a YouTube song plays, on top of the game
+  in the top-right corner (`deck.playerCorner` in `config.json` picks another corner). The app makes
+  it when it starts, never while the game is in front (a new browser window takes the focus), and
+  needs Edge or Chrome: it never uses a tab in your default browser. If a tool on your PC redirects
+  Edge to another browser ("Edge Deflector" and similar), NeedleDropper uses Chrome. The browser's
+  own messages are in `logs\browser.log` (tray → **Open log folder**).
 - **Ads** are normal for embedded YouTube videos; NeedleDropper doesn't block them.
 
 ## Chat-log link
@@ -253,8 +279,16 @@ To stop: `/needle chatlog off`, then `/chatlog` until the game says logging is o
   **Open log folder** and **Quit**. While needle drops are paused the app ignores the game, and the
   icon shows the tone arm parked.
 - **Notifications** appear only when they matter: linked to World of Warcraft (once per session), a
-  test signal arrived, Spotify sign-in expired, a song wasn't found on Spotify, a YouTube video can't
-  be embedded, and (if the update check is on) a new version is available.
+  test signal arrived, Spotify sign-in expired, Spotify isn't starting songs, a song wasn't found on
+  Spotify, a YouTube video can't be embedded, a part of the app stopped because of an error (details
+  in the log), and (if the update check is on) a new version is available.
+- **The YouTube player window** is made once, hidden, when the app starts. It shows only while a
+  YouTube song plays, on top of the game in the top-right corner, and never takes the focus from the
+  game; afterwards it hides again.
+- **Commands in a terminal** (`NeedleDropper.exe --version`, `diag`, `packs …`) print into the
+  window you started them from. Windows doesn't wait for the app, so the prompt can come back before
+  the output: in `cmd` use `start /wait NeedleDropper.exe diag`, in PowerShell add `| Out-Host`
+  (for example `NeedleDropper.exe --version | Out-Host`).
 - **It starts with Windows** (if **Start with Windows** is ticked) and stays idle until the game
   runs. To stop that, untick it in the tray menu, or switch NeedleDropper off in Task Manager →
   *Startup apps*.
@@ -309,7 +343,7 @@ setting.
 |---|---|
 | `/needle` | Open or close the NeedleDropper window |
 | `/needle help` | List every command in the chat window |
-| `/needle add [Artist - Title \| link]` | **Add drop here**: adds the place where you stand to My Drops (or to the soundtrack the Drops tab is showing) and opens it in the window, cursor in Artist. With text it also fills in the song and saves it: `/needle add Toto - Africa` or `/needle add https://youtu.be/QAo_Ycocl1E`, then prints *Added Goldshire: Toto · Africa to My Drops.* If the place already has a drop, that drop opens instead |
+| `/needle add [Artist - Title \| link]` | **Add drop here**: adds the place where you stand to My Drops (or to the soundtrack the Drops tab is showing) and opens it in the window, cursor in Artist. If the place already has a drop, that drop opens instead. With text it also saves the song: `/needle add Toto - Africa` prints *Added Goldshire: Toto · Africa to My Drops.* (a built-in drop there is overridden in My Drops); with only a link (`/needle add https://youtu.be/QAo_Ycocl1E`) it saves the link, and you type or check the artist and title in the window |
 | `/needle soundtracks` | Open the window on the Soundtracks tab |
 | `/needle journal` | Open the window on the Journal tab |
 | `/needle journal print [count]` | Print the songs this character has heard in the chat window instead (the last 15, or `count`) |
@@ -319,14 +353,14 @@ setting.
 | `/needle where` | Where you stand, for soundtrack authors: zone key and map number, subzone and its by-name id, instance id, the area numbers here, and the drops that match |
 | `/needle replay [id]` | Replay the last drop you heard, or the one with that id. Doesn't change your history |
 | `/needle play <id or place>` | Play any drop now, by id or place name: `/needle play zone:1429` or `/needle play Elwynn Forest`. Doesn't mark it as heard |
-| `/needle test` | Show the test title card and send a test signal: the app shows a notification and ticks **Check the link** on its Connect page. Nothing plays |
+| `/needle test` | Show the test title card (for 30 seconds) and send a test signal: the app shows a notification and ticks **Check the link** on its Connect page. Nothing plays and the zone music isn't faded; `/needle stop` ends the card |
 | `/needle toast [on\|off]` | Preview the title card for where you stand; with `on` / `off`, turn title cards on or off |
-| `/needle stop` | Stop the song that is playing. With nothing playing, let the pending drop go for now: it comes back on your next visit |
+| `/needle stop` | Stop the song that is playing (it stays marked as heard). With nothing playing, let the pending drop go for now: it comes back on your next visit. Either way no needle drop starts at this place until you move on to another zone, landmark or instance |
 | `/needle skip` | Stop the song and keep it marked as heard. With nothing playing, mark the pending drop as heard so it never plays |
 | `/needle reset char\|account\|all\|settings` | Forget this character's drops, journal and cooldown (`char`), the account-wide drops (`account`), both (`all`), or put every setting back to its default (`settings`). Your soundtracks are never touched |
 | `/needle beacon on\|off` | The pixel beacon the app reads |
 | `/needle chatlog on\|off` | The [chat-log link](#chat-log-link) (turns WoW's chat logging on) |
-| `/needle selftest [beacon\|chatlog\|discovery\|music\|share]` | Check your setup: `beacon` (default) shows the largest beacon for 10 seconds, sends a test signal and prints the beacon's size and the gap above your player frame; `chatlog` tests the chat-log link; `discovery` prints every discovery message, exploration update and zone change for 120 seconds; `music` fades the zone music out for 8 seconds and back; `share` checks that share codes can be read and written on your client |
+| `/needle selftest [beacon\|chatlog\|discovery\|music\|share]` | Check your setup: `beacon` (default) sends a test signal, shows the largest beacon for 10 seconds and prints the beacon's size and the gap above your player frame (not while a song or the test card plays); `chatlog` tests the chat-log link; `discovery` prints every discovery message, exploration update and zone change for 120 seconds; `music` fades the zone music out for 8 seconds and back; `share` checks that share codes can be read and written on your client |
 | `/needle debug on\|off` | Diagnostic messages in the chat window |
 | `/needle set <setting> <value>` | Change a setting, for example `/needle set cooldownMin 15` (names below) |
 | `/needle settings` | List every setting with its value and range |
@@ -339,9 +373,10 @@ right-click on NeedleDropper in the add-on compartment, or *Game Menu → Option
 NeedleDropper*. The Settings panel is searchable. Every option can also be changed with
 `/needle set <setting> <value>` (on/off values: `on` or `off`).
 
-The page starts with an **Open NeedleDropper** button and has a **Preview** button for the title
-card and a **Send a test signal** button for the link. Your soundtracks are edited in the
-NeedleDropper window, not here.
+The page starts with an **Open NeedleDropper** button, then groups the options under *Needle drops*,
+*Playback*, *Title card* (with a **Preview** button), *Companion link* (with a **Send a test
+signal** button) and *Troubleshooting*. Your soundtracks are edited in the NeedleDropper window, not
+here.
 
 | Option | Setting | Default | Values | What it does |
 |---|---|---|---|---|
@@ -358,6 +393,7 @@ NeedleDropper window, not here.
 | Length when unknown (s) | `maxDropSec` | 300 | 10 – 1800 | How long a drop counts as playing when its length is unknown |
 | Zone music during a drop | `duckMethod` | silence | `silence` / `volume` / `none` | How the zone music is faded out: a silent track, music volume to 0, or not at all |
 | Restart zone music afterwards | `kickZoneMusic` | on | on / off | Brings the zone music back right away after a drop |
+| Fade zone music without the app | `duckWithoutApp` | off | on / off | Also fade the zone music for Spotify and YouTube songs when the NeedleDropper app has never reported in. Off: such drops show their title card and the zone music keeps playing, because nothing would play the song |
 | Play in-game files | `localPlayback` | on | on / off | Let WoW play drops that have an in-game audio file |
 | Title card | `toast` | on | on / off | Show the place / artist / title card when a drop starts |
 | Title card size | `toastScale` | 100% | 60% – 160% | Size of the card's text (`/needle set toastScale 120%`) |
@@ -384,7 +420,8 @@ The app keeps its few settings on its Connect page (tray icon → **Open setup�
 
 | Where | Setting | Default |
 |---|---|---|
-| **Spotify** card | Client ID, **Sign in** / **Disconnect**, **Play on** (the device that plays) | not set up |
+| **Spotify** card | Client ID, **Sign in** / **Sign out of Spotify**, **Play on** (the device that plays) | not set up |
+| **YouTube** card | **Play songs from YouTube** | on |
 | Footer | **Start with Windows** | on |
 | Tray menu | **Pause needle drops**, **Start with Windows** | off, on |
 

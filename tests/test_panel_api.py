@@ -266,8 +266,12 @@ def test_never_overwrites_an_addon_someone_else_installed(shell, how, tmp_path):
     st, state = shell.call("GET", "/api/state")
     a = state["addon"]
     assert a["installed"] and a["action"] is None and not a["canInstall"]
-    assert a["owner"] == ("other" if how == "by-hand" else "manager")
-    assert a["managedBy"] == {"wowup": "WowUp", "curseforge-ids": "CurseForge", "by-hand": None}[how]
+    # A TOC project id no longer counts as a manager's mark: NeedleDropper's own release TOC carries
+    # its CurseForge id now (journey review F8), so a hand-unpacked zip has it as well. The folder is
+    # still someone else's ("other": never overwritten, no install offered). This used to expect
+    # owner "manager" / managedBy "CurseForge" for the curseforge-ids case.
+    assert a["owner"] == ("manager" if how == "wowup" else "other")
+    assert a["managedBy"] == {"wowup": "WowUp", "curseforge-ids": None, "by-hand": None}[how]
     st, data = shell.call("POST", "/api/addon/install", {"force": True})
     assert st == 409 and data["managed"]
     assert (dest / "Core.lua").read_text(encoding="utf-8") == "-- installed elsewhere\n"

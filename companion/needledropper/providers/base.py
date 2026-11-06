@@ -10,7 +10,19 @@ from ..models import Drop
 
 
 class ProviderError(Exception):
-    """This attempt failed; the engine may try the next provider."""
+    """This attempt failed; the engine may try the next provider.
+
+    Optional attributes a provider may set (the engine reads them with ``getattr``):
+
+    * ``notice`` -- a change kind for the shell (``on_status``), e.g. ``"spotifyStuck"``;
+    * ``cleanup`` -- a :class:`PlayHandle` the engine passes to this provider's ``stop()`` when
+      the drop ends: for a provider that failed *after* taking over playback (Spotify accepted
+      the song and never started it), so it can pause a late start and resume the player's own
+      music once the fallback provider is done.
+    """
+
+    notice: "Optional[str]" = None
+    cleanup: "Optional[PlayHandle]" = None
 
 
 class ProviderUnavailable(ProviderError):

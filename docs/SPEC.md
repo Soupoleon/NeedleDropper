@@ -1,5 +1,10 @@
 # NeedleDropper — Build Spec (v1)
 
+> **Historical** (v1.0). NeedleDropper 1.2 follows [DESIGN-v1.2.md](DESIGN-v1.2.md),
+> [CONTRACTS-v1.2.md](CONTRACTS-v1.2.md) and [PROTOCOL-v2.md](PROTOCOL-v2.md): the v1 beacon,
+> `Map.lua` / `Map.json`, the `(hash, n)` lookup and the companion-side soundtracks described below
+> are retired. The location rules, drop ids and timing still apply.
+
 This file is the **contract** between every component. If you are implementing a component, follow it exactly; if something here is wrong or impossible, say so in your report instead of silently diverging.
 
 Target: **World of Warcraft: Forever** (flavor `wowf`, build 1.60.1.70790, TOC `## Interface: 16001`). Forever runs classic Azeroth content on the Mainline 12.x client and API (incl. Midnight "secret value" restrictions). Host OS: Windows 11. Install: `C:\Program Files (x86)\World of Warcraft\_forever_`.

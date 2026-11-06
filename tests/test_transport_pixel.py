@@ -657,11 +657,13 @@ def test_zero_client_area_treated_as_minimized():
 
 
 def test_auto_switches_to_printwindow_when_screen_shows_nothing():
+    # v1.2: the switch comes after SWITCH_TO_PRINT_AFTER frames (~1.5 s) instead of SWITCH_AFTER (5 s):
+    # the owner's real client needed PrintWindow at character select (real-client-2026-11-05.md).
     s = FakeScreen(EV[0])
     s.screen_event = None  # e.g. another window covers the corner on screen
     h = Harness(s)
-    out = h.step(PixelTransport.SWITCH_AFTER)
-    assert out == ["invalid"] * PixelTransport.SWITCH_AFTER
+    out = h.step(PixelTransport.SWITCH_TO_PRINT_AFTER)
+    assert out == ["invalid"] * PixelTransport.SWITCH_TO_PRINT_AFTER
     assert h.t.status()["method"] == "printwindow"
     assert any("switching capture to printwindow" in d for d in h.diag)
     assert h.step(2) == ["baseline", "same"]
@@ -676,7 +678,7 @@ def test_auto_flips_back_when_printwindow_fails():
     s.screen_event = None
     s.window_error = RuntimeError("PrintWindow failed (Win32 error 0)")
     h = Harness(s)
-    h.step(PixelTransport.SWITCH_AFTER)
+    h.step(PixelTransport.SWITCH_TO_PRINT_AFTER)  # v1.2: the faster switch (see the test above)
     assert h.t.status()["method"] == "printwindow"
     assert h.step() == ["capture-error"]
     assert h.t.status()["method"] == "screen"

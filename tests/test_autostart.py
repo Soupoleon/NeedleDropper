@@ -252,6 +252,10 @@ def test_enable_makes_relative_paths_absolute(reg, tmp_path, monkeypatch):
 
 def test_enable_default_command_frozen(reg, tmp_path, monkeypatch):
     exe = tmp_path / "Program Files" / "NeedleDropper.exe"
+    # pytest's tmp_path lives in %TEMP%, which Start with Windows now refuses (journey review F10):
+    # point TEMP elsewhere so this fake "Program Files" counts as the permanent folder it stands for.
+    monkeypatch.setenv("TEMP", str(tmp_path / "temp"))
+    monkeypatch.setenv("TMP", str(tmp_path / "temp"))
     monkeypatch.setattr(sys, "frozen", True, raising=False)
     monkeypatch.setattr(sys, "executable", str(exe))
     assert autostart.enable(winreg=reg) == f'"{exe}"'

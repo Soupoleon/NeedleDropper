@@ -1,0 +1,446 @@
+# Release: one tag publishes NeedleDropper everywhere (docs/RELEASING.md).
+#
+#   git tag -a v1.2.0-beta.1 -m "NeedleDropper 1.2.0 beta 1" && git push origin v1.2.0-beta.1
+#
+# The tag picks the channel, for the GitHub release and for the addon sites alike:
+#   v1.2.0-alpha.N -> Alpha    (GitHub: pre-release)
+#   v1.2.0-beta.N  -> Beta     (GitHub: pre-release)
+#   v1.2.0         -> Release  (GitHub: latest release)
+# Any other tag (v1.2.0-rc.1, v1.2) is refused. The BigWigs packager calls every tag that
+# doesn't contain "alpha" or "beta" a full release (release.sh v2.7.0, "Automatic file type
+# detection"), so an -rc tag would otherwise reach the Release channel.
+#
+# Jobs:
+#   prepare      checks the tag against the versions in the repository and works out which
+#                addon sites are set up.
+#   github       (Windows) runs the tests, builds NeedleDropper.exe and the zips with
+#                tools/build_release.ps1, and publishes the GitHub release.
+#   addon-sites  runs after github succeeded: packages the addon from .pkgmeta with the
+#                BigWigs packager, checks the zip, then uploads it to CurseForge and Wago.
+#
+# Set up once (Settings -> Secrets and variables -> Actions):
+#   secrets   CF_API_KEY       CurseForge API token (passed to the packager as CF_API_TOKEN)
+#             WAGO_API_TOKEN   Wago Addons API token
+#             WOWI_API_TOKEN   WoWInterface token (unused for now, see the addon-sites job)
+#   variable  ADDON_SITE_UPLOADS = off   optional: keep every tag GitHub-only for a while
+#                                        (a friends-only build after the sites are set up)
+#   TOC (addon/NeedleDropper/NeedleDropper.toc):
+#             ## X-Curse-Project-ID: <number>   ## X-Wago-ID: <id>   ## Version: @project-version@
+# A site without its secret or its TOC id is skipped, and the run still succeeds.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The Python that NeedleDropper.exe is built with (and bundles).
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  prepare:
+    name: Check the tag and the versions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.check.outputs.tag }}
+      version: ${{ steps.check.outputs.version }}
+      base: ${{ steps.check.outputs.base }}
+      channel: ${{ steps.check.outputs.channel }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+      title: ${{ steps.check.outputs.title }}
+      upload: ${{ steps.check.outputs.upload }}
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the tag, the versions and the upload targets
+        id: check
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+          # Only whether each secret is set ("true" / "false"); the values stay out of this job.
+          HAS_CF_TOKEN: ${{ secrets.CF_API_KEY != '' }}
+          HAS_WAGO_TOKEN: ${{ secrets.WAGO_API_TOKEN != '' }}
+          HAS_WOWI_TOKEN: ${{ secrets.WOWI_API_TOKEN != '' }}
+          SITE_UPLOADS: ${{ vars.ADDON_SITE_UPLOADS }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error title=Release check::$1"; exit 1; }
+          warn() { echo "::warning title=Release check::$1"; }
+
+          # --- the tag -------------------------------------------------------------
+          if [[ ! "$TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)(-(alpha|beta)\.([0-9]+))?$ ]]; then
+            fail "'$TAG' is not a release tag. Use vX.Y.Z (release), vX.Y.Z-beta.N (beta) or vX.Y.Z-alpha.N (alpha)."
+          fi
+          base="${BASH_REMATCH[1]}"
+          channel="${BASH_REMATCH[3]:-release}"
+          number="${BASH_REMATCH[4]:-}"
+          version="${TAG#v}"
+          if [[ "$channel" == "release" ]]; then
+            prerelease=false
+            title="NeedleDropper $base"
+          else
+            prerelease=true
+            title="NeedleDropper $base $channel $number"
+          fi
+
+          # --- the app version: needledropper.__version__ names the release files --------
+          app_version="$(python3 - <<'PY'
+          import pathlib, re
+          text = pathlib.Path("companion/needledropper/__init__.py").read_text(encoding="utf-8")
+          m = re.search(r"^__version__\s*=\s*(\S+)", text, re.M)
+          print(m.group(1).strip("\"'") if m else "")
+          PY
+          )"
+          [[ -n "$app_version" ]] || fail "No __version__ in companion/needledropper/__init__.py."
+          if [[ "$app_version" != "$version" && "$app_version" != "$base" ]]; then
+            want="\"$base\""; [[ "$version" != "$base" ]] && want="\"$base\" (or \"$version\")"
+            fail "The tag is $TAG but companion/needledropper/__init__.py says __version__ = \"$app_version\". Set it to $want, commit, and tag that commit."
+          fi
+          py_version="$(awk -F'"' '/^version[ \t]*=/ && !seen { print $2; seen = 1 }' companion/pyproject.toml)"
+          if [[ -n "$py_version" && "$py_version" != "$app_version" ]]; then
+            warn "companion/pyproject.toml says version = \"$py_version\" but __version__ is \"$app_version\"."
+          fi
+
+          # --- the addon TOC (the same parsing as the packager's set_toc_project_info) -----
+          tocs=()
+          for f in addon/NeedleDropper/NeedleDropper.toc addon/NeedleDropper/NeedleDropper_*.toc addon/NeedleDropper/NeedleDropper-*.toc; do
+            [[ -f "$f" ]] && tocs+=("$f")
+          done
+          [[ ${#tocs[@]} -gt 0 ]] || fail "No addon/NeedleDropper/NeedleDropper.toc."
+          toc_text() { sed -e $'1s/^\xEF\xBB\xBF//' -e $'s/\r//g' "$1"; }
+          toc_id() {  # the first non-empty "## <key>:" value, all blanks removed
+            local f v
+            for f in "${tocs[@]}"; do
+              v="$(awk -F: -v key="## $1" '$1 == key && v == "" { gsub(/[ \t]/, "", $2); v = $2 } END { print v }' <<< "$(toc_text "$f")")"
+              if [[ -n "$v" ]]; then printf '%s' "$v"; return 0; fi
+            done
+            return 0
+          }
+          toc_version="$(awk '/^## Version:/ && !seen { sub(/^## Version:[ \t]*/, ""); sub(/[ \t]+$/, ""); v = $0; seen = 1 } END { print v }' <<< "$(toc_text "${tocs[0]}")")"
+          case "$toc_version" in
+            "@project-version@") toc_note="@project-version@ (stamped with $TAG)" ;;
+            "$version" | "$base" | "$TAG" | "v$base") toc_note="$toc_version" ;;
+            "") fail "${tocs[0]} has no ## Version: line. Use ## Version: @project-version@." ;;
+            *) fail "${tocs[0]} says ## Version: $toc_version, which doesn't match $TAG. Use ## Version: @project-version@ (the packager and this workflow fill it in)." ;;
+          esac
+
+          if ! grep -qF "## [$base]" CHANGELOG.md; then
+            warn "CHANGELOG.md has no '## [$base]' section: the release notes and the addon sites' changelog will lack this version's changes."
+          fi
+
+          # --- addon sites -----------------------------------------------------------
+          cf_id="$(toc_id X-Curse-Project-ID)"
+          wago_id="$(toc_id X-Wago-ID)"
+          wowi_id="$(toc_id X-WoWI-ID)"
+          cf=false; wago=false
+          if [[ "${SITE_UPLOADS,,}" == "off" ]]; then
+            cf_note="off: the ADDON_SITE_UPLOADS variable is 'off'"
+            wago_note="$cf_note"
+          else
+            if [[ "$HAS_CF_TOKEN" != "true" ]]; then cf_note="skipped: no CF_API_KEY secret"
+            elif [[ -z "$cf_id" ]]; then cf_note="skipped: no ## X-Curse-Project-ID in the TOC"
+            elif [[ ! "$cf_id" =~ ^[0-9]+$ ]]; then cf_note="skipped: ## X-Curse-Project-ID must be the project's number, not '$cf_id'"
+            else cf=true; cf_note="upload to project $cf_id ($channel)"
+            fi
+            if [[ "$HAS_WAGO_TOKEN" != "true" ]]; then wago_note="skipped: no WAGO_API_TOKEN secret"
+            elif [[ -z "$wago_id" ]]; then wago_note="skipped: no ## X-Wago-ID in the TOC"
+            else wago=true; wago_note="upload to project $wago_id ($channel)"
+            fi
+          fi
+          wowi_note="off: WoWInterface lists no WoW: Forever versions (the packager skips Forever there and fails the upload)"
+          if [[ "$HAS_WOWI_TOKEN" == "true" || -n "$wowi_id" ]]; then
+            warn "WoWInterface is set up (secret or ## X-WoWI-ID) but stays off: the packager can't upload WoW: Forever files there yet."
+          fi
+          upload=false
+          if [[ "$cf" == "true" || "$wago" == "true" ]]; then upload=true; fi
+
+          {
+            echo "tag=$TAG"
+            echo "version=$version"
+            echo "base=$base"
+            echo "channel=$channel"
+            echo "prerelease=$prerelease"
+            echo "title=$title"
+            echo "upload=$upload"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## $title"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Tag | \`$TAG\` |"
+            echo "| Channel | $channel |"
+            echo "| GitHub release | $([[ "$prerelease" == "true" ]] && echo "pre-release" || echo "latest release") |"
+            echo "| App (\`__version__\`) | $app_version |"
+            echo "| Addon TOC version | $toc_note |"
+            echo "| CurseForge | $cf_note |"
+            echo "| Wago | $wago_note |"
+            echo "| WoWInterface | $wowi_note |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$title: channel $channel, pre-release $prerelease; CurseForge: $cf_note; Wago: $wago_note"
+
+  github:
+    name: Build the app and publish the GitHub release
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        id: python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install the build and test tools
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r companion/build-requirements.txt pytest lupa
+
+      # Before the version is stamped in: tests/test_addon_misc.py compares the TOC byte for byte.
+      - name: Run the test suite
+        shell: pwsh
+        run: python -m pytest tests -q -p no:cacheprovider
+
+      # The packager replaces @project-version@ in its own zip. The GitHub zips are built by
+      # build_release.ps1 from the checkout, and NeedleDropper.exe bundles the addon (for
+      # "Install addon"), so this runner's copy gets the same value: the tag, as the packager
+      # writes it. Nothing is committed.
+      - name: Stamp the version into the addon files (this runner's copy only)
+        shell: pwsh
+        run: |
+          $stamped = 0
+          $utf8 = New-Object System.Text.UTF8Encoding -ArgumentList $false
+          foreach ($file in Get-ChildItem -Path addon/NeedleDropper -Recurse -File -Include *.toc, *.lua, *.xml) {
+            $text = [System.IO.File]::ReadAllText($file.FullName)
+            if ($text.Contains('@project-version@')) {
+              [System.IO.File]::WriteAllText($file.FullName, $text.Replace('@project-version@', $env:TAG), $utf8)
+              Write-Host "Stamped $env:TAG into $($file.FullName)"
+              $stamped++
+            }
+          }
+          if ($stamped -eq 0) { Write-Host "No @project-version@ in the addon files: nothing to stamp." }
+
+      - name: Build the release files (tools/build_release.ps1)
+        shell: pwsh
+        env:
+          PYTHON_EXE: ${{ steps.python.outputs.python-path }}
+        run: |
+          ./tools/build_release.ps1 -SkipTests -OutDir dist -Python $env:PYTHON_EXE
+          if ($LASTEXITCODE -ne 0) { throw "tools/build_release.ps1 failed (exit code $LASTEXITCODE)" }
+
+      - name: Check the release files
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $dist = (Resolve-Path -LiteralPath dist).Path
+          $expected = 'NeedleDropper-*-addon.zip', 'NeedleDropper-*-win64.zip', 'NeedleDropper-*-win64-folder.zip', 'NeedleDropper.exe', 'SHA256SUMS.txt'
+          foreach ($pattern in $expected) {
+            $found = @(Get-ChildItem -LiteralPath $dist -File | Where-Object { $_.Name -like $pattern })
+            if ($found.Count -ne 1) { throw "dist should hold exactly one $pattern, found $($found.Count)" }
+          }
+          $listed = 0
+          foreach ($line in Get-Content -LiteralPath (Join-Path $dist 'SHA256SUMS.txt')) {
+            if (-not $line.Trim()) { continue }
+            if ($line -notmatch '^([0-9a-f]{64})  (\S+)$') { throw "unexpected line in SHA256SUMS.txt: $line" }
+            $want = $Matches[1]; $name = $Matches[2]
+            $have = (Get-FileHash -LiteralPath (Join-Path $dist $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($have -ne $want) { throw "SHA256SUMS.txt doesn't match $name" }
+            Write-Host "checksum OK  $name"
+            $listed++
+          }
+          if ($listed -ne 4) { throw "SHA256SUMS.txt should list 4 files, it lists $listed" }
+          $addonZip = Get-ChildItem -LiteralPath $dist -File | Where-Object { $_.Name -like 'NeedleDropper-*-addon.zip' }
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($addonZip.FullName)
+          try {
+            $names = @($zip.Entries | ForEach-Object { $_.FullName })
+            $roots = @($names | ForEach-Object { ($_ -split '/')[0] } | Sort-Object -Unique)
+            if ($roots.Count -ne 1 -or $roots[0] -ne 'NeedleDropper') { throw "the addon zip must hold only NeedleDropper/, found: $($roots -join ', ')" }
+            $binaries = @($names | Where-Object { $_ -match '\.(exe|dll|bat|cmd|ps1|py|pyd)$' })
+            if ($binaries.Count -gt 0) { throw "the addon zip must not contain programs: $($binaries -join ', ')" }
+            $entry = $zip.GetEntry('NeedleDropper/NeedleDropper.toc')
+            if ($null -eq $entry) { throw "the addon zip has no NeedleDropper/NeedleDropper.toc" }
+            $reader = [System.IO.StreamReader]::new($entry.Open())
+            try { $toc = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            if ($toc.Contains('@project-version@')) { throw "the addon zip's TOC still says @project-version@" }
+            Write-Host ("addon TOC: " + (($toc -split "`n" | Where-Object { $_ -match '^## (Interface|Version|X-)' }) -join ' | '))
+          } finally {
+            $zip.Dispose()
+          }
+
+      - name: Keep the release files with this run
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: NeedleDropper-${{ env.TAG }}
+          path: dist/
+          if-no-files-found: error
+
+      - name: Write the release notes
+        shell: bash
+        env:
+          BASE: ${{ needs.prepare.outputs.base }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+          UPLOAD: ${{ needs.prepare.outputs.upload }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          repo_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          changes="$(awk -v head="## [${BASE}]" 'index($0, head) == 1 { on = 1; next } on && /^## \[/ { exit } on { print }' CHANGELOG.md)"
+          {
+            if [[ "$PRERELEASE" == "true" ]]; then
+              printf '> **%s build for testers**, not the stable release. How to install it, test it and report what you find: [docs/BETA-TESTING.md](%s/blob/%s/docs/BETA-TESTING.md)\n\n' "${CHANNEL^}" "$repo_url" "$TAG"
+            fi
+            if [[ "$UPLOAD" == "true" ]]; then
+              printf 'The addon is also published to CurseForge and Wago (%s channel), so addon managers update it by themselves.\n\n' "$CHANNEL"
+            fi
+            echo "## Downloads"
+            echo
+            echo "| File | What it is |"
+            echo "|---|---|"
+            for f in dist/*-addon.zip dist/*-win64.zip dist/*-win64-folder.zip dist/NeedleDropper.exe dist/SHA256SUMS.txt; do
+              name="${f##*/}"
+              case "$name" in
+                *-addon.zip) what='The addon. Open the zip and drag the `NeedleDropper` folder into `World of Warcraft\_forever_\Interface\AddOns`' ;;
+                *-win64-folder.zip) what='The same app as a folder: starts faster, and antivirus programs flag it less often. Keep the folder together' ;;
+                *-win64.zip) what='The optional Windows app (`NeedleDropper.exe` and a quick start) that plays the Spotify and YouTube songs' ;;
+                NeedleDropper.exe) what='The app on its own (the same file as in the win64 zip)' ;;
+                SHA256SUMS.txt) what='SHA-256 checksums of the four files above' ;;
+                *) what='' ;;
+              esac
+              printf '| `%s` | %s |\n' "$name" "$what"
+            done
+            echo
+            echo 'The app is not code-signed: if Windows says *"Windows protected your PC"*, click **More info**, then **Run anyway**.'
+            echo
+            if [[ -n "${changes//[[:space:]]/}" ]]; then
+              echo "## What's new in $BASE"
+              printf '%s\n\n' "$changes"
+            else
+              printf 'See [CHANGELOG.md](%s/blob/%s/CHANGELOG.md) for what changed.\n\n' "$repo_url" "$TAG"
+            fi
+            echo "## Checksums"
+            echo
+            echo '```'
+            cat dist/SHA256SUMS.txt
+            echo '```'
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Publish the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: ${{ needs.prepare.outputs.title }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist/*)
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "The release $TAG exists (a re-run): updating its notes and replacing its files."
+            gh release edit "$TAG" --title "$TITLE" --notes-file release-notes.md --prerelease="$PRERELEASE"
+            gh release upload "$TAG" "${files[@]}" --clobber
+          else
+            flags=()
+            if [[ "$PRERELEASE" == "true" ]]; then flags+=(--prerelease); fi
+            gh release create "$TAG" "${files[@]}" --verify-tag --title "$TITLE" --notes-file release-notes.md ${flags[@]+"${flags[@]}"}
+          fi
+          gh release view "$TAG" --json url,isPrerelease,assets --jq '"\(.url) (pre-release: \(.isPrerelease))", (.assets[] | "  \(.name)  \(.size) bytes")'
+
+  addon-sites:
+    name: Package the addon for CurseForge and Wago
+    needs: [prepare, github]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out the tag with its history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The packager reads the tags (version, previous version); its wiki asks for the full history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # BigWigs packager: https://github.com/BigWigsMods/packager (README "Usage", and release.sh).
+      #   -d    skip uploading (this first run only builds .release/NeedleDropper-<tag>.zip)
+      #   -w 0  unset the WoWInterface id: WoWInterface lists no WoW: Forever versions, and for a
+      #         Forever-only addon release.sh's upload_wowinterface skips the "forever" game type,
+      #         finds no game version and returns 1, which fails the run after the other uploads.
+      #         Remove "-w 0" (both steps) once WoWInterface and a newer packager support Forever.
+      # The CurseForge token is passed here too: with a project id it fills in Locale.lua's
+      # @localization@ lines from CurseForge's localization tool. Without one they stay comments.
+      # Never give the packager GH_API_TOKEN, GITHUB_API_TOKEN or GITHUB_OAUTH: it would then make
+      # a GitHub release of its own, next to the one the github job made.
+      - name: Package the addon (no upload yet)
+        uses: BigWigsMods/packager@01e8631a69c69d7654c788d152630d5fed9e3812 # v2.7.0
+        with:
+          args: -d -w 0
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_KEY }}
+
+      - name: Check the package
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          zips=(.release/*.zip)
+          [[ ${#zips[@]} -eq 1 ]] || { echo "::error ::Expected one zip in .release/, found ${#zips[@]}."; exit 1; }
+          zip="${zips[0]}"
+          unzip -l "$zip"
+          # One listing, searched with here-strings: no "| grep -q" that pipefail could trip over.
+          names="$(unzip -Z1 "$zip")"
+          roots="$(cut -d/ -f1 <<< "$names" | sort -u)"
+          [[ "$roots" == "NeedleDropper" ]] || { echo "::error ::The zip must hold only NeedleDropper/, found: $(echo $roots)"; exit 1; }
+          grep -qx 'NeedleDropper/NeedleDropper.toc' <<< "$names" || { echo "::error ::No NeedleDropper/NeedleDropper.toc in the zip."; exit 1; }
+          if grep -Ei '\.(exe|dll|bat|cmd|ps1|py|pyd)$' <<< "$names"; then
+            echo "::error ::The addon zip must not contain programs (addon sites refuse them)."; exit 1
+          fi
+          for dir in companion/ tests/ tools/ docs/ packs/ NeedleDropper_Local/ addon/; do
+            if grep -q "^NeedleDropper/$dir" <<< "$names"; then
+              echo "::error ::NeedleDropper/$dir is in the zip: check the ignore and move-folders lists in .pkgmeta."; exit 1
+            fi
+          done
+          toc="$(unzip -p "$zip" NeedleDropper/NeedleDropper.toc)"
+          if grep -q '@project-version@' <<< "$toc"; then echo "::error ::The packaged TOC still says @project-version@."; exit 1; fi
+          grep -E '^## (Interface|Version|X-)' <<< "$toc" || true
+
+      - name: Upload to CurseForge and Wago
+        if: needs.prepare.outputs.upload == 'true'
+        uses: BigWigsMods/packager@01e8631a69c69d7654c788d152630d5fed9e3812 # v2.7.0
+        with:
+          args: -w 0
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_KEY }}
+          WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+          WOWI_API_TOKEN: ${{ secrets.WOWI_API_TOKEN }}
+
+      - name: Keep the packaged zip with this run
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: NeedleDropper-${{ needs.prepare.outputs.tag }}-addon-sites
+          path: .release/*.zip
+          include-hidden-files: true
+          if-no-files-found: error

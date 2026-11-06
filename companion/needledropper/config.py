@@ -28,13 +28,18 @@ v1.2 keys (the Connect page changes only ``wowRoot``, ``setupComplete``,
 
 v1.1 keys:
 
-* ``deck.autoOpen`` -- when the companion opens the small player window:
-  ``"youtube"`` (default: only when a YouTube drop starts and no player window
-  is connected), ``"always"`` (also open it when the companion starts) or
-  ``"never"``. Old booleans migrate: ``true`` -> ``"youtube"``, ``false`` ->
-  ``"never"``. Companion-side local files never open a window; they play only
-  in an already open player.
-* ``deck.playerPosition`` -- optional ``"x,y"`` screen position of the player window.
+* ``deck.autoOpen`` -- the small YouTube player window: ``"youtube"`` (default) and
+  ``"always"`` (kept for old configs; the same now) create it once, hidden, when the app
+  starts while the game is not in front, and show it -- always on top at
+  ``deck.playerCorner``, never taking the focus -- only while a YouTube song plays
+  (real-client findings #8 / #13: a window created during play takes the focus, so none
+  is created then); ``"never"`` never creates it. Old booleans migrate: ``true`` ->
+  ``"youtube"``, ``false`` -> ``"never"``. The window is an Edge or Chrome app window;
+  the default browser is never used for playback.
+* ``deck.playerCorner`` -- the corner of the game's monitor the player window shows in:
+  ``"topright"`` (default), ``"topleft"``, ``"bottomright"`` or ``"bottomleft"``.
+* ``deck.playerPosition`` -- optional ``"x,y"`` screen position of the player window
+  (overrides ``deck.playerCorner``).
 * ``deck.panelOnStart`` -- open the Connect page when the app starts without a
   command: ``"first-run"`` (default: until the Connect page's **Done** has been
   clicked with this version), ``"always"`` or ``"never"``.
@@ -56,13 +61,12 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
 
-from . import resources
+from . import atomicio as _atomicio, resources
 
 #: Source checkout root (``D:\\NeedleDropper``); see :mod:`.resources` for bundled files.
 REPO_ROOT = resources.repo_root()
@@ -83,6 +87,7 @@ DEFAULT_FLAVOR = "_forever_"
 BUNDLED_PREFIX = "builtin:"
 
 AUTO_OPEN_MODES = ("youtube", "always", "never")
+PLAYER_CORNERS = ("topright", "topleft", "bottomright", "bottomleft")
 PANEL_ON_START_MODES = ("first-run", "always", "never")
 CHATLOG_MATCH_MODES = ("strict", "anywhere")
 PIXEL_METHODS = ("auto", "screen", "printwindow")
@@ -99,8 +104,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "local": {"enabled": True, "mediaDir": "%APPDATA%\\NeedleDropper\\media"},
     "youtube": {"enabled": True},
     "deck": {"port": 8322, "autoOpen": "youtube", "browser": "edge", "playerPosition": "",
-             "panelOnStart": "first-run"},
-    "transport": {"pixel": {"enabled": True, "method": "auto", "hz": 4, "regionW": 256, "regionH": 32},
+             "playerCorner": "topright", "panelOnStart": "first-run"},
+    "transport": {"pixel": {"enabled": True, "method": "auto", "hz": 4, "regionW": 512, "regionH": 48},
                   "chatlog": {"enabled": True, "pollMs": 250, "match": "strict"}},
     "fadeInMs": 2500,
     "fadeOutMs": 3000,
@@ -224,6 +229,9 @@ def normalize_config(cfg: dict[str, Any]) -> dict[str, Any]:
     deck["panelOnStart"] = _enum(deck.get("panelOnStart"), PANEL_ON_START_MODES, "first-run")
     if deck.get("playerPosition") is None:
         deck["playerPosition"] = ""
+    corner = deck.get("playerCorner")
+    deck["playerCorner"] = _enum(corner.strip().lower().replace("-", "") if isinstance(corner, str) else corner,
+                                 PLAYER_CORNERS, "topright")
     transport = _section(cfg, "transport")
     chat = transport.get("chatlog")
     if isinstance(chat, dict):
@@ -312,39 +320,14 @@ def update_config_file(updates: dict[str, Any], path: Optional[str | os.PathLike
 
 def atomic_write_bytes(path: str | os.PathLike[str], data: bytes, *, retries: int = 10,
                        delay: float = 0.2) -> Path:
-    """Write ``data`` via a temp file in the same dir + ``os.replace``.
+    """Write ``data`` via a temp file in the same dir + ``os.replace`` (:mod:`.atomicio`).
 
     ``os.replace`` is retried on ``PermissionError`` (Windows: file briefly
-    locked by an editor, antivirus or the game) up to ``retries`` times.
+    locked by an editor, antivirus or the game) up to ``retries`` times; a
+    cross-device refusal (WinError 17, a virtualised ``%APPDATA%``) falls back to
+    writing the file in place.
     """
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=str(target.parent))
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            try:
-                os.fsync(fh.fileno())
-            except OSError:
-                pass
-        last_exc: Optional[BaseException] = None
-        for attempt in range(max(1, retries)):
-            try:
-                os.replace(tmp_name, target)
-                return target
-            except PermissionError as exc:
-                last_exc = exc
-                if attempt + 1 < retries:
-                    time.sleep(delay)
-        assert last_exc is not None
-        raise last_exc
-    finally:
-        if os.path.exists(tmp_name):
-            try:
-                os.remove(tmp_name)
-            except OSError:
-                pass
+    return _atomicio.atomic_write_bytes(path, data, retries=retries, delay=delay)
 
 
 def atomic_write_text(path: str | os.PathLike[str], text: str, **kw: Any) -> Path:
@@ -924,9 +907,11 @@ def addon_status(paths: "Paths") -> AddonStatus:
         owner, manager = "companion", None
     elif legacy and not managers and not site:
         owner, manager = "companion", None
-    elif managers or site:
-        owner, manager = "manager", (managers[0] if managers else site)
+    elif managers:
+        owner, manager = "manager", managers[0]
     else:
+        # A site's project id in the TOC (X-Curse-Project-ID, ...) no longer names a manager: the
+        # release TOC itself carries NeedleDropper's CurseForge id, so a hand-unpacked zip has it too.
         owner, manager = "other", None
     return AddonStatus(True, owner, toc=toc, version=version, interface=interface, manager=manager,
                        managers=managers, legacy=legacy)

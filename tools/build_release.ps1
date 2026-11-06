@@ -107,9 +107,14 @@ $RequiredModules = @(
     "needledropper.panel_api",
     "needledropper.tray",
     "needledropper.deck.server",
+    "needledropper.deck.window",
     "needledropper.transport.pixel",
+    "needledropper.transport.beacon2",
     "needledropper.transport.chatlog",
-    "needledropper.providers.spotify"
+    "needledropper.providers.spotify",
+    "needledropper.commands_packs",
+    "needledropper.sharecode",
+    "needledropper.atomicio"
 )
 
 # ---------------------------------------------------------------- helpers ----
@@ -373,9 +378,11 @@ function Get-QuickStartText([string]$Version) {
         "     addon that comes with this app if you have no addon manager.",
         "   - Spotify (optional, Premium): three steps to connect your own free Spotify app.",
         "   - YouTube: nothing to set up.",
-        "   - Check the link: start WoW: Forever in ""Windowed"" or ""Windowed (Fullscreen)""",
+        "   - Check the link: start WoW: Forever in ""Windowed"" or ""Fullscreen (Windowed)""",
         "     mode and type   /needle test   - the page shows a tick.",
         "   Leave ""Start with Windows"" ticked and click Done.",
+        "   Start the app before the game the first time (or restart the game once): the",
+        "   game finds the app's small data addon only when it starts.",
         "",
         "3. Play. In game, type /needle to change songs, pick soundtracks or share them.",
         "",
@@ -548,6 +555,19 @@ try {
     $validateOut = Invoke-NativeOutput -What "$AppName.exe validate (bundled packs)" -FilePath $builtExe -Arguments @("validate")
     $validateSummary = @($validateOut | Where-Object { $_ -match '^(OK|FAILED)\s' -or $_ -match '^Total:' })
     foreach ($line in $validateSummary) { Write-Note "validate: $($line.Trim())" }
+    # The packs tools (loaded by name) and the share codes work in the frozen exe: encode a bundled
+    # pack, then validate the code it printed.
+    $codeFile = Join-Path $tempRoot "mixtape.code.txt"
+    $encodeOut = Invoke-NativeOutput -What "$AppName.exe packs encode" -FilePath $builtExe -Arguments @(
+        "packs", "encode", (Join-Path $RepoRoot "packs\azeroth-mixtape.json"), "--out", $codeFile)
+    if (-not (Test-Path -LiteralPath $codeFile -PathType Leaf) -or
+            -not ((Get-Content -LiteralPath $codeFile -Raw) -match '^!NeedleDropper:1!')) {
+        Fail "$AppName.exe packs encode wrote no share code ($($encodeOut -join ' '))"
+    }
+    $codeCheck = Invoke-NativeOutput -What "$AppName.exe packs validate <code>" -FilePath $builtExe -Arguments @(
+        "packs", "validate", $codeFile)
+    Write-Note ("packs: share code of Azeroth Mixtape OK (" + (Get-Item -LiteralPath $codeFile).Length + " bytes); " +
+                (($codeCheck | Select-Object -Last 1) -join "").Trim())
     $folderVersionOut = Invoke-NativeOutput -What "$AppName\$AppName.exe --version" -FilePath $builtFolderExe -Arguments @("--version")
     if (-not (($folderVersionOut -join "`n") -match [regex]::Escape($Version))) {
         Fail "the one-folder $AppName.exe --version printed '$($folderVersionOut -join ' ')', expected version $Version"

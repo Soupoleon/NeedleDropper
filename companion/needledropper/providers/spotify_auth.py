@@ -56,8 +56,14 @@ API_BASE = "https://api.spotify.com/v1"
 DASHBOARD_URL = "https://developer.spotify.com/dashboard"
 DEFAULT_PORT = 8321
 CALLBACK_PATH = "/callback"
-SCOPES: tuple[str, ...] = ("user-modify-playback-state", "user-read-playback-state")
+#: ``user-read-private`` is needed by ``market=from_token`` on ``/search`` and ``/tracks`` (without it
+#: Spotify answers 403 "Insufficient client scope", seen on a real PC on 2026-11-05) and makes ``/me``
+#: return ``product`` and ``country`` (the Connect page's Premium check).
+SCOPE_PRIVATE = "user-read-private"
+SCOPES: tuple[str, ...] = ("user-modify-playback-state", "user-read-playback-state", SCOPE_PRIVATE)
 TOKEN_FILE = "spotify_token.bin"
+#: A sign-in that could not be saved is retried at most this often (see :class:`TokenStore`).
+SAVE_RETRY_S = 30.0
 LOGIN_TIMEOUT_S = 180.0
 PANEL_LOGIN_TIMEOUT_S = 300.0  # the panel flow may include logging in to Spotify in the browser first
 HTTP_TIMEOUT_S = 10.0
@@ -451,18 +457,39 @@ def _app_dir(paths: Any) -> Path:
     return Path(base) / "NeedleDropper"
 
 
+#: Sign-ins this process obtained but could not write to disk, by normalised token-file path:
+#: ``{path: (tokens, error text, monotonic time of the last write attempt)}``. Every
+#: :class:`TokenStore` of that path (the provider's, the Connect page's login, the account
+#: check) sees them, so a fresh sign-in or a rotated refresh token is never thrown away.
+_UNSAVED: dict[str, tuple[dict[str, Any], str, float]] = {}
+_UNSAVED_LOCK = threading.RLock()
+
+
+def _store_key(path: Path) -> str:
+    return os.path.normcase(os.path.abspath(str(path)))
+
+
 class TokenStore:
     """Spotify tokens in ``<app_dir>\\spotify_token.bin`` (DPAPI-encrypted JSON).
 
     Stored keys: access_token, refresh_token, expires_at (unix time), scope, client_id.
     Thread-safe; re-reads the file when it changes on disk (e.g. a login in
     another process while ``needledropper run`` is going).
+
+    **Never loses fresh tokens.** When the file cannot be written (a locked or virtualised
+    ``%APPDATA%``, see :mod:`needledropper.atomicio`), :meth:`save` keeps the tokens in memory
+    for this process (shared by every store of the same path), returns False, logs the
+    problem and exposes it as :attr:`save_error`; later :meth:`load` calls retry the write at
+    most every :data:`SAVE_RETRY_S` seconds. Spotify rotates refresh tokens, so dropping a
+    just-refreshed one would sign the player out.
     """
 
     KEYS = ("access_token", "refresh_token", "expires_at", "scope", "client_id")
 
-    def __init__(self, app_dir: Any) -> None:
+    def __init__(self, app_dir: Any, *, clock: Callable[[], float] = time.monotonic) -> None:
         self.path = _app_dir(app_dir) / TOKEN_FILE
+        self._key = _store_key(self.path)
+        self._clock = clock
         self._lock = threading.RLock()
         self._cache: Optional[dict[str, Any]] = None
         self._stamp: Optional[tuple[int, int]] = None
@@ -474,8 +501,48 @@ class TokenStore:
             return None
         return (st.st_mtime_ns, st.st_size)
 
+    @property
+    def save_error(self) -> Optional[str]:
+        """Why the newest tokens are only in memory (None when they are saved on disk)."""
+        with _UNSAVED_LOCK:
+            pending = _UNSAVED.get(self._key)
+        return pending[1] if pending else None
+
+    @property
+    def unsaved(self) -> bool:
+        return self.save_error is not None
+
+    def _write(self, clean: dict[str, Any]) -> Optional[str]:
+        """Write ``clean`` to disk; None on success, else the error text."""
+        try:
+            nd_secrets.save_secret(self.path, clean)
+        except (OSError, nd_secrets.SecretError) as exc:
+            return f"{type(exc).__name__}: {exc}"
+        return None
+
+    def _retry_unsaved(self) -> Optional[dict[str, Any]]:
+        """The in-memory tokens, if any (trying to write them again when that is due)."""
+        with _UNSAVED_LOCK:
+            pending = _UNSAVED.get(self._key)
+            if pending is None:
+                return None
+            tokens, _err, tried = pending
+            if self._clock() - tried < SAVE_RETRY_S:
+                return dict(tokens)
+            err = self._write(tokens)
+            if err is None:
+                del _UNSAVED[self._key]
+                log.info("Spotify sign-in saved to %s (it was kept in memory until now)", self.path)
+                self._cache, self._stamp = dict(tokens), self._file_stamp()
+            else:
+                _UNSAVED[self._key] = (tokens, err, self._clock())
+            return dict(tokens)
+
     def load(self) -> Optional[dict[str, Any]]:
         with self._lock:
+            pending = self._retry_unsaved()
+            if pending is not None:
+                return pending
             stamp = self._file_stamp()
             if stamp is None:
                 self._cache, self._stamp = None, None
@@ -485,15 +552,28 @@ class TokenStore:
                 self._stamp = stamp
             return dict(self._cache) if self._cache else None
 
-    def save(self, tokens: dict[str, Any]) -> None:
+    def save(self, tokens: dict[str, Any]) -> bool:
+        """Store ``tokens``; True when they are on disk, False when only in memory (see the class doc)."""
         clean = {k: tokens.get(k) for k in self.KEYS}
         with self._lock:
-            nd_secrets.save_secret(self.path, clean)
-            self._cache = clean
-            self._stamp = self._file_stamp()
+            self._cache = dict(clean)  # live at once, whatever happens to the write
+            with _UNSAVED_LOCK:
+                err = self._write(clean)
+                if err is None:
+                    _UNSAVED.pop(self._key, None)
+                else:
+                    _UNSAVED[self._key] = (dict(clean), err, self._clock())
+            if err is None:
+                self._stamp = self._file_stamp()
+                return True
+        log.warning("Could not save the Spotify sign-in to %s (%s). NeedleDropper keeps it in memory and tries "
+                    "again; it is lost only if the app quits before a save works.", self.path, err)
+        return False
 
     def clear(self) -> None:
         with self._lock:
+            with _UNSAVED_LOCK:
+                _UNSAVED.pop(self._key, None)
             nd_secrets.delete_secret(self.path)
             self._cache, self._stamp = None, None
 
@@ -558,7 +638,10 @@ class TokenManager:
         new = refresh(client_id, tokens["refresh_token"], http=self._http, now=self._now)
         if not new.get("scope"):
             new["scope"] = tokens.get("scope", "")
-        self.store.save(new)
+        try:
+            self.store.save(new)  # keeps the rotated tokens in memory when the disk refuses them
+        except Exception as exc:  # noqa: BLE001 - a broken store must never cost the fresh token
+            log.warning("Could not store the refreshed Spotify token (%s); using it anyway", exc)
         log.debug("Spotify access token refreshed (valid until %s)", time.ctime(new["expires_at"]))
         return new["access_token"]
 
@@ -598,30 +681,81 @@ def is_logged_in(spotify_cfg: dict[str, Any], paths: Any) -> bool:
     return TokenManager(client_id, TokenStore(paths)).usable()
 
 
-def fetch_account(access_token: str, http: Optional[HttpFunc] = None) -> tuple[Optional[int], Optional[str]]:
-    """``GET /v1/me``: ``(HTTP status, display name)``; ``(None, None)`` if unreachable.
+def granted_scopes(tokens: Optional[dict[str, Any]]) -> Optional[set[str]]:
+    """The scopes a stored sign-in carries, or None when the store does not say."""
+    raw = (tokens or {}).get("scope") if isinstance(tokens, dict) else None
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    return set(raw.split())
 
-    403 means the account is not on the app's User Management allowlist.
+
+def missing_scopes(tokens: Optional[dict[str, Any]]) -> list[str]:
+    """Scopes this version asks for that the stored sign-in lacks (signed in with an older version)."""
+    granted = granted_scopes(tokens)
+    if granted is None:
+        return []
+    return [s for s in SCOPES if s not in granted]
+
+
+def fetch_profile(access_token: str, http: Optional[HttpFunc] = None) -> dict[str, Any]:
+    """``GET /v1/me``: ``{"status", "name", "product", "country", "problem", "message"}``.
+
+    ``status`` is None when Spotify could not be reached. With ``user-read-private``
+    Spotify includes ``product`` ("premium", "free", "open") and ``country``.
+    ``problem`` classifies a refusal: ``"allowlist"`` (403: the account is not on the
+    development app's User Management list), ``"scope"`` (403 "Insufficient client
+    scope"), ``"expired"`` (401) or None.
     """
+    out: dict[str, Any] = {"status": None, "name": None, "product": None, "country": None, "problem": None,
+                           "message": None}
     call = http or urllib_http
     try:
         status, _h, raw = call("GET", API_BASE + "/me",
                                {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}, None)
     except Exception as exc:  # noqa: BLE001 - purely informational
         log.debug("GET /v1/me failed: %s", exc)
-        return None, None
+        return out
     data = _json(raw)
-    who = None
+    out["status"] = status
     if status == 200 and isinstance(data, dict):
-        who = str(data.get("display_name") or data.get("id") or "") or None
-    return status, who
+        out["name"] = str(data.get("display_name") or data.get("id") or "") or None
+        product = data.get("product")
+        out["product"] = product.lower() if isinstance(product, str) and product else None
+        country = data.get("country")
+        out["country"] = country.upper() if isinstance(country, str) and country else None
+        return out
+    err = data.get("error") if isinstance(data, dict) else None
+    message = str(err.get("message") or "") if isinstance(err, dict) else str(err or "")
+    out["message"] = message or None
+    if status == 401:
+        out["problem"] = "expired"
+    elif status == 403:
+        out["problem"] = "scope" if "insufficient client scope" in message.lower() else "allowlist"
+    return out
+
+
+def fetch_account(access_token: str, http: Optional[HttpFunc] = None) -> tuple[Optional[int], Optional[str]]:
+    """``GET /v1/me``: ``(HTTP status, display name)``; ``(None, None)`` if unreachable.
+
+    403 means the account is not on the app's User Management allowlist. See
+    :func:`fetch_profile` for the plan (``product``) and country.
+    """
+    prof = fetch_profile(access_token, http)
+    return prof["status"], prof["name"]
 
 
 def _check_account(access_token: str, http: Optional[HttpFunc], out: PrintFunc) -> None:
-    """Best effort: greet the user, or explain the dev-mode allowlist 403."""
-    status, who = fetch_account(access_token, http)
+    """Best effort: greet the user (with the plan, when Spotify says), or explain the dev-mode allowlist 403."""
+    prof = fetch_profile(access_token, http)
+    status, who = prof["status"], prof["name"]
     if status == 200:
-        out(f"Logged in to Spotify as {who or 'your account'}.")
+        plan = prof["product"]
+        extra = ""
+        if plan == "premium":
+            extra = " (Spotify Premium)"
+        elif plan:
+            extra = f" (Spotify {plan.title()}: NeedleDropper needs Premium to control playback)"
+        out(f"Logged in to Spotify as {who or 'your account'}{extra}.")
     elif status == 403:
         out("Warning: Spotify says this account is not allowed to use your app (HTTP 403).\n"
             f"  Open {DASHBOARD_URL}, select your app, go to 'User Management' and add the e-mail\n"
@@ -689,7 +823,12 @@ def login_interactive(spotify_cfg: dict[str, Any], paths: Any, *, open_browser: 
     granted = set((tokens.get("scope") or "").split())
     missing = [s for s in SCOPES if granted and s not in granted]
     store = TokenStore(paths)
-    store.save(tokens)
+    if not store.save(tokens):
+        # This command ends in a moment, so a sign-in kept in memory would be lost with it.
+        raise SpotifyAuthError(f"Spotify login worked, but Windows refused to save it to {store.path} "
+                               f"({store.save_error}). Sign in from the Connect page instead "
+                               "(NeedleDropper keeps the sign-in while it runs and retries saving it).",
+                               error="store_failed")
     protection = "encrypted with Windows DPAPI" if nd_secrets.dpapi_available() else "base64-encoded"
     print_fn(f"Spotify login successful. Tokens saved ({protection}) to {store.path}")
     if missing:
@@ -733,6 +872,8 @@ class LoginSession:
         self.account: Optional[str] = None
         self.warning: Optional[str] = None
         self.error: Optional[str] = None  # machine-readable SpotifyAuthError.error
+        self.save_error: Optional[str] = None  # the sign-in works but is only in memory (see TokenStore)
+        self.profile: Optional[dict[str, Any]] = None  # fetch_profile() once connected (plan, country)
         self._cancelled = threading.Event()
         self._done = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -763,8 +904,10 @@ class LoginSession:
 
     def to_dict(self) -> dict[str, Any]:
         """JSON-safe snapshot for the control panel (no secrets)."""
+        prof = self.profile or {}
         return {
             "state": self.state, "message": self.message, "account": self.account, "warning": self.warning,
+            "saveError": self.save_error, "product": prof.get("product"), "country": prof.get("country"),
             "authorizeUrl": self.authorize_url if self.state == LOGIN_WAITING else None,
             "redirectUri": self.redirect_uri, "startedAt": self.started_at,
             "expiresIn": max(0, int(self.started_at + self.timeout - time.time()))
@@ -839,17 +982,26 @@ def start_login(spotify_cfg: dict[str, Any], paths: Any, *, http: Optional[HttpF
                 return
             try:
                 tokens = exchange_code(client_id, result.code or "", redirect_uri, verifier, http=http, now=now)
-                TokenStore(paths).save(tokens)
             except SpotifyAuthError as exc:
                 session._finish(LOGIN_ERROR, str(exc), error=exc.error or "exchange_failed")
                 return
-            except Exception as exc:  # noqa: BLE001 - e.g. the token file cannot be written
+            store = TokenStore(paths)
+            try:
+                saved = store.save(tokens)  # never raises for a refused write: kept in memory instead
+            except Exception as exc:  # noqa: BLE001 - an unexpected store bug: still keep the sign-in
                 log.exception("Spotify login: could not store the tokens")
-                session._finish(LOGIN_ERROR, f"Could not save the Spotify login: {exc}", error="store_failed")
-                return
-            status, who = fetch_account(tokens["access_token"], http)
+                saved = False
+                session.save_error = f"{type(exc).__name__}: {exc}"
+            if not saved:
+                session.save_error = session.save_error or store.save_error
+                session.warning = ("Signed in, but Windows refused to save the sign-in "
+                                   f"({session.save_error}). NeedleDropper keeps it while it runs and tries "
+                                   "to save it again; if you quit first, you will have to sign in again.")
+            prof = fetch_profile(tokens["access_token"], http)
+            who = prof["name"]
             session.account = who
-            if status == 403:
+            session.profile = prof
+            if prof["status"] == 403 and prof["problem"] == "allowlist":
                 session.warning = ("Spotify says this account is not allowed to use your app. Open the "
                                    "Spotify dashboard, select your app, open User Management and add the "
                                    "e-mail address of the account you just logged in with.")

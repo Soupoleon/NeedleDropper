@@ -285,8 +285,11 @@ function W.TurnOff(ref)
 end
 
 -- The personal top layer every "Add drop here" goes to: created and put first when needed.
+-- The model does it (Soundtracks.EnsureMyDrops): it picks a free name, so an imported soundtrack
+-- that is also called "My Drops" (a friend's shared code) never blocks Add drop here.
 function W.EnsureMyDrops()
   local S = ns.Soundtracks
+  if type(S.EnsureMyDrops) == "function" then return S.EnsureMyDrops() end
   local ref = "user:my-drops"
   if not S.Exists(ref) then
     -- Created under its canonical name so its id is "my-drops" (the one Change song here and
@@ -470,12 +473,135 @@ local function restoreLayout()
   end
 end
 
+-- ---------------------------------------------------------------- gamepad --
+-- Forever's gamepad UI (real-client finding 7): Blizzard_GamepadSmartNavigation moves its cursor
+-- over the Buttons and EditBoxes of the frames GamepadMode.FrameControlsManager knows. A frame
+-- joins by calling FrameControlsManager:FrameShown(frame) in OnShow and :FrameHidden(frame) in
+-- OnHide while InputUtil.IsGamepadUIEnabled() (the comment at the top of
+-- Blizzard_GamepadSharedUtility/FrameControlsManager.lua; e.g. Blizzard_Channels
+-- CreateChannelPopup.lua and ColorPickerFrame.lua). Both are SecureHelper:WrapFunction'ed (FrameControlsManager.lua
+-- L464 / L561) so insecure callers may use them, but only outside the combat restriction
+-- (SecureHelper.IsSecureOrOutOfCombatRestriction): an insecure call in combat would print
+-- "Interface action failed". So the calls are skipped in combat and made up for when it ends.
+-- SmartNavigation's B button clicks the active frame's CloseButton (SmartNavigation.lua
+-- AttemptClose): all three frames have one. StaticPopups and Blizzard_Menu menus are tracked by
+-- Blizzard itself (StaticPopupGamepad.lua, the MenuProxy.OnShow callback). Edit boxes are never
+-- focused programmatically while the gamepad UI is on (W.FocusBox), so nothing grabs the
+-- controller's input until the player picks a box.
+
+local gamepadRegistered = setmetatable({}, { __mode = "k" })
+
+function W.GamepadUI()
+  if type(InputUtil) ~= "table" or type(InputUtil.IsGamepadUIEnabled) ~= "function" then return false end
+  local ok, on = pcall(InputUtil.IsGamepadUIEnabled)
+  return ok and on == true
+end
+
+local function combatLocked()
+  if type(InCombatLockdown) == "function" then
+    local ok, v = pcall(InCombatLockdown)
+    if ok and v then return true end
+  end
+  local kinds = Enum and Enum.AddOnRestrictionType
+  if C_RestrictedActions and C_RestrictedActions.IsAddOnRestrictionActive and kinds and kinds.Combat ~= nil then
+    local ok, v = pcall(C_RestrictedActions.IsAddOnRestrictionActive, kinds.Combat)
+    if ok and v == true then return true end
+  end
+  return false
+end
+W.CombatLocked = combatLocked
+
+local function frameControls()
+  local FCM = type(GamepadMode) == "table" and GamepadMode.FrameControlsManager or nil
+  if type(FCM) == "table" and type(FCM.FrameShown) == "function" and type(FCM.FrameHidden) == "function" then
+    return FCM
+  end
+  return nil
+end
+
+local gamepadStale = setmetatable({}, { __mode = "k" })   -- hidden in combat: FrameHidden still owed
+
+local function tellHidden(f)
+  gamepadRegistered[f], gamepadStale[f] = nil, nil
+  return (pcall(GamepadMode.FrameControlsManager.FrameHidden, GamepadMode.FrameControlsManager, f))
+end
+
+-- Tells the gamepad UI that `f` is shown (true when it was told). A frame hidden during combat is
+-- first reported hidden, so the gamepad UI picks it up afresh.
+function W.GamepadShown(f)
+  if not W.GamepadUI() or combatLocked() or not frameControls() then return false end
+  if gamepadStale[f] then tellHidden(f) end
+  if gamepadRegistered[f] then return false end
+  local ok = pcall(GamepadMode.FrameControlsManager.FrameShown, GamepadMode.FrameControlsManager, f)
+  if ok then gamepadRegistered[f] = true end
+  return ok
+end
+
+function W.GamepadHidden(f)
+  if not gamepadRegistered[f] or not frameControls() then return false end
+  if combatLocked() then
+    gamepadStale[f] = true       -- told once combat ends (W.GamepadCatchUp)
+    return false
+  end
+  return tellHidden(f)
+end
+
+-- After combat: report the frames that were hidden meanwhile and stayed hidden.
+function W.GamepadCatchUp(f)
+  if gamepadStale[f] and not f:IsShown() and not combatLocked() and frameControls() then return tellHidden(f) end
+  return false
+end
+
+-- After a tab switch or a list refresh: SmartNavigation re-reads the frame's buttons (it also
+-- does so by itself for frames created later, through its CreateFrame hook).
+function W.GamepadRefresh(f)
+  if not (f and gamepadRegistered[f]) or combatLocked() then return false end
+  if type(SmartNavigation) ~= "table" or type(SmartNavigation.RefreshButtonGroups) ~= "function" then return false end
+  return (pcall(SmartNavigation.RefreshButtonGroups, SmartNavigation, f))
+end
+
+function W.IsGamepadRegistered(f) return gamepadRegistered[f] == true end
+
+-- Puts the keyboard cursor in `box` (mouse and keyboard only; see above). Returns true if it did.
+-- A box that is not on screen (a dialog that opens after combat) is left alone.
+function W.FocusBox(box)
+  if not box or W.GamepadUI() then return false end
+  if box.IsVisible and not box:IsVisible() then return false end
+  box:SetFocus()
+  return true
+end
+
+-- In combat the window and its dialogs stay hidden (DESIGN-v1.2 4.3, the WeakAuras pattern), so
+-- an open asked for meanwhile (/needle, the key binding, the compartment, Settings) happens when
+-- combat ends. A frame shown in combat could not join Forever's gamepad UI (W.GamepadShown is
+-- skipped under the combat restriction), so a controller could neither use nor close it.
+function W.InCombat()
+  if combatLocked() then return true end
+  return ns.SafeBool ~= nil and ns.SafeBool(UnitAffectingCombat, "player") == true
+end
+
+local toldAfterCombat = false
+function W.OpenAfterCombat(f)
+  f.ndReopen = "open"
+  if not toldAfterCombat then
+    toldAfterCombat = true
+    if ns.Print then ns.Print(L["NeedleDropper opens when combat ends."]) end
+  end
+end
+
 -- Frames listed here hide when combat starts and return when it ends, unless the player
 -- closed them meanwhile (the WeakAuras pattern); nothing is destroyed, so typed text stays.
+-- They also join the gamepad UI while they are shown.
 function W.ManageInCombat(f)
   managed[#managed + 1] = f
-  f:HookScript("OnShow", function(self) self.ndReopen = nil end)
-  f:HookScript("OnHide", function(self) if not self.ndCombatHiding then self.ndReopen = nil end end)
+  f:HookScript("OnShow", function(self)
+    self.ndReopen = nil
+    W.GamepadShown(self)
+  end)
+  f:HookScript("OnHide", function(self)
+    if not self.ndCombatHiding then self.ndReopen = nil end
+    W.GamepadHidden(self)
+  end)
 end
 
 function W.OnCombatStart()
@@ -490,15 +616,19 @@ function W.OnCombatStart()
 end
 
 function W.OnCombatEnd()
+  toldAfterCombat = false
   for _, f in ipairs(managed) do
     if f.ndReopen then
+      local fresh = f.ndReopen == "open"   -- opened during combat (W.OpenAfterCombat)
       f.ndReopen = nil
       if not f:IsShown() then
-        f.ndReturning = true        -- not a fresh open: keep the selection and the typed text
+        f.ndReturning = not fresh   -- returning: keep the selection and the typed text
         f:Show()
         f.ndReturning = nil
       end
     end
+    -- Hidden or opened during combat: tell the gamepad UI now.
+    if f:IsShown() then W.GamepadShown(f) else W.GamepadCatchUp(f) end
   end
 end
 
@@ -555,10 +685,22 @@ function W.UpdateFooter()
   local text, canStop = W.StatusText()
   frame.Status:SetText(text)
   local showSave = countEdits and editsSinceLogin >= W.SAVE_HINT_EDITS
-  frame.SaveButton:SetShown(showSave)
-  frame.StopButton:SetShown(canStop)
   local def = W.CurrentTab()
   local right = def and def.buttons or frame.Grip
+  -- The window's own Stop only where the tab has none (the Drops tab's bar has Stop), and the
+  -- footer never overlaps the tab's buttons: at the narrowest window the Soundtracks tab's bar
+  -- leaves ~150 px, so Save now takes its short label there and Save now beats Stop for room.
+  canStop = canStop and not (def and def.hasStop)
+  local fw = frame:GetWidth()
+  local barW = (def and def.buttons and def.buttons:GetWidth()) or 0
+  local room = (type(fw) == "number" and fw or W.DEFAULT_W) - 22 - barW - 12
+  local saveW = 160
+  if showSave and room < saveW + (canStop and 70 or 0) then saveW = 84 end
+  if showSave and canStop and room < saveW + 70 then canStop = false end
+  frame.SaveButton:SetText(saveW == 160 and L["Save now (reloads UI)"] or L["Save now"])
+  frame.SaveButton:SetWidth(saveW)
+  frame.SaveButton:SetShown(showSave)
+  frame.StopButton:SetShown(canStop)
   local status = frame.Status
   status:ClearAllPoints()
   if showSave then
@@ -593,7 +735,10 @@ function W.Flush()
   dirty = {}
   if not (frame and frame:IsShown()) or next(what) == nil then return end
   local def = W.CurrentTab()
-  if def and def.Refresh and (what.all or what.model or what.location) then def.Refresh(what) end
+  if def and def.Refresh and (what.all or what.model or what.location) then
+    def.Refresh(what)
+    W.GamepadRefresh(frame)
+  end
   W.UpdateFooter()
 end
 
@@ -622,6 +767,7 @@ function W.SelectTab(index, userClick)
   if userClick then PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB) end
   if def.OnShow then def.OnShow(false) end
   W.UpdateFooter()
+  W.GamepadRefresh(frame)
 end
 
 -- ------------------------------------------------------------------ build --
@@ -742,6 +888,7 @@ local function build()
     if def and def.OnShow then def.OnShow(not f.ndReturning) end
     W.RefreshAll()
   end)
+  f:HookScript("OnSizeChanged", function() W.UpdateFooter() end)   -- the footer's room depends on the width
   f:SetScript("OnHide", function()
     PlaySound(SOUNDKIT.IG_CHARACTER_INFO_CLOSE)
     if ticker then
@@ -774,6 +921,9 @@ function UI.Open(tab)
   W.SelectTab(index, false)
   if frame:IsShown() then
     W.RefreshAll()
+  elseif W.InCombat() then
+    W.OpenAfterCombat(frame)
+    return true
   else
     frame:Show()
   end
@@ -782,11 +932,14 @@ function UI.Open(tab)
 end
 
 function UI.Close()
-  if frame then frame:Hide() end
+  if frame then
+    frame.ndReopen = nil            -- also cancels an open waiting for the end of combat
+    frame:Hide()
+  end
 end
 
 function UI.Toggle()
-  if UI.IsShown() then UI.Close() else UI.Open() end
+  if UI.IsShown() or (frame and frame.ndReopen) then UI.Close() else UI.Open() end
 end
 
 function UI.Refresh()

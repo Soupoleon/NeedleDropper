@@ -203,6 +203,11 @@
       text = `${f.component} stopped because of an error${f.restarted ? " and was restarted" : ""}. ` +
              "The details are in the log.";
       logs = true;
+    } else if (st.app && st.app.tempLocation) {
+      // Started from inside the zip (Explorer unpacks it into a temporary folder): journey review F10.
+      text = "NeedleDropper is running from a temporary folder (inside the zip?). Extract the zip to a " +
+             "permanent folder, such as Documents\\NeedleDropper, and start it from there: Windows cleans " +
+             "temporary folders, and Start with Windows would stop working.";
     } else if (st.app && st.app.paused) {
       text = "Needle drops are paused. Resume them from the NeedleDropper icon in the tray.";
       info = true;
@@ -266,6 +271,12 @@
     }
     if (wow.found && wow.running && install) {
       note = (note ? note + " " : "") + "World of Warcraft is running: restart it after installing.";
+    } else if (wow.found && wow.running && addon.dataNeedsRestart) {
+      // The app made NeedleDropper_Companion while the game ran: the game finds new addon folders
+      // only when it starts (journey review F6).
+      note = (note ? note + " " : "") + "Restart World of Warcraft once: it only finds NeedleDropper's data addon " +
+             "when it starts (until then the zone music isn't faded for the app's songs).";
+      if (status[0] === "ok") status = ["warn", "Restart the game"];
     }
     setText($("addon-line"), line);
     setText($("addon-note"), note);
@@ -284,7 +295,7 @@
 
   function renderSpotify(sp) {
     const st = sp.state || "not-set-up";
-    const connected = st === "connected" || st === "premium";
+    const connected = st === "connected" || st === "premium" || st === "allowlist";
     show($("sp-steps"), !connected);
     show($("sp-connected"), connected);
     show($("sp-waiting"), st === "waiting");
@@ -298,7 +309,11 @@
     else if (st === "premium") {
       note = "Spotify refused to play a song: controlling playback needs Spotify Premium. If you signed in with " +
              "another account than the app's owner, add it under User Management in the Spotify dashboard.";
+    } else if (st === "allowlist") {
+      note = sp.message || "Spotify refused this account for your app: add it under User Management in the Spotify dashboard.";
+      noteCls = "bad";
     } else if (st === "error" && sp.message) { note = sp.message; noteCls = "bad"; }
+    else if (sp.reconnect) note = sp.reconnectMessage || "Sign in to Spotify again to grant NeedleDropper one more permission.";
     const msg = $("sp-message");
     msg.className = "callout " + noteCls;
     setText(msg, note);
@@ -309,7 +324,14 @@
       const premium = { ok: "✓ Yes: Spotify runs your app (it only does that for a Premium owner).",
                         required: "Required: Spotify refused to play. Playback control needs Spotify Premium.",
                         unknown: "Needed for playback. Spotify checks it when the first song starts." };
-      setText($("sp-premium"), premium[sp.premium] || premium.unknown);
+      let premiumText = premium[sp.premium] || premium.unknown;
+      // With the user-read-private permission Spotify tells the plan itself (real-client finding #3).
+      if (sp.product === "premium") premiumText = "✓ Yes: this account has Spotify Premium.";
+      else if (sp.product) premiumText = `No: this account is on Spotify ${sp.product.charAt(0).toUpperCase()}${sp.product.slice(1)}. Controlling playback needs Premium.`;
+      setText($("sp-premium"), premiumText);
+      setText($("sp-country"), sp.country || "");
+      show($("sp-country-row"), !!sp.country);
+      show($("sp-reconnect-row"), !!sp.reconnect);
       if (!devicesLoaded) loadDevices(false);
       syncDeviceSelect(sp.deviceName || "");
     } else {
@@ -321,7 +343,8 @@
     lastSpotifyState = st;
 
     const status = { "not-set-up": ["off", "Optional"], waiting: ["wait", "Waiting for Spotify"],
-                     connected: ["ok", "Connected"], premium: ["warn", "Premium needed"], error: ["bad", "Needs attention"] };
+                     connected: ["ok", "Connected"], premium: ["warn", "Premium needed"],
+                     allowlist: ["bad", "Account not allowed"], error: ["bad", "Needs attention"] };
     const s = status[st] || status["not-set-up"];
     setStatus("sp-status", s[0], s[1]);
   }
@@ -562,6 +585,9 @@
     });
   });
 
+  // "Sign in again" (a sign-in from an older version lacks a permission): the same flow as Sign in,
+  // inside this click so the browser lets it open Spotify's tab.
+  $("sp-reconnect").addEventListener("click", () => { $("sp-form").requestSubmit(); });
   $("sp-refresh").addEventListener("click", () => busy($("sp-refresh"), "Looking…", () => loadDevices(true)));
   $("sp-device").addEventListener("change", async () => {
     const name = $("sp-device").value;

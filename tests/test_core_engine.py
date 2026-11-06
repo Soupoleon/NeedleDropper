@@ -1,4 +1,11 @@
-"""engine.py with fake providers/deck and an injected clock (no real sleeps)."""
+"""engine.py with fake providers/deck and an injected clock (no real sleeps).
+
+These tests drive the engine's generic behaviour (provider chain, fades, polling, dedupe, the
+stale-HELLO rule, play_now) through **v1** events and a small duck-typed v1 map (``FakeRegistry``).
+The companion's real v1 map (``mapgen.MapRegistry`` over ``Map.json``) was retired with v1.2:
+nothing in the app passes a registry any more, and v2 frames carry the song themselves
+(tests/test_v12_engine_*.py). The engine keeps accepting ``registry=`` for addons older than 1.2.
+"""
 from __future__ import annotations
 
 import threading
@@ -8,10 +15,9 @@ from typing import Optional
 
 import pytest
 
-from needledropper import mapgen
 from needledropper.config import Paths
 from needledropper.engine import Engine
-from needledropper.models import Drop, Event, EventType, Flags
+from needledropper.models import TEST_DROP, Drop, Event, EventType, Flags
 from needledropper.providers.base import NowPlaying, PlayHandle, Provider, ProviderError, ProviderUnavailable
 
 
@@ -90,6 +96,25 @@ def make_paths(tmp_path: Path) -> Paths:
                  game_exe=fl / "Wow.exe", app_dir=app, cache_dir=app / "cache", maps_dir=app / "maps")
 
 
+class FakeRegistry:
+    """A v1 map: ``(hash, n)`` -> drop (``n`` 0 is the test drop), as the engine's ``registry=`` expects."""
+
+    def __init__(self, drops: list[Drop], pack_hash: int = 40213) -> None:
+        self.drops = {d.n: d for d in drops}
+        self.pack_hash = pack_hash
+        self.installed_hash = None
+
+    def resolve_event(self, ev: Event) -> Optional[Drop]:
+        if ev.hash != self.pack_hash:
+            return None
+        return TEST_DROP if ev.n == 0 else self.drops.get(ev.n)
+
+    def describe_miss(self, ev: Event) -> str:
+        if ev.hash != self.pack_hash:
+            return f"unknown map hash {ev.hash} (this map is {self.pack_hash})"
+        return f"no drop n={ev.n} in the map"
+
+
 DROPS = [
     Drop(n=1, id="zone:1411", kind="zone", title="Durotar Song", artist="A", label="Durotar", mapID=1411,
          durationMs=10000),
@@ -102,7 +127,7 @@ DROPS = [
 def env(tmp_path):
     clock = FakeClock()
     deck = FakeDeck()
-    reg = mapgen.MapRegistry(make_paths(tmp_path), DROPS)
+    reg = FakeRegistry(DROPS)
     logs: list[str] = []
 
     def build(*providers: FakeProvider, **kw) -> Engine:
@@ -437,8 +462,9 @@ def test_set_providers_and_registry_swap_live(env, tmp_path):
     assert old.stops() and new.stops() == []
     eng.handle(ev(env, EventType.FIRE, 3, 3, Flags.DROP_ACTIVE), "pixel")
     assert new.plays() == ["zone:1436"]
-    reg2 = mapgen.MapRegistry(make_paths(tmp_path / "other"), [
-        Drop(n=1, id="zone:1411", kind="zone", title="Other Song", artist="Z", label="Durotar", mapID=1411)])
+    reg2 = FakeRegistry([
+        Drop(n=1, id="zone:1411", kind="zone", title="Other Song", artist="Z", label="Durotar", mapID=1411)],
+        pack_hash=777)
     eng.set_registry(reg2)
     assert eng.registry is reg2
     eng.handle(Event(EventType.FIRE, 4, 1, reg2.pack_hash, Flags.DROP_ACTIVE, ""), "pixel")

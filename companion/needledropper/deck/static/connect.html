@@ -123,7 +123,9 @@
               <dl class="facts">
                 <div class="fact"><dt>Account</dt><dd id="sp-account">&hellip;</dd></div>
                 <div class="fact"><dt>Premium</dt><dd id="sp-premium">&hellip;</dd></div>
+                <div class="fact" id="sp-country-row" hidden><dt>Country</dt><dd id="sp-country">&hellip;</dd></div>
               </dl>
+              <p class="actions" id="sp-reconnect-row" hidden><button type="button" class="btn small" id="sp-reconnect">Sign in again</button></p>
               <div class="field">
                 <label for="sp-device">Play on</label>
                 <div class="field-row">
@@ -147,7 +149,7 @@
             <p class="status" id="yt-status"><span class="glyph" aria-hidden="true"></span><span class="status-text">Checking&hellip;</span></p>
           </div>
           <div class="card-body">
-            <p class="note">Nothing to set up. When a song plays from YouTube, a small player window opens and closes again when the song is over: YouTube's rules say the video must stay visible while it plays. The first time, click once in that window to allow sound.</p>
+            <p class="note">Nothing to set up. While a song plays from YouTube, a small player window shows on top of the game in the top-right corner, and hides again when the song is over: YouTube's rules say the video must stay visible while it plays. It never takes the focus from the game. It needs Microsoft Edge or Google Chrome.</p>
             <label class="switch">
               <input type="checkbox" role="switch" id="yt-enabled">
               <span class="track" aria-hidden="true"></span>
@@ -175,7 +177,7 @@
             <details class="more" id="link-tips">
               <summary>Nothing happens?</summary>
               <ul class="tips">
-                <li>Play in <strong>Windowed</strong> or <strong>Windowed (Fullscreen)</strong> mode: NeedleDropper reads a tiny strip in the top-left corner of the game window.</li>
+                <li>Play in <strong>Windowed</strong> or <strong>Fullscreen (Windowed)</strong> mode: NeedleDropper reads a tiny strip in the top-left corner of the game window.</li>
                 <li>Check that NeedleDropper is ticked in the AddOns list on the character screen.</li>
                 <li>Installed the addon while the game was running? Restart World of Warcraft.</li>
                 <li>Still nothing? <button type="button" class="link-btn" id="tips-logs">Open the log folder</button> and look at <code>needledropper.log</code>.</li>

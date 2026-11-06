@@ -6,11 +6,13 @@
  *   {cmd:"show", dropId, label, title, artist, artUrl, attribution, link, hint}
  *   {cmd:"hide", dropId}
  *   {cmd:"play", playId, source:"local"|"youtube", url|videoId, startMs, fadeInMs, volume}
+ *   {cmd:"cue", videoId, startMs, dropId}   (ARM: load the video paused and silent; FIRE plays it)
  *   {cmd:"stop", playId, fadeOutMs}
  *   {cmd:"fade", playId, volume, ms}
  * Status: {state:"ready"|"playing"|"ended"|"error"|"autoplay-blocked", detail, playId, code?}
  *
- * YouTube's rules: the video stays visible (>= 320x180) and uncovered while it plays.
+ * YouTube's rules: the video stays visible (>= 320x180) and uncovered while it plays. The app keeps
+ * this window hidden between songs and shows it on top while one plays; the page never focuses itself.
  */
 (function () {
   "use strict";
@@ -30,6 +32,7 @@
   var es = null;
   var retryMs = 1000;
   var yt = { player: null, ready: false, loading: false, waiting: [], watch: null };
+  var cued = null;           // {videoId, startMs}: cued on ARM (paused, silent), started by the FIRE
 
   // ------------------------------------------------------------ status --
   function post(state, detail, playId, extra) {
@@ -138,8 +141,8 @@
     if (c) {
       last.textContent = (c.label || "") + (c.artist || c.title ? " — " + [c.artist, c.title].filter(Boolean).join(" · ") : "");
       last.hidden = !last.textContent;
-      $("idle-line").textContent = "You can close this window.";
-      $("idle-help").textContent = "It opens again for the next YouTube drop.";
+      $("idle-line").textContent = "The next YouTube song plays here.";
+      $("idle-help").textContent = "NeedleDropper hides this window between songs.";
     }
   }
 
@@ -294,9 +297,27 @@
     document.head.appendChild(s);
   }
 
+  // ARM, ~10 s before the FIRE: cue the video (loaded, paused, silent) so the FIRE only starts it.
+  // cueVideoById never plays; a warmer start (load, then pause at the first frame) would play a few
+  // milliseconds of video in a hidden window, a grey area of YouTube's terms (research 1.3 / 3.3).
+  function cueYoutube(cmd) {
+    if (!cmd.videoId) return;
+    if (current && current.source === "youtube") return;   // a song plays: never disturb it
+    withYouTube(function () {
+      if (current && current.source === "youtube") return;
+      try {
+        yt.player.cueVideoById({ videoId: cmd.videoId, startSeconds: Math.floor((cmd.startMs || 0) / 1000) });
+        cued = { videoId: cmd.videoId, startMs: cmd.startMs || 0 };
+      } catch (e) { cued = null; }
+    });
+  }
+
   function playYoutube(cmd) {
     if (current && current.source === "local") stopLocalNow();
-    stopYoutubeNow();
+    var wasCued = cued && cued.videoId === cmd.videoId && (cued.startMs | 0) === (cmd.startMs | 0);
+    if (!wasCued) stopYoutubeNow();
+    else { cancelFade("yt"); if (yt.watch) { clearTimeout(yt.watch); yt.watch = null; } }
+    cued = null;
     var vol = targetVolume(cmd) / 100;
     current = { playId: cmd.playId, source: "youtube", volume: vol * 100, started: false, cmd: cmd };
     showYt();
@@ -304,7 +325,8 @@
       if (!current || current.playId !== cmd.playId) return;
       ytSetVolume(cmd.fadeInMs > 0 ? 0 : vol);
       try {
-        yt.player.loadVideoById({ videoId: cmd.videoId, startSeconds: Math.floor((cmd.startMs || 0) / 1000) });
+        if (wasCued) yt.player.playVideo();
+        else yt.player.loadVideoById({ videoId: cmd.videoId, startSeconds: Math.floor((cmd.startMs || 0) / 1000) });
       } catch (e) {
         post("error", "youtube: " + e.message, cmd.playId, { code: -2 });
         current = null; hideYt();
@@ -441,6 +463,7 @@
         if (!unlocked) showUnlock();
         if (cmd.source === "youtube") playYoutube(cmd); else playLocal(cmd);
         break;
+      case "cue": cueYoutube(cmd); break;
       case "stop": stopCmd(cmd); break;
       case "fade": fadeCmd(cmd); break;
       default: break;

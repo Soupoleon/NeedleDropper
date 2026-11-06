@@ -93,7 +93,7 @@ and its song.
 2. **Change the song.** Click **Change song here**. NeedleDropper copies the drop into **My Drops**, a
    soundtrack of your own that sits at the top of your list, so your version is the one that plays.
    The cursor lands in **Artist** with the old name selected: type the new artist and title, and
-   paste a Spotify or YouTube link if you have one. Press ▶ **Test** to hear it at once.
+   paste a Spotify or YouTube link if you have one. Press **Test** to hear it at once.
 3. **Or silence it.** Some places are better quiet: **Turn off here**.
 4. **Changed your mind?** **Revert to Azeroth Mixtape** brings the original song back.
 5. **Add places it doesn't cover.** Stand there (a town, an inn, a bridge, a dungeon: anywhere) and
@@ -108,7 +108,7 @@ zone; see its [liner notes](SOUNDTRACK.md)) and keep *Azeroth Mixtape* above it 
 tab: when two soundtracks have a song for the same place, the one higher in the list plays. The
 Mixtape then plays at its 38 places and Unbound scores everywhere else.
 
-To share your version, select My Drops on the Soundtracks tab and click **Share…**: you get a code
-to paste into Discord, and friends paste it into **Import…**. To hear a drop without waiting for a
-first visit, press ▶ **Test** next to it in the window, or type `/needle play Goldshire`. Everything
+To share your version, select My Drops on the Soundtracks tab and click **Share...**: you get a code
+to paste into Discord, and friends paste it into **Import...**. To hear a drop without waiting for a
+first visit, press **Test** next to it in the window, or type `/needle play Goldshire`. Everything
 else, including the file format for soundtrack authors, is in [Soundtracks](PACKS.md).
