@@ -89,6 +89,19 @@ def test_v1_corruption_is_rejected():
     assert protocol.parse_chat_line(line.replace(" 12 ", " 13 ")) is None
 
 
+@pytest.mark.parametrize("t", range(6, 16))
+def test_v1_decoders_reject_types_above_5(t):
+    """EventType gained CONFIG = 6 for protocol v2 (DESIGN-v1.2.1 2.5): the v1 decoders still
+    accept only 0..5, as beacon bytes and as an NDROP1 line, even with a valid checksum."""
+    head = bytes((protocol.MAGIC, (protocol.VERSION << 4) | t, 9, 0, 1, 0, 2, 0))
+    f = protocol.fletcher16(head)
+    assert protocol.decode_beacon_bytes(head + bytes((f >> 8, f & 0xFF))) is None
+    body = f"NDROP1 9 {t} 1 2 0 zone:1"
+    assert protocol.parse_chat_line(f"{body} {protocol.fletcher16(body.encode('ascii')):04x}") is None
+    ok = "NDROP1 9 5 1 2 0 zone:1"  # the same record as a PING still parses
+    assert protocol.parse_chat_line(f"{ok} {protocol.fletcher16(ok.encode('ascii')):04x}") is not None
+
+
 def test_the_addon_no_longer_ships_or_uses_the_v1_protocol():
     assert not (ADDON_DIR / "Protocol.lua").exists()
     offenders = []

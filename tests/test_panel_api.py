@@ -36,8 +36,10 @@ def test_state_shows_the_four_cards_and_no_secrets(shell):
                                  "expires_at": time.time() + 3600, "scope": "", "client_id": "abcdef0123456789"})
     st, data = shell.call("GET", "/api/state")
     assert st == 200
+    # 1.2.1 adds "music": the choices set in game and the last request results (DESIGN-v1.2.1 3.12)
     assert set(data) == {"app", "wow", "addon", "spotify", "youtube", "link", "autostart", "update", "faults",
-                         "playing"}
+                         "playing", "music"}
+    assert data["music"]["order"] == "spotify-youtube" and data["music"]["fromGame"] is False
     assert data["wow"]["found"] and data["wow"]["exe"] and not data["wow"]["running"]
     assert data["wow"]["source"] == "config" and data["wow"]["folder"].endswith("_forever_")
     assert data["addon"]["installed"] is False and data["addon"]["action"] == "install"
@@ -92,8 +94,12 @@ def test_config_patch_allows_only_the_connect_page_keys(shell, patch, field):
 
 def test_schema_is_exactly_the_connect_page(shell):
     assert set(SCHEMA) == {"wowRoot", "setupComplete", "startWithWindows", "spotify", "youtube"}
-    assert set(SCHEMA["spotify"]) == {"enabled", "clientId", "deviceName"}
+    # 1.2.1: the Connect page also picks where Spotify plays (spotify.device, D6)
+    assert set(SCHEMA["spotify"]) == {"enabled", "clientId", "deviceName", "device"}
     assert validate_config_patch({"spotify": {"deviceName": "  PC  "}}) == {"spotify": {"deviceName": "PC"}}
+    assert validate_config_patch({"spotify": {"device": "Connect"}}) == {"spotify": {"device": "connect"}}
+    with pytest.raises(PatchError):
+        validate_config_patch({"spotify": {"device": "desktop"}})
     with pytest.raises(PatchError) as exc:
         validate_config_patch({"a": 1, "b": 2})
     assert set(exc.value.fields) == {"a", "b"}

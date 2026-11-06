@@ -26,8 +26,17 @@ returns ``(http_status, json_payload)`` and never includes secrets (Spotify toke
 deck token, the PKCE verifier). Routes: ``GET /api/state``, ``POST /api/config``,
 ``POST /api/spotify/connect``, ``POST /api/spotify/disconnect``,
 ``GET /api/spotify/devices``, ``GET /api/link``, ``POST /api/wow/detect``,
-``POST /api/addon/install``, ``POST /api/open`` (``{"what": "logs"}``). Anything else
-(the v1.1 soundtrack, map, pack and test endpoints included) is a 404.
+``POST /api/addon/install``, ``POST /api/open`` (``{"what": "logs"}``), and from v1.2.1
+``POST /api/music/test`` (``{"service": "spotify" | "youtube"}``) and ``POST /api/youtube/signin``,
+which run the same handlers as the requests the game sends (:mod:`.music_config`). Anything
+else (the v1.1 soundtrack, map, pack and test endpoints included) is a 404.
+
+v1.2.1 (DESIGN-v1.2.1 3): the music choices and requests the game sends reach
+:class:`~needledropper.music_config.MusicConfig` from :meth:`Companion.submit` (before the pause
+gate) and from the pixel link's baseline frame; the companion applies the choices live
+(:meth:`Companion._apply`: "Play music with" orders the engine's routes, the fade switch, the
+YouTube box corner) and reports to the game through the ``music`` block of
+``NeedleDropper_Companion`` (:meth:`Companion._push_game_music`).
 """
 from __future__ import annotations
 
@@ -49,11 +58,12 @@ from typing import Any, Callable, Optional, Sequence
 
 from . import __version__, autostart, cli, resources, tray
 from .config import (
-    DEFAULT_FLAVOR, DEFAULT_WOW_ROOT, ConfigError, Paths, RegistryReader, addon_status, addon_toc, config_path,
-    detect_wow_root, load_config, parse_position, paths_from_config, provider_enabled, read_toc_version,
-    update_config_file, version_key, wow_install_score,
+    DEFAULT_FLAVOR, DEFAULT_WOW_ROOT, SPOTIFY_DEVICE_MODES, ConfigError, Paths, RegistryReader, addon_status,
+    addon_toc, config_path, detect_wow_root, effective_fades, load_config, music_choices, parse_position,
+    paths_from_config, provider_enabled, read_toc_version, update_config_file, version_key, wow_install_score,
 )
 from .models import EventType, Flags
+from .music_config import MusicConfig
 
 log = logging.getLogger("needledropper.panel")
 
@@ -68,6 +78,9 @@ GAME_RUNNING_CACHE_S = 3.0
 WOW_DETECT_CACHE_S = 60.0
 #: A frame heard within this many seconds counts as "linked" in the tray's status line.
 LINK_FRESH_S = 20.0
+#: The oldest addon this app can read: 1.2.1 changed the frame check (D1/D2), so 1.2.0 and 1.2.1 frames are
+#: unreadable to each other (review ON-2).
+MIN_ADDON_VERSION = "1.2.1"
 #: The same TEST frame from both transports (or the engine's callback) ticks once.
 TEST_DEDUPE_S = 30.0
 HOUSEKEEPING_S = 5.0
@@ -145,15 +158,27 @@ def _v_client_id(v: Any) -> str:
     return s
 
 
+def _v_spotify_device(v: Any) -> str:
+    if isinstance(v, str) and v.strip().lower() in SPOTIFY_DEVICE_MODES:
+        return v.strip().lower()
+    raise ValueError("must be \"app\" (NeedleDropper plays Spotify itself) or \"connect\" (another Spotify device)")
+
+
 #: The only settings the Connect page may change. Everything else (fades, transports,
-#: player window, ports, update check) is an advanced knob edited in config.json.
+#: player window, ports, update check) is an advanced knob edited in config.json; the music
+#: choices ("Play music with", the YouTube box position, fade, resume) are set in game.
 SCHEMA: dict[str, Any] = {
     "wowRoot": _v_path,
     "setupComplete": _v_bool,
     "startWithWindows": _v_bool,
-    "spotify": {"enabled": _v_bool, "clientId": _v_client_id, "deviceName": _v_text(200)},
+    "spotify": {"enabled": _v_bool, "clientId": _v_client_id, "deviceName": _v_text(200),
+                "device": _v_spotify_device},
     "youtube": {"enabled": _v_bool},
 }
+#: What the Connect page's Test buttons may test (POST /api/music/test).
+MUSIC_TEST_SERVICES = {"spotify": "test-spotify", "youtube": "test-youtube"}
+#: The player browser (music.youtube.player) is looked up again at most this often while no player page is open.
+PLAYER_BROWSER_CACHE_S = 60.0
 
 
 def _validate_tree(patch: Any, schema: dict[str, Any], prefix: str, errors: dict[str, str]) -> dict[str, Any]:
@@ -643,12 +668,20 @@ class Companion:
         self._wow_det: Optional[tuple[float, Any]] = None
         self._last_install: Optional[dict[str, Any]] = None
         self._game_status_sent: Optional[dict[str, Any]] = None
+        self._game_music_sent: Optional[dict[str, Any]] = None
+        self._player_browser: Optional[tuple[float, bool, str]] = None  # (when, page open, browser)
+        self._too_old_cache: Optional[tuple[float, bool]] = None  # (when, the installed addon is too old)
+        #: a sign-in started by the game for another Client ID while a working one exists (DESIGN-v1.2.1
+        #: 3.5): config.json keeps the old ID until it succeeds, and the expiry watcher waits for it
+        self._deferred_login: Any = None
         self._sv_stamp: Optional[tuple] = None  # SavedVariables files last seen (see _watch_savedvars)
         self.updates: Optional[UpdateChecker] = None
         self._hk_thread: Optional[threading.Thread] = None
         self._hk_stop = threading.Event()
         self._hk_wake = threading.Event()
         self._started = False
+        #: the music choices and requests from the game (DESIGN-v1.2.1 3)
+        self.music = MusicConfig(self)
         self.api = PanelAPI(self)
 
     # -------------------------------------------------------- lifecycle --
@@ -676,6 +709,7 @@ class Companion:
             self.providers = self._build_providers()
             self.engine = self._make_engine(self.providers)
             self.engine.start()
+            self.music.start()
             self.transports = self._start_transports()
             self.updates = self._make_update_checker()
             self.deck.on_player_status = self._on_player_status
@@ -692,8 +726,12 @@ class Companion:
 
     def _watch_player(self, now: float) -> None:
         """No player window (it did not start, or was closed): try again, at most every few minutes,
-        and never while the game is in front (deck.open_player refuses then)."""
+        and never while the game is in front (deck.open_player refuses then). Never while a YouTube
+        sign-in window the game asked for runs in the player's own profile either: a player made then
+        would open inside that browser process, without its flags (DESIGN-v1.2.1 3.8)."""
         if getattr(self.deck, "page_open", True) or now < self._next_player_try:
+            return
+        if self.music.signin_running():
             return
         self._next_player_try = now + PLAYER_RETRY_S
         self._prepare_player()
@@ -701,12 +739,17 @@ class Companion:
     def _youtube_enabled(self) -> bool:
         return any(getattr(p, "name", None) == "youtube" for p in self.providers or [])
 
+    def _player_needed(self) -> bool:
+        """YouTube plays in the player window, and so does Spotify in app mode (D6)."""
+        return self._youtube_enabled() or any(getattr(p, "name", None) == "spotify" and getattr(p, "mode", None) == "app"
+                                              for p in self.providers or [])
+
     def _prepare_player(self) -> None:
         """Create the hidden YouTube player window now, while the game is (normally) not in front:
         Chromium activates a window when it creates it, so none may be created during play
         (real-client #8 / #13). The housekeeping loop tries again while there is none."""
         prepare = getattr(self.deck, "prepare_player", None)
-        if not callable(prepare) or not self._youtube_enabled():
+        if not callable(prepare) or not self._player_needed():
             return
         if getattr(self.deck, "auto_open", "youtube") == "never":
             return
@@ -780,6 +823,9 @@ class Companion:
             self._side_spotify = None
             self._started = False
         cli._stop_all(transports)
+        music = getattr(self, "music", None)
+        if music is not None:
+            music.stop()
         if engine is not None:
             try:
                 engine.stop()
@@ -800,8 +846,8 @@ class Companion:
         return cli.build_providers(self.cfg, self.paths, self.deck, out=self.out, spotify_http=self.spotify_http)
 
     def _engine_kw(self) -> dict[str, Any]:
-        kw: dict[str, Any] = {"fade_in_ms": int(self.cfg.get("fadeInMs", 2500)),
-                              "fade_out_ms": int(self.cfg.get("fadeOutMs", 3000)),
+        fade_in, fade_out = effective_fades(self.cfg)  # 0 when the game's "Fade songs in and out" is off
+        kw: dict[str, Any] = {"fade_in_ms": fade_in, "fade_out_ms": fade_out,
                               "log": logging.getLogger("needledropper.engine"),
                               "on_link_check": self.on_link_check, "on_status": self.on_engine_status}
         if self.paths.addons_dir.is_dir():  # where the engine records Spotify matches / failures for the game
@@ -812,10 +858,22 @@ class Companion:
     def _make_engine(self, providers: list) -> Any:
         kw = self._engine_kw()
         if self._engine_factory is not None:
-            return self._engine_factory(list(providers), self.deck, **kw)
-        from .engine import Engine
+            engine = self._engine_factory(list(providers), self.deck, **kw)
+        else:
+            from .engine import Engine
 
-        return construct_engine(Engine, list(providers), self.deck, kw)
+            engine = construct_engine(Engine, list(providers), self.deck, kw)
+        self._set_music_order(engine)
+        return engine
+
+    def _set_music_order(self, engine: Any) -> None:
+        """The game's "Play music with" (``music.order``) into the engine's routes (DESIGN-v1.2.1 3.3)."""
+        setter = getattr(engine, "set_music_order", None) if engine is not None else None
+        if callable(setter):
+            try:
+                setter(music_choices(self.cfg)["order"])
+            except Exception:  # noqa: BLE001 - an engine without it plays the default order
+                log.debug("set_music_order failed", exc_info=True)
 
     def _replace_engine(self) -> None:
         """A new engine with the current providers (after a crash, or a provider change the engine
@@ -841,7 +899,35 @@ class Companion:
             built = cli.build_transports(self.cfg, self.paths, self.submit, out=self.out)
         else:
             built = self._transport_factory(self.cfg, self.paths, self.submit)
+        for t in built:
+            self.hook_baseline(t)
         return cli._start_transports(list(built), out=self.out)
+
+    def hook_baseline(self, transport: Any) -> None:
+        """Let a transport's baseline frame (the pixel link's first read after a start: never played)
+        deliver the music choices it carries (DESIGN-v1.2.1 3.1). A no-op for transports without one."""
+        if hasattr(transport, "on_baseline"):
+            transport.on_baseline = self._on_baseline
+
+    def _on_baseline(self, frame: Any, transport_name: str) -> None:
+        self._music_order_now(frame)
+        self.music.feed(frame, transport_name, baseline=True)
+
+    def _music_order_now(self, frame: Any) -> None:
+        """A frame's "Play music with" reaches the engine before the frames behind it: the chat log delivers
+        a PREFS-only CONFIG in one batch with the next drop's ARM and FIRE, and the music worker writes
+        config.json (and sets the order again) only after the engine handled them (review INGAME-4). A lock-
+        free attribute store (Engine.set_music_order)."""
+        if not MusicConfig.wants(frame):
+            return
+        order = getattr(getattr(frame, "prefs", None), "order", None)
+        eng = self.engine
+        setter = getattr(eng, "set_music_order", None) if eng is not None else None
+        if order is not None and callable(setter):
+            try:
+                setter(order)
+            except Exception:  # noqa: BLE001 - the worker applies it again
+                log.debug("set_music_order failed", exc_info=True)
 
     def _configure_deck(self) -> None:
         d = self.cfg.get("deck") or {}
@@ -915,10 +1001,13 @@ class Companion:
 
     # ------------------------------------------------- frames and link --
     def submit(self, event: Any, transport_name: str) -> None:
-        """The transports' ``on_event``: link bookkeeping, the pause gate, then the engine."""
+        """The transports' ``on_event``: link bookkeeping, the music choices and requests (also while
+        paused: choices apply, requests other than the tests run), the pause gate, then the engine."""
         self._note_frame(transport_name)
         if is_test_event(event):
             self._link_tick(event, transport_name)
+        self._music_order_now(event)
+        self.music.feed(event, transport_name)
         if self._paused:
             return
         eng = self.engine
@@ -1088,23 +1177,35 @@ class Companion:
             self._account = None
             if login is not None and not login.done:
                 threading.Thread(target=login.cancel, daemon=True).start()
+        # The game's fade choice rules the Spotify provider's own fade switch once it was sent
+        # (cli.build_providers), so a change of it needs new providers too.
+        old_music, new_music = old.get("music") or {}, new.get("music") or {}
+        spotify_fade = (new_music.get("fromGame") is True or old_music.get("fromGame") is True) and any(
+            old_music.get(k) != new_music.get(k) for k in ("fade", "fromGame"))
         if self._started and paths_changed:
             actions.append(self._rebuild_engine)  # it records for the game in the new AddOns folder
-        elif self._started and any(old.get(k) != new.get(k) for k in ("providers", "spotify", "local", "youtube")):
+        elif self._started and (spotify_fade or any(old.get(k) != new.get(k)
+                                                    for k in ("providers", "spotify", "local", "youtube"))):
             actions.append(self.rebuild_providers)
         if self._started and (paths_changed or old.get("transport") != new.get("transport")):
             actions.append(self.restart_transports)
         eng = self.engine
         if eng is not None:
-            for attr, key, default in (("fade_in_ms", "fadeInMs", 2500), ("fade_out_ms", "fadeOutMs", 3000)):
+            for attr, value in zip(("fade_in_ms", "fade_out_ms"), effective_fades(new)):
                 if hasattr(eng, attr):
-                    try:
-                        setattr(eng, attr, int(new.get(key, default)))
-                    except (TypeError, ValueError):
-                        pass
+                    setattr(eng, attr, value)
+            self._set_music_order(eng)
         self._configure_deck()
         self._hk_wake.set()
         return warnings, actions
+
+    def apply_music_choices(self, changes: dict[str, Any]) -> list[str]:
+        """Write the music choices from the game (``music``, ``deck.playerCorner`` / ``playerPosition``,
+        ``spotify.restorePrevious``; already compared with the config) and apply them live, like a
+        Connect page edit (DESIGN-v1.2.1 3.2). Returns warnings."""
+        warnings = self._write_config(changes)
+        self._nudge("music")
+        return warnings
 
     def _nudge(self, what: str = "state") -> None:
         notify = getattr(self.deck, "notify_panels", None)
@@ -1168,12 +1269,34 @@ class Companion:
                 from .providers.spotify import SpotifyProvider
 
                 kw = {"http": self.spotify_http} if self.spotify_http is not None else {}
-                self._side_spotify = SpotifyProvider(self.cfg.get("spotify") or {}, self.paths, **kw)
+                # passive: it reports, but never connects the in-app player (Spotify is switched off)
+                self._side_spotify = SpotifyProvider(self.cfg.get("spotify") or {}, self.paths, deck=self.deck,
+                                                     passive=True, **kw)
             return self._side_spotify
 
-    def spotify_connect(self, client_id: Optional[str]) -> dict[str, Any]:
-        """Start the browser sign-in (PKCE); returns Spotify's authorize URL for the page to open."""
-        from .providers.spotify_auth import start_login
+    def spotify_connect(self, client_id: Optional[str], *, on_done: Optional[Callable[[Any], Any]] = None,
+                        keep_working: bool = False) -> dict[str, Any]:
+        """Start the browser sign-in (PKCE); returns Spotify's authorize URL for the page to open.
+
+        ``on_done(session)`` runs once the sign-in ended (after the companion took it over).
+        ``keep_working`` (a Connect sent from the game, DESIGN-v1.2.1 3.5): when the ID differs from the
+        configured one and the configured one has a working sign-in, nothing is saved until the new
+        sign-in succeeds -- a failed or abandoned one leaves the working connection as it was.
+        """
+        session = self._start_spotify_login(client_id, on_done=on_done, keep_working=keep_working)
+        return {"authorizeUrl": session.authorize_url, "redirectUri": session.redirect_uri, "state": session.state}
+
+    def connect_spotify_from_game(self, client_id: str, on_done: Callable[[Any], Any]) -> Any:
+        """Connect Spotify for a request from the game; returns the login session (its authorize URL)."""
+        return self._start_spotify_login(client_id, on_done=on_done, keep_working=True)
+
+    def current_login(self) -> Any:
+        """The Spotify sign-in in progress (or finished last), None when there is none."""
+        return self._login
+
+    def _start_spotify_login(self, client_id: Optional[str], *, on_done: Optional[Callable[[Any], Any]],
+                             keep_working: bool) -> Any:
+        from .providers.spotify_auth import TokenManager, TokenStore, start_login
 
         sp_cfg = self.cfg.get("spotify") or {}
         cid = (client_id if client_id is not None else sp_cfg.get("clientId") or "").strip()
@@ -1183,38 +1306,86 @@ class Companion:
             raise PatchError(f"Client ID {exc}", {"spotify.clientId": str(exc)}) from exc
         if not cid:
             raise PatchError("Paste your Spotify app's Client ID first.", {"spotify.clientId": "must not be empty"})
-        updates: dict[str, Any] = {}
-        if cid != sp_cfg.get("clientId"):
-            updates.setdefault("spotify", {})["clientId"] = cid
-        if not provider_enabled(self.cfg, "spotify"):
-            updates.setdefault("spotify", {})["enabled"] = True
-        provs = list(self.cfg.get("providers") or [])
-        if "spotify" not in provs:
-            updates["providers"] = ["spotify"] + provs
+        configured = str(sp_cfg.get("clientId") or "").strip()
+        defer = False
+        if keep_working and configured and cid.lower() != configured.lower():
+            try:
+                defer = TokenManager(configured, TokenStore(self.paths), http=self.spotify_http).usable()
+            except Exception:  # noqa: BLE001 - an unreadable sign-in is not a working one
+                defer = False
         old, self._login = self._login, None
         if old is not None and not old.done:
             old.cancel()  # frees the callback port before the new listener binds it
-        if updates:
-            self._write_config(updates)
-        session = start_login(self.cfg.get("spotify") or {}, self.paths, http=self.spotify_http,
-                              on_change=self._on_login_change)
-        with self._lock:
-            self._login = session
-            self._account = None
-            self._spotify_user_off = False
+
+        def changed(s: Any) -> None:
+            self._on_login_change(s, on_done)
+
+        if defer:
+            # The new ID is saved only when its sign-in succeeds (_after_login); until then the
+            # working sign-in keeps playing and the expiry watcher waits (_watch_spotify).
+            log.info("Spotify: signing in with another Client ID; the current sign-in stays until it succeeds")
+            session = start_login({**sp_cfg, "clientId": cid}, self.paths, http=self.spotify_http,
+                                  on_change=changed)
+            with self._lock:
+                self._login = session
+                self._deferred_login = session
+                self._spotify_user_off = False
+        else:
+            updates: dict[str, Any] = {}
+            if cid != sp_cfg.get("clientId"):
+                updates.setdefault("spotify", {})["clientId"] = cid
+            if not provider_enabled(self.cfg, "spotify"):
+                updates.setdefault("spotify", {})["enabled"] = True
+            provs = list(self.cfg.get("providers") or [])
+            if "spotify" not in provs:
+                updates["providers"] = ["spotify"] + provs
+            if updates:
+                self._write_config(updates)
+            session = start_login(self.cfg.get("spotify") or {}, self.paths, http=self.spotify_http,
+                                  on_change=changed)
+            with self._lock:
+                self._login = session
+                self._deferred_login = None
+                self._account = None
+                self._spotify_user_off = False
         self.notifier.reset(tray.NOTE_SPOTIFY_EXPIRED)
         self._nudge("spotify")
-        return {"authorizeUrl": session.authorize_url, "redirectUri": session.redirect_uri, "state": session.state}
+        return session
 
-    def _on_login_change(self, session: Any) -> None:
+    def _on_login_change(self, session: Any, on_done: Optional[Callable[[Any], Any]] = None) -> None:
         # Called on the login thread; follow up on a fresh thread so a concurrent cancel()
         # (which joins the login thread) can never deadlock.
-        threading.Thread(target=self.guard.wrap(lambda: self._after_login(session), "needledropper-spotify-done"),
+        def run() -> None:
+            try:
+                self._after_login(session)
+            finally:
+                if on_done is not None:
+                    on_done(session)
+
+        threading.Thread(target=self.guard.wrap(run, "needledropper-spotify-done"),
                          name="needledropper-spotify-done", daemon=True).start()
 
     def _after_login(self, session: Any) -> None:
+        deferred = session is self._deferred_login
+        if deferred:
+            with self._lock:
+                self._deferred_login = None
         if session is not self._login:
             return
+        if deferred and session.state == "connected":
+            # Now the new Client ID is saved (which forgets the old account and login by design).
+            updates: dict[str, Any] = {"spotify": {"clientId": session.client_id}}
+            if not provider_enabled(self.cfg, "spotify"):
+                updates["spotify"]["enabled"] = True
+            provs = list(self.cfg.get("providers") or [])
+            if "spotify" not in provs:
+                updates["providers"] = ["spotify"] + provs
+            try:
+                self._write_config(updates)
+            except (ConfigError, OSError) as exc:
+                log.warning("could not save the new Spotify Client ID: %s", exc)
+            with self._lock:
+                self._login = session
         if session.state == "connected":
             prof = getattr(session, "profile", None) or {}
             status = prof.get("status")
@@ -1232,6 +1403,7 @@ class Companion:
             else:
                 self.rebuild_providers()
             self.notifier.reset(tray.NOTE_SPOTIFY_EXPIRED)
+            self.notifier.reset(tray.NOTE_SPOTIFY_RELOGIN)
         self._nudge("spotify")
         self._hk_wake.set()
 
@@ -1244,6 +1416,7 @@ class Companion:
             self._account = None
             self._spotify_user_off = True
             self._spotify_was_connected = False
+            self._deferred_login = None
         if login is not None and not login.done:
             login.cancel()
         TokenStore(self.paths).clear()
@@ -1255,7 +1428,13 @@ class Companion:
         from .providers.base import ProviderError, ProviderUnavailable
 
         sp = self.spotify_provider()
-        if not sp.available():
+        try:
+            signed_in = bool((sp.status_dict() or {}).get("loggedIn"))
+        except Exception:  # noqa: BLE001
+            signed_in = False
+        # In app mode Spotify is "available" only once the in-app player is ready; the list of other
+        # Spotify devices (the "connect" choice) needs just a sign-in.
+        if not signed_in or (getattr(sp, "mode", "connect") != "app" and not sp.available()):
             return 409, {"error": sp.unavailable_reason() or "Spotify is not connected."}
         try:
             devices = sp.list_devices()
@@ -1263,13 +1442,27 @@ class Companion:
             return 409, {"error": str(exc)}
         except ProviderError as exc:
             return 502, {"error": str(exc)}
-        return 200, {"devices": devices, "selected": (self.cfg.get("spotify") or {}).get("deviceName") or ""}
+        sp_cfg = self.cfg.get("spotify") or {}
+        return 200, {"devices": devices, "selected": sp_cfg.get("deviceName") or "",
+                     "device": sp_cfg.get("device") or "app"}
 
     def _spotify_status(self) -> dict[str, Any]:
         try:
             st = dict(self.spotify_provider().status_dict() or {})
         except Exception as exc:  # noqa: BLE001 - e.g. Spotify support missing
             st = {"badge": "error", "message": str(exc), "loggedIn": False, "configured": False}
+        acct = self._account
+        if (isinstance(acct, dict) and acct.get("status") == 403 and acct.get("problem") == "allowlist"
+                and st.get("badge") == "connected"):
+            # The sign-in's own profile read said the account is not on the developer app's User Management
+            # list: say so at once, not "Connected" until the first song fails (review ON-3).
+            from .providers.spotify import ALLOWLIST_MESSAGE
+
+            st.update(badge="allowlist", message=ALLOWLIST_MESSAGE)
+            if st.get("state") == "connected":
+                st["state"] = "error"
+        if st.get("badge") == "allowlist":
+            st["problem"] = "allowlist"
         return st
 
     def _spotify_state(self) -> dict[str, Any]:
@@ -1290,6 +1483,8 @@ class Companion:
         if account and account.get("status") == 403 and problem != "scope" and not warning:
             warning = ("Spotify refused this account for your app. Development apps work only for their owner "
                        "(who needs Premium) and the accounts added under User Management in the dashboard.")
+        if not warning and st.get("warning"):
+            warning = st["warning"]  # e.g. in-app Spotify can't run: no Chrome / no player window yet (D10)
         save_error = st.get("saveError") or (login or {}).get("saveError")
         if save_error and not warning:
             warning = (f"Signed in, but Windows refused to save the sign-in ({save_error}). NeedleDropper keeps it "
@@ -1317,7 +1512,9 @@ class Companion:
                 "account": (account or {}).get("name") or (login or {}).get("account"), "premium": premium,
                 "product": product, "country": country, "missingScopes": missing, "reconnect": reconnect,
                 "reconnectMessage": st.get("scopeMessage") if reconnect else None, "saveError": save_error,
-                "warning": warning, "deviceName": sp_cfg.get("deviceName") or "", "login": login}
+                "warning": warning, "deviceName": sp_cfg.get("deviceName") or "", "login": login,
+                "device": sp_cfg.get("device") or "app", "relogin": bool(st.get("relogin")),
+                "musicState": st.get("state")}
 
     def _check_spotify_account(self) -> None:
         """Ask Spotify who is signed in (``GET /v1/me``); a revoked sign-in is reported as expired."""
@@ -1359,8 +1556,25 @@ class Companion:
         self._next_spotify_watch = now + SPOTIFY_WATCH_S
         if not (self.cfg.get("spotify") or {}).get("clientId"):
             return
+        deferred = self._deferred_login
+        if deferred is not None and not getattr(deferred, "done", True):
+            # A sign-in for another Client ID runs (DESIGN-v1.2.1 3.5): its tokens carry that ID, which
+            # the configured one would read as a revoked sign-in. Quiet until it ended.
+            return
+        for prov in list(self.providers or []):
+            sync = getattr(prov, "sync_sdk", None) if getattr(prov, "name", None) == "spotify" else None
+            if callable(sync):
+                # in-app Spotify: connect the player once a sign-in allows it, and connect a player that
+                # never became ready again (at most once a minute); the engine skips an unavailable Spotify
+                sync()
         st = self._spotify_status()
         badge = st.get("badge")
+        if st.get("relogin"):
+            # Signed in before 1.2.1: the sign-in works, but in-app Spotify needs two more permissions
+            # (D9). Not "expired": one notification asks for a new sign-in; YouTube plays meanwhile.
+            if any(getattr(p, "name", None) == "spotify" for p in self.providers or []):
+                self._spotify_relogin()
+            return
         if badge == "connected":
             self._spotify_was_connected = True
             acc = self._account
@@ -1373,6 +1587,13 @@ class Companion:
             self._spotify_was_connected = False
             self._spotify_expired()
 
+    def _spotify_relogin(self) -> None:
+        from .providers.spotify import RELOGIN_MESSAGE
+
+        self.notifier.notify(tray.NOTE_SPOTIFY_RELOGIN, f"{RELOGIN_MESSAGE} Click here to sign in again.",
+                             title="Sign in to Spotify again", action=self.open_setup, level="warning")
+        self._nudge("spotify")
+
     def _spotify_expired(self) -> None:
         log.warning("the Spotify sign-in has expired")
         self.notifier.notify(tray.NOTE_SPOTIFY_EXPIRED, "Your Spotify sign-in has expired. Click here to sign in "
@@ -1383,6 +1604,9 @@ class Companion:
     # ------------------------------------------------- engine / player --
     def on_engine_status(self, *args: Any, **kwargs: Any) -> None:
         """The engine's ``on_status``: playback changes, plus notices (see :func:`parse_engine_notice`)."""
+        change = args[0].get("change") if args and isinstance(args[0], dict) else kwargs.get("change")
+        if isinstance(change, dict):
+            self.music.on_engine_note(change)  # a test the game (or the Connect page) asked for
         kind, info = parse_engine_notice(args, kwargs)
         if kind == tray.NOTE_NOT_FOUND:
             self._song_not_found(info)
@@ -1408,9 +1632,15 @@ class Companion:
 
         song = _song(info.get("artist"), info.get("title"))
         what = f" It accepted {song} but did not start it." if song else ""
+        # The provider words it for its mode: in-app Spotify (D8) has no Spotify app to restart.
+        notice = getattr(self.spotify_provider(), "stuck_notice", None)
+        try:
+            title, text = notice() if callable(notice) else ("Spotify isn't starting songs", f"{STUCK_MESSAGE}.")
+        except Exception:  # noqa: BLE001
+            title, text = "Spotify isn't starting songs", f"{STUCK_MESSAGE}."
         # Real-client #10: say once what happens now -- YouTube plays until Spotify works again.
-        self.notifier.notify(tray.NOTE_SPOTIFY_STUCK, f"{STUCK_MESSAGE}.{what} YouTube plays NeedleDropper's songs "
-                             "until Spotify works again.", title="Spotify isn't starting songs",
+        self.notifier.notify(tray.NOTE_SPOTIFY_STUCK, f"{text}{what} YouTube plays NeedleDropper's songs "
+                             "until Spotify works again.", title=title,
                              level="warning", action=self.open_logs)
         self._push_game_status()  # the game keeps YouTube ids in its frames (fit rule step 7)
         self._nudge("spotify")
@@ -1503,8 +1733,8 @@ class Companion:
                 return
             now = self._clock()
             for step in (self._do_restarts, lambda: self._watch_spotify(now), self._watch_game,
-                         self._push_game_status, self._watch_savedvars, self._maybe_check_updates,
-                         lambda: self._watch_player(now)):
+                         self.push_game_data, self._watch_savedvars,
+                         self._maybe_check_updates, lambda: self._watch_player(now)):
                 if self._hk_stop.is_set():
                     return
                 try:
@@ -1577,8 +1807,8 @@ class Companion:
                              title="NeedleDropper update", key=info.version, action=action)
         self._nudge("update")
 
-    def _game_status(self) -> dict[str, Any]:
-        st = self._spotify_status()
+    def _game_status(self, st: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        st = self._spotify_status() if st is None else st
         badge = st.get("badge")
         spotify = {"connected": "connected", "premium": "premium-required", "allowlist": "error",
                    "error": "error"}.get(str(badge), "not-connected")
@@ -1586,19 +1816,25 @@ class Companion:
             # Signed in, but it accepts songs and never starts them this session: "error" makes the
             # game keep the YouTube id when a frame can carry only one (DESIGN 2.3 fit rule step 7).
             spotify = "error"
+        state = st.get("state")
+        if isinstance(state, str) and state:
+            from .providers.spotify import MUSIC_STATES, legacy_status
+
+            if state in MUSIC_STATES:  # D17: needs-relogin, no-player and stuck are "error" for v1.2 readers
+                spotify = legacy_status(state)
         running = {getattr(t, "name", ""): t for t in self.transports}
         return {"spotify": spotify,
                 "youtube": any(getattr(p, "name", None) == "youtube" for p in self.providers),
                 "transports": {name: name in running for name in ("pixel", "chatlog")}}
 
-    def _push_game_status(self) -> None:
+    def _push_game_status(self, st: Optional[dict[str, Any]] = None) -> None:
         """Tell the game (``NeedleDropper_Companion``) what this app can play, when it changed."""
         from . import gamedata
 
         setter = getattr(gamedata, "set_status", None)
         if setter is None or not self.paths.addons_dir.is_dir():
             return
-        status = self._game_status()
+        status = self._game_status(st)
         if status == self._game_status_sent:
             return
         try:
@@ -1607,6 +1843,100 @@ class Companion:
             log.info("could not update the game's companion data: %s", exc)
             return
         self._game_status_sent = status
+
+    def player_browser(self) -> str:
+        """``music.youtube.player`` (D17): "chrome", "edge" or "none" -- the connected player page's
+        browser, else the one the deck would start (looked up at most once a minute then)."""
+        deck = self.deck
+        fn = getattr(deck, "player_browser", None)
+        if not callable(fn):
+            return "none"
+        page_open = bool(getattr(deck, "page_open", False))
+        now = time.monotonic()
+        cached = self._player_browser
+        if cached is not None and cached[1] == page_open and now - cached[0] < PLAYER_BROWSER_CACHE_S:
+            return cached[2]
+        try:
+            kind = str(fn())
+        except Exception:  # noqa: BLE001
+            kind = "none"
+        kind = kind if kind in ("chrome", "edge") else "none"
+        self._player_browser = (now, page_open, kind)
+        return kind
+
+    def _game_music(self, st: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        """The ``music`` block for the game (DESIGN-v1.2.1 3.10, D17), without the request results."""
+        from .providers.spotify_auth import redirect_uri_for
+
+        sp_cfg = self.cfg.get("spotify") or {}
+        cid = str(sp_cfg.get("clientId") or "").strip().lower()
+        st = self._spotify_status() if st is None else st
+        state = st.get("state")
+        from .providers.spotify import MUSIC_STATES
+
+        if state not in MUSIC_STATES:
+            state = {"connected": "connected", "premium": "premium-required", "allowlist": "error",
+                     "error": "error"}.get(str(st.get("badge")), "not-connected")
+        account = dict(self._account) if self._account else {}
+        try:
+            port = int(sp_cfg.get("redirectPort") or 8321)
+        except (TypeError, ValueError):
+            port = 8321
+        product = account.get("product")
+        spotify = {"clientId": cid if re.fullmatch(r"[0-9a-f]{32}", cid) else None,
+                   "redirectUri": redirect_uri_for(port) if 0 < port <= 65535 else None,
+                   "account": account.get("name") if isinstance(account.get("name"), str) else None,
+                   "product": product if isinstance(product, str) and re.fullmatch(r"[a-z]{1,16}", product) else None,
+                   "state": state,
+                   "mode": st.get("mode") if st.get("mode") in SPOTIFY_DEVICE_MODES else (sp_cfg.get("device") or "app")}
+        if st.get("problem") == "allowlist" and state == "error":
+            spotify["problem"] = "allowlist"  # the game says "add the account under User Management" (ON-3)
+        youtube = {"enabled": "youtube" in (self.cfg.get("providers") or []) and provider_enabled(self.cfg, "youtube"),
+                   "player": self.player_browser()}
+        return {"spotify": spotify, "youtube": youtube, "prefs": music_choices(self.cfg)}
+
+    def _push_game_music(self, st: Optional[dict[str, Any]] = None) -> None:
+        """Tell the game the music services' state and the choices in effect, when they changed (the
+        twin of :meth:`_push_game_status`)."""
+        from . import gamedata
+
+        setter = getattr(gamedata, "set_music", None)
+        if setter is None or not self.paths.addons_dir.is_dir():
+            return
+        music = self._game_music(st)
+        if music == self._game_music_sent:
+            return
+        try:
+            setter(self.paths.addons_dir, **music)
+        except (TypeError, ValueError, OSError) as exc:
+            log.info("could not update the game's music data: %s", exc)
+            return
+        self._game_music_sent = music
+
+    def push_game_data(self, *, flush: bool = False) -> None:
+        """Status and music block for the game now (and ``Data.lua`` written at once with ``flush``:
+        before a request's final notification, so a Refresh status right after it shows the news)."""
+        if self.paths.addons_dir.is_dir():
+            st = self._spotify_status()  # read once for both (it reads the stored sign-in)
+            self._push_game_status(st)
+            self._push_game_music(st)
+        if flush:
+            self._flush_game_data()
+
+    def note_youtube_sign_in(self, when: int) -> None:
+        """``music.youtube.signInOpened`` (the YouTube sign-in window opened at ``when``, Unix seconds)."""
+        from . import gamedata
+
+        if not self.paths.addons_dir.is_dir():
+            return
+        try:
+            gamedata.set_music(self.paths.addons_dir, youtube={"signInOpened": int(when)})
+        except (gamedata.GameDataError, OSError) as exc:
+            log.info("could not note the YouTube sign-in for the game: %s", exc)
+
+    def nudge(self, what: str = "state") -> None:
+        """Ask open Connect pages to refresh now."""
+        self._nudge(what)
 
     def _watch_game(self) -> None:
         """When the game starts, refresh the data addon's "written" time (the in-game "app seen" line);
@@ -1797,8 +2127,11 @@ class Companion:
             data_addon = False
         in_game = self._engine_status().get("addon")
         outdated = bool(isinstance(in_game, dict) and in_game.get("outdated"))  # the game runs a v1.1 addon
+        # 1.2.1 changed the signal format (D1/D2): an older installed addon and this app can't read each other,
+        # whoever installed it (review ON-2)
+        too_old = bool(st.installed and have is not None and have < version_key(MIN_ADDON_VERSION))
         return {"installed": st.installed, "version": st.version, "toc": st.toc.name if st.toc else None,
-                "outdatedInGame": outdated,
+                "outdatedInGame": outdated, "tooOld": too_old, "minVersion": MIN_ADDON_VERSION,
                 "bundledVersion": bundled, "owner": st.owner, "managedBy": st.manager, "managers": list(st.managers),
                 "legacy": st.legacy, "updateAvailable": bool(update), "action": action,
                 "canInstall": action is not None, "pageUrl": (self.cfg.get("links") or {}).get("addonPage"),
@@ -1818,6 +2151,13 @@ class Companion:
             return {}
         return dict(st) if isinstance(st, dict) else {}
 
+    def _music_state(self) -> dict[str, Any]:
+        """``/api/state`` ``music``: the choices in effect (set in game) and the last 8 request results."""
+        out = music_choices(self.cfg)
+        out["actions"] = self.music.recent()
+        out["pendingTests"] = self.music.pending_tests()
+        return out
+
     def status_line(self) -> str:
         """One line for the tray menu and tooltip."""
         if self._paused:
@@ -1834,6 +2174,8 @@ class Companion:
         last = self._link.get("lastAt")
         if last is not None and now - last <= LINK_FRESH_S:
             line = "Linked to World of Warcraft"
+        elif self._addon_too_old():
+            line = f"Update the NeedleDropper addon to {MIN_ADDON_VERSION} (this app can't read older ones)"
         elif self.game_running():
             line = "World of Warcraft is running: waiting for the link"
         else:
@@ -1841,6 +2183,22 @@ class Companion:
         if self._spotify_status().get("badge") == "connected":
             line += " \u00b7 Spotify connected"
         return line
+
+    def _addon_too_old(self) -> bool:
+        """The installed addon's TOC says a version older than :data:`MIN_ADDON_VERSION` (cached for a minute:
+        the tray tooltip asks every few seconds)."""
+        now = self._clock()
+        cached = self._too_old_cache
+        if cached is not None and now - cached[0] < 60.0:
+            return cached[1]
+        try:
+            st = addon_status(self.paths)
+            have = version_key(st.version) if st.installed else None
+            old = have is not None and have < version_key(MIN_ADDON_VERSION)
+        except Exception:  # noqa: BLE001 - a status line must never fail
+            old = False
+        self._too_old_cache = (now, old)
+        return old
 
     def state(self) -> dict[str, Any]:
         """Everything the Connect page shows (no secrets)."""
@@ -1861,7 +2219,9 @@ class Companion:
             "addon": self._addon_state(),
             "spotify": self._spotify_state(),
             "youtube": {"enabled": "youtube" in (cfg.get("providers") or []) and provider_enabled(cfg, "youtube"),
-                        "playerConnected": bool(getattr(deck, "page_open", False))},
+                        "playerConnected": bool(getattr(deck, "page_open", False)),
+                        "player": self.player_browser(), "signInOpened": self.music.sign_in_opened},
+            "music": self._music_state(),
             "link": self.link_check(),
             "autostart": {"available": self.autostart_available(), "enabled": self.autostart_enabled(),
                           "choice": cfg.get("startWithWindows")},
@@ -1888,6 +2248,8 @@ class PanelAPI:
             ("POST", "/api/wow/detect"): self._wow_detect,
             ("POST", "/api/addon/install"): self._addon_install,
             ("POST", "/api/open"): self._open,
+            ("POST", "/api/music/test"): self._music_test,
+            ("POST", "/api/youtube/signin"): self._youtube_signin,
         }
 
     def __call__(self, method: str, path: str, query: dict[str, str], body: Any) -> tuple[int, Any]:
@@ -1955,8 +2317,20 @@ class PanelAPI:
             return 400, {"error": "what must be one of: " + ", ".join(OPEN_TARGETS)}
         return self.app.open_logs()
 
+    def _music_test(self, _q: dict[str, str], body: dict[str, Any]) -> tuple[int, Any]:
+        """Test Spotify / Test YouTube on the Connect page: the same handler as the game's request;
+        the result appears in ``state.music.actions`` (``id`` = the returned id)."""
+        action = MUSIC_TEST_SERVICES.get(body.get("service")) if isinstance(body.get("service"), str) else None
+        if action is None:
+            return 400, {"error": "service must be one of: " + ", ".join(MUSIC_TEST_SERVICES)}
+        return 202, {"ok": True, "id": self.app.music.request(action), "action": action}
+
+    def _youtube_signin(self, _q: dict[str, str], _body: dict[str, Any]) -> tuple[int, Any]:
+        """Sign in to YouTube on the Connect page: the same handler as the game's request."""
+        return 202, {"ok": True, "id": self.app.music.request("youtube-sign-in"), "action": "youtube-sign-in"}
+
 
 __all__ = ["Companion", "PanelAPI", "PatchError", "validate_config_patch", "should_open_panel", "SCHEMA",
-           "OPEN_TARGETS", "AUTOSTART_ARGS", "default_opener", "FaultLog", "Fault", "ThreadGuard",
+           "OPEN_TARGETS", "AUTOSTART_ARGS", "MUSIC_TEST_SERVICES", "default_opener", "FaultLog", "Fault", "ThreadGuard",
            "component_for_thread", "UpdateChecker", "UpdateInfo", "releases_api_url", "parse_release", "fetch_json",
            "construct_engine", "parse_engine_notice", "is_test_event", "YOUTUBE_EMBED_ERRORS"]

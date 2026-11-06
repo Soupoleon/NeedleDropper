@@ -93,10 +93,17 @@
             <p class="status" id="sp-status"><span class="glyph" aria-hidden="true"></span><span class="status-text">Checking&hellip;</span></p>
           </div>
           <div class="card-body">
-            <p class="note">Plays the real recording in your Spotify app. Spotify lets every player connect through a free developer app of their own: about two minutes, once.</p>
+            <p class="note">Plays the real recording inside NeedleDropper, with no Spotify window (it needs Google Chrome). Spotify lets every player connect through a free developer app of their own: about two minutes, once.</p>
+            <dl class="facts">
+              <div class="fact">
+                <dt>Play music with</dt>
+                <dd><span id="music-order">Spotify, then YouTube</span> <span class="hint" id="music-order-hint">(set in game: Options &gt; AddOns &gt; NeedleDropper)</span></dd>
+              </div>
+            </dl>
 
             <ol class="steps" id="sp-steps">
-              <li>Open the <a id="sp-dashboard" href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Spotify developer dashboard<span class="sr-only"> (opens in a new tab)</span></a>, sign in with the account you listen with and choose <strong>Create app</strong>. Any name will do; tick <strong>Web API</strong>.</li>
+              <li id="sp-step1-new">Open the <a id="sp-dashboard" href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Spotify developer dashboard<span class="sr-only"> (opens in a new tab)</span></a>, sign in with the account you listen with and choose <strong>Create app</strong>. Any name will do; tick <strong>Web API</strong> and <strong>Web Playback SDK</strong>.</li>
+              <li id="sp-step1-relogin" hidden>Your developer app from NeedleDropper 1.2.0: open it in the <a id="sp-dashboard-relogin" href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Spotify developer dashboard<span class="sr-only"> (opens in a new tab)</span></a>, then <strong>Settings</strong> &rarr; <strong>Edit</strong>, tick <strong>Web Playback SDK</strong> and <strong>Save</strong>. (Its Redirect URI and Client ID stay as they are.)</li>
               <li>Under <strong>Redirect URIs</strong> add exactly this address, then <strong>Save</strong>:
                 <span class="copy-row">
                   <code id="sp-redirect">http://127.0.0.1:8321/callback</code>
@@ -129,12 +136,16 @@
               <div class="field">
                 <label for="sp-device">Play on</label>
                 <div class="field-row">
-                  <select id="sp-device" aria-describedby="sp-device-hint"><option value="">This PC (automatic)</option></select>
+                  <select id="sp-device" aria-describedby="sp-device-hint"><option value="app">NeedleDropper (this app)</option></select>
                   <button type="button" class="btn small" id="sp-refresh">Refresh</button>
                 </div>
-                <p class="hint" id="sp-device-hint">Open Spotify on the device you want to hear it on, then Refresh.</p>
+                <p class="hint" id="sp-device-hint">NeedleDropper plays Spotify itself: no Spotify app has to be open.</p>
               </div>
-              <p class="actions"><button type="button" class="btn ghost" id="sp-signout">Sign out of Spotify</button></p>
+              <p class="actions">
+                <button type="button" class="btn small" id="sp-test" aria-describedby="sp-test-result">Test Spotify</button>
+                <button type="button" class="btn ghost" id="sp-signout">Sign out of Spotify</button>
+              </p>
+              <p class="hint" id="sp-test-result" aria-live="polite"></p>
             </div>
           </div>
         </section>
@@ -149,12 +160,24 @@
             <p class="status" id="yt-status"><span class="glyph" aria-hidden="true"></span><span class="status-text">Checking&hellip;</span></p>
           </div>
           <div class="card-body">
-            <p class="note">Nothing to set up. While a song plays from YouTube, a small player window shows on top of the game in the top-right corner, and hides again when the song is over: YouTube's rules say the video must stay visible while it plays. It never takes the focus from the game. It needs Microsoft Edge or Google Chrome.</p>
+            <p class="note">Nothing to set up. While a song plays from YouTube, a small player window shows on top of the game in the corner you chose, and hides again when the song is over: YouTube's rules say the video must stay visible while it plays. It never takes the focus from the game. It needs Microsoft Edge or Google Chrome.</p>
+            <dl class="facts">
+              <div class="fact">
+                <dt>Player box</dt>
+                <dd><span id="yt-corner">Top right</span> <span class="hint">(set in game: Options &gt; AddOns &gt; NeedleDropper)</span></dd>
+              </div>
+            </dl>
             <label class="switch">
               <input type="checkbox" role="switch" id="yt-enabled">
               <span class="track" aria-hidden="true"></span>
               <span>Play songs from YouTube</span>
             </label>
+            <p class="actions">
+              <button type="button" class="btn small" id="yt-test" aria-describedby="yt-test-result">Test YouTube</button>
+              <button type="button" class="btn small ghost" id="yt-signin" aria-describedby="yt-signin-hint">Sign in to YouTube</button>
+            </p>
+            <p class="hint" id="yt-signin-hint">Optional: signed in with YouTube Premium, YouTube songs play without ads. The sign-in opens in the player box's own browser window, not your everyday browser.</p>
+            <p class="hint" id="yt-test-result" aria-live="polite"></p>
           </div>
         </section>
       </li>

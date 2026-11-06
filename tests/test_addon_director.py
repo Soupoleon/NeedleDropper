@@ -38,7 +38,8 @@ LOCAL_DROPS = [
      "label": "Sentinel Hill", "title": "Watch", "artist": "Guard", "durationMs": 0, "file": "sentinel.mp3"},
 ]
 SET = make_set(DROPS)
-APP = {"schema": 1, "appVersion": "1.2.0", "written": 1762365000,
+# 1.2.1: an app older than 1.2.1 counts as outdated (it reads no 1.2.1 frame, DESIGN-v1.2.1 2.11)
+APP = {"schema": 1, "appVersion": "1.2.1", "written": 1762365000,
        "status": {"spotify": "connected", "youtube": True, "transports": {"pixel": True}}}
 
 

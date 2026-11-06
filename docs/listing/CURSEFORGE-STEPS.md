@@ -31,8 +31,8 @@ Values marked *(verify)* weren't confirmed on the live site yet. Check them on s
    .\tools\build_release.ps1 -OutDir dist
    ```
 
-   Open `dist\NeedleDropper-1.2.0-addon.zip` and check that it holds one `NeedleDropper` folder, and
-   that its `NeedleDropper.toc` says `## Version: 1.2.0` (a real number, not `@project-version@`).
+   Open `dist\NeedleDropper-1.2.1-addon.zip` and check that it holds one `NeedleDropper` folder, and
+   that its `NeedleDropper.toc` says `## Version: 1.2.1` (a real number, not `@project-version@`).
 3. **A CurseForge account.** Sign in at <https://www.curseforge.com>, or create an account there.
 
 ## 1. Create the project
@@ -73,8 +73,8 @@ In the project, open **Files** → **Upload file**:
 
 | Field | Value |
 |---|---|
-| File | `dist\NeedleDropper-1.2.0-addon.zip` (from step 0) |
-| Display name | `v1.2.0-beta.1` |
+| File | `dist\NeedleDropper-1.2.1-addon.zip` (from step 0) |
+| Display name | `v1.2.1-beta.1` |
 | Release type | **Beta** |
 | Game version | **WoW: Forever 1.60.1** (client 1.60.1.70790, TOC `## Interface: 16001`). The exact name in the list *(verify)* |
 | Changelog | The text below. Pick Markdown if the form asks. |
@@ -82,12 +82,13 @@ In the project, open **Files** → **Upload file**:
 | Related projects | None |
 
 ```markdown
-First public beta of NeedleDropper 1.2.0.
+First public beta of NeedleDropper 1.2.1.
 
 - One hand-picked song and a cinematic title card, the first time you arrive somewhere new.
 - Everything happens in game: type /needle for the Drops, Soundtracks and Journal tabs. Add drop here, paste a Spotify or YouTube link, and Test it.
 - Two built-in soundtracks, Azeroth Mixtape and Azeroth Unbound, plus your own. Share them with a code.
-- Spotify and YouTube songs need the free NeedleDropper app for Windows, a separate download: https://github.com/Soupoleon/NeedleDropper/releases/latest
+- Music services in Options > AddOns > NeedleDropper: set up Spotify, choose which service plays, test both.
+- Spotify and YouTube songs need the free NeedleDropper app for Windows, a separate download: https://github.com/Soupoleon/NeedleDropper/releases (Spotify: Premium and Google Chrome).
 - This is a beta. Please report bugs at https://github.com/Soupoleon/NeedleDropper/issues
 
 Full notes: https://github.com/Soupoleon/NeedleDropper/blob/main/CHANGELOG.md
@@ -99,20 +100,21 @@ That can take a few days *(verify)*. If they ask for changes, they'll message yo
 > **Beta-only projects don't reach the CurseForge App yet.** CurseForge's help pages say a project
 > needs at least one **Release** file before it syncs to the CurseForge App *(verify)*. Until then,
 > testers download the zip from the project's **Files** tab (or from GitHub). The first Release
-> file (`v1.2.0`) brings the project into the app.
+> file (`v1.2.1`, or whichever version is first released) brings the project into the app.
 
 ## 4. After approval: connect the Release workflow
 
 1. **Project ID.** The **About Project** box on the project page shows **Project ID**, a number. It
-   may show up before approval too *(verify)*. Add one line to
-   `addon/NeedleDropper/NeedleDropper.toc`, under `## X-License: MIT`, using your own number:
+   may show up before approval too *(verify)*. The TOC already has NeedleDropper's
+   (`## X-Curse-Project-ID: 1786392`, see [curseforge-project.md](curseforge-project.md)); for
+   another project, put its number in that line of `addon/NeedleDropper/NeedleDropper.toc`, under
+   `## X-License: MIT`:
 
    ```
    ## X-Curse-Project-ID: 123456
    ```
 
-   Other people are editing `addon/` right now, so add the line once their changes are in. Then
-   commit and push to `main`.
+   Then commit and push to `main`.
 2. **API token.** Open <https://authors.curseforge.com/#/settings/api-tokens>, name the token
    `NeedleDropper GitHub`, generate it and copy it. It may be shown only once *(verify)*.
 3. **GitHub secret.** In the repository, open *Settings → Secrets and variables → Actions → New
@@ -128,15 +130,15 @@ runs on every version tag:
 
 | Tag | GitHub | CurseForge |
 |---|---|---|
-| `v1.2.0-alpha.N` | pre-release | Alpha |
-| `v1.2.0-beta.N` | pre-release | Beta |
-| `v1.2.0` | latest release | Release |
+| `v1.2.1-alpha.N` | pre-release | Alpha |
+| `v1.2.1-beta.N` | pre-release | Beta |
+| `v1.2.1` | latest release | Release |
 
-It refuses any other tag (`v1.2.0-rc.1`, `v1.2`). For the next beta:
+It refuses any other tag (`v1.2.1-rc.1`, `v1.2`). For the next beta:
 
 ```powershell
-git tag -a v1.2.0-beta.2 -m "NeedleDropper 1.2.0 beta 2"
-git push origin v1.2.0-beta.2
+git tag -a v1.2.1-beta.2 -m "NeedleDropper 1.2.1 beta 2"
+git push origin v1.2.1-beta.2
 ```
 
 - **Start at beta.2.** You uploaded beta.1 by hand, so tagging it again would put it on CurseForge

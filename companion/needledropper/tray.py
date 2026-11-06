@@ -1469,6 +1469,11 @@ NOTE_SPOTIFY_EXPIRED = "spotify-expired"  # the stored Spotify sign-in stopped w
 NOTE_NOT_FOUND = "spotify-not-found"  # a search-only drop has no match on Spotify
 NOTE_NOT_EMBEDDABLE = "youtube-not-embeddable"  # the video's owner does not allow embedding
 NOTE_SPOTIFY_STUCK = "spotify-stuck"  # Spotify accepted a song but did not start it (restart the app)
+NOTE_SPOTIFY_RELOGIN = "spotify-relogin"  # a sign-in from before 1.2.1: in-app Spotify needs a new one (D9)
+#: v1.2.1: the result of a request the player sent from the game (Connect / Disconnect Spotify, the
+#: tests, the YouTube sign-in), keyed "<action>:<issuedAt>:<phase>" so each phase of a request shows once
+NOTE_MUSIC = "music"
+NOTE_MUSIC_BUSY = "music-busy"  # a request from the game was refused as too soon after another one
 NOTE_FAULT = "fault"  # a transport / engine thread died
 NOTE_UPDATE = "update"  # a newer NeedleDropper release exists
 
@@ -1490,6 +1495,9 @@ NOTE_POLICIES: Dict[str, NotePolicy] = {
     NOTE_NOT_FOUND: NotePolicy(cooldown_s=6 * 3600.0),
     NOTE_NOT_EMBEDDABLE: NotePolicy(cooldown_s=6 * 3600.0),
     NOTE_SPOTIFY_STUCK: NotePolicy(cooldown_s=30 * 60.0),
+    NOTE_SPOTIFY_RELOGIN: NotePolicy(once_per_session=True),
+    NOTE_MUSIC: NotePolicy(once_per_session=True),
+    NOTE_MUSIC_BUSY: NotePolicy(cooldown_s=60.0),
     NOTE_FAULT: NotePolicy(once_per_session=True),
     NOTE_UPDATE: NotePolicy(once_per_session=True),
 }
@@ -1619,7 +1627,8 @@ __all__ = [
     "MenuEntry", "LayoutEntry", "MenuLayout", "find_item", "default_item", "companion_menu", "build_hmenu",
     "default_icon_path", "TrayIcon", "ITEM_STATUS", "ITEM_SETUP", "ITEM_PAUSE", "ITEM_AUTOSTART",
     "ITEM_LOG_FOLDER", "ITEM_QUIT", "NOTE_LINKED", "NOTE_TEST", "NOTE_SPOTIFY_EXPIRED", "NOTE_NOT_FOUND",
-    "NOTE_NOT_EMBEDDABLE", "NOTE_SPOTIFY_STUCK", "NOTE_FAULT", "NOTE_UPDATE", "NotePolicy", "NOTE_POLICIES", "Note",
+    "NOTE_NOT_EMBEDDABLE", "NOTE_SPOTIFY_STUCK", "NOTE_SPOTIFY_RELOGIN", "NOTE_MUSIC", "NOTE_MUSIC_BUSY", "NOTE_FAULT",
+    "NOTE_UPDATE", "NotePolicy", "NOTE_POLICIES", "Note",
     "Notifier",
     "message_box",
 ]

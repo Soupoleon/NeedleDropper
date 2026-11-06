@@ -320,7 +320,8 @@ def test_interrupt_ends_a_spotify_start_check_at_once(tmp_path):
     http = FakeHTTP()
     ok_routes(http)
     http.set("GET", "/v1/me/player", (204, None), *([(200, player_state(DROP_TRACK, 0))] * 20))
-    prov = SpotifyProvider({"clientId": "cid"}, SimpleNamespace(app_dir=tmp_path), http=http,
+    # connect mode: the desktop app's start checks (the in-app ones: test_spotify_inapp.py)
+    prov = SpotifyProvider({"clientId": "cid", "device": "connect"}, SimpleNamespace(app_dir=tmp_path), http=http,
                            startfile=lambda t: None, sleep=time.sleep)          # real waits
     threading.Timer(0.3, prov.interrupt).start()                                # Windows logs off
     t0 = time.monotonic()

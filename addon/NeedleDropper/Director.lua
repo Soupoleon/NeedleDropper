@@ -22,12 +22,14 @@ local ADDON, ns = ...
 --     keeps a drop from firing for the rest of this visit (Add drop here).
 --   * ND_PLAYBACK(state, drop) on every change: "armed", "disarmed", "active", "ended".
 --   * Zone music is faded only when something will play the song: an in-game file, or a
---     Spotify / YouTube song while the NeedleDropper app is known (or settings.duckWithoutApp).
+--     Spotify / YouTube song while the NeedleDropper app is known (or settings.duckWithoutApp)
+--     and "Play music with" lets a service play it (v1.2.1).
 --   * The playing drop survives a /reload (cdb.playing, ND-DIR-01).
 
 local D = {}
 ns.Director = D
 
+local L = ns.L or setmetatable({}, { __index = function(_, k) return k end })
 local P = ns.Protocol2
 local EV, FLAG = P.EV, P.FLAG
 local LANDMARK_CHECK_DELAY = 1.5   -- wait after entering a landmark before reading history
@@ -376,7 +378,8 @@ local function hasSong(drop)
       or (nonEmpty(drop.artist) ~= nil and nonEmpty(drop.title) ~= nil)
 end
 
--- True when the NeedleDropper app (1.2 or newer) has reported in (NeedleDropper_Companion).
+-- True when the NeedleDropper app has reported in (NeedleDropper_Companion) and can read this
+-- addon's frames (1.2.1 or newer: Companion.IsOutdated).
 function D.AppKnown()
   local C = ns.Companion
   if type(C) ~= "table" or type(C.Status) ~= "function" then return false end
@@ -384,12 +387,29 @@ function D.AppKnown()
   return ok and type(st) == "table" and st.present == true and not st.outdated
 end
 
+-- True when "Play music with" lets a service play `drop` and the drop has a source for it, but none of
+-- those services can play now (MusicServices.Plan): the song waits for the service (review INGAME-2).
+function D.ServiceBlocked(drop)
+  local MS = ns.MusicServices
+  if type(MS) ~= "table" or type(MS.Plan) ~= "function" then return false end
+  local ok, plan = pcall(MS.Plan, drop)
+  if not ok or type(plan) ~= "table" or plan.canPlay then return false end
+  return (plan.wantSpotify and plan.hasSpotify) or (plan.wantYouTube and plan.hasYouTube) or false
+end
+
 -- Real-client finding 6: fading the zone music for a song nothing will play leaves silence.
 -- Spotify / YouTube songs fade it only when the app is known (or settings.duckWithoutApp);
--- songless drops (the /needle test card) never do; in-game files always do.
+-- songless drops (the /needle test card) never do; in-game files always do. v1.2.1: and only when
+-- "Play music with" lets a service play this song (MusicServices.Plan(drop).canPlay; "Neither"
+-- never does), DESIGN-v1.2.1 1.5.
 function D.ShouldDuck(drop, isLocal)
   if isLocal then return true end
   if type(drop) ~= "table" or not hasSong(drop) then return false end
+  local MS = ns.MusicServices
+  if type(MS) == "table" and type(MS.Plan) == "function" then
+    local ok, plan = pcall(MS.Plan, drop)
+    if ok and type(plan) == "table" and plan.canPlay == false then return false end
+  end
   if settings().duckWithoutApp then return true end
   return D.AppKnown()
 end
@@ -459,18 +479,36 @@ function D.StartActive(drop, opts)
 end
 
 -- A first-visit drop whose song nothing on this PC can play: no in-game file played and the
--- NeedleDropper app has never reported in (NeedleDropper_Companion). Only the title card showed,
+-- NeedleDropper app has never reported in (NeedleDropper_Companion), or only an app too old to read
+-- this addon's frames did (older than 1.2.1, Companion.IsOutdated). Only the title card showed,
 -- so the place is marked "card", not "played": Soundtracks.DoneCounts lets it play again once the
 -- app is there (journey review F4). The cooldown and the journal entry stay as for any drop.
-local function cardOnly(d, charBefore, acctBefore)
+-- `why` "service" (review INGAME-2): the app is there, but no music service it has can play this song now
+-- (Spotify not signed in or signed in before 1.2.1, no Chrome; YouTube off or no player browser; "Play music
+-- with" naming only such a service). The place plays its song once one can (DoneCounts asks
+-- MusicServices.Plan again), with its own one-time hint. Not for "Neither", the player's own choice.
+local function cardOnly(d, charBefore, acctBefore, why)
   local c = ns.cdb.done[d.id]
-  if c ~= charBefore and type(c) == "table" and c.how == "played" then c.how = "card" end
+  if c ~= charBefore and type(c) == "table" and c.how == "played" then c.how, c.why = "card", why end
   local a = ns.db.accountDone[d.id]
-  if a ~= acctBefore and type(a) == "table" and a.how == "played" then a.how = "card" end
+  if a ~= acctBefore and type(a) == "table" and a.how == "played" then a.how, a.why = "card", why end
+  if why == "service" then
+    if not ns.db.noServiceHint then
+      ns.db.noServiceHint = true
+      ns.Print(L["only the title card showed: none of the music services the NeedleDropper app has can play this song right now (see Music services in the options). The place plays its song once one can."])
+    end
+    return
+  end
   if not ns.db.noAppHint then
     ns.db.noAppHint = true
-    ns.Print("only the title card showed: Spotify and YouTube songs play through the NeedleDropper app, which " ..
-      "hasn't been seen on this PC. Places you visit before you install it play their song once it is there.")
+    local C = ns.Companion
+    local ok, st = false, nil
+    if type(C) == "table" and type(C.Status) == "function" then ok, st = pcall(C.Status) end
+    if ok and type(st) == "table" and st.present then
+      ns.Print(L["only the title card showed: the NeedleDropper app on this PC is older than 1.2.1 and can't read this addon's signals. Update it; places you visit before then play their song once it is updated."])
+    else
+      ns.Print(L["only the title card showed: Spotify and YouTube songs play through the NeedleDropper app, which hasn't been seen on this PC. Places you visit before you install it play their song once it is there."])
+    end
   end
 end
 
@@ -483,7 +521,13 @@ function D.Fire(d)
   ns.Debug("fire %s", d.id)
   local ev = D.StartActive(d, { isTest = false })
   local a = D.active
-  if a and a.drop == d and not a.isLocal and hasSong(d) and not D.AppKnown() then cardOnly(d, charBefore, acctBefore) end
+  if a and a.drop == d and not a.isLocal and hasSong(d) then
+    if not D.AppKnown() then
+      cardOnly(d, charBefore, acctBefore)
+    elseif D.ServiceBlocked(d) then
+      cardOnly(d, charBefore, acctBefore, "service")
+    end
+  end
   return ev
 end
 

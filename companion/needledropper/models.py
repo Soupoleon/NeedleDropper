@@ -17,6 +17,7 @@ class EventType(IntEnum):
     FIRE = 3
     CANCEL = 4
     PING = 5
+    CONFIG = 6  # protocol v2 only (DESIGN-v1.2.1 2.2): music choices and requests, never a song
 
 
 class Flags(IntFlag):

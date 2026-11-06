@@ -84,7 +84,8 @@ def test_status_lines_use_the_providers_own_reasons(cfg_paths):
 def test_spotify_never_searches_for_the_placeholder_test_drop(tmp_path):
     save_tokens(tmp_path)
     http = FakeHTTP()
-    sp = SpotifyProvider({"clientId": "cid"}, type("P", (), {"app_dir": tmp_path})(), http=http)
+    # connect mode: app mode would also need the in-app player (no deck here)
+    sp = SpotifyProvider({"clientId": "cid", "device": "connect"}, type("P", (), {"app_dir": tmp_path})(), http=http)
     assert sp.available()
     assert is_placeholder_test_drop(TEST_DROP)
     assert not sp.can_play(TEST_DROP)
@@ -105,7 +106,8 @@ def _real_providers(tmp_path, home):
     provs = cli.build_providers(cfg, paths, deck)
     assert isinstance(provs[0], SpotifyProvider)
     http = FakeHTTP()
-    provs[0] = SpotifyProvider(cfg["spotify"], paths, http=http)  # same config; scripted HTTP, no network
+    # same config, but connect mode (this fake deck has no in-app player); scripted HTTP, no network
+    provs[0] = SpotifyProvider({**cfg["spotify"], "device": "connect"}, paths, http=http)
     assert provs[0].available()
     return provs, deck, http
 

@@ -53,24 +53,28 @@ What it does:
    written it, to keep backup copies and to look songs up on Spotify ahead of time. It never writes
    that file.
 4. **Writes one small data addon.** `Interface\AddOns\NeedleDropper_Companion` holds the app's
-   version, whether Spotify is connected and which Spotify songs it found. The game reads it at
-   login, like any addon's data file; the WeakAuras Companion delivers its data the same way.
+   version, whether Spotify and YouTube are ready, which Spotify songs it found and the results of
+   the requests you sent from the game's Music services. The game reads it at login, like any addon's
+   data file; the WeakAuras Companion delivers its data the same way.
 5. **Writes other addon files only when you click:** **Install addon** on the Connect page (refused
    while the game runs, and not offered when an addon manager looks after the addon), and copying your
    own audio files into `NeedleDropper_Local\media`. It never writes into the `NeedleDropper` addon
    folder otherwise.
 
 The game tells the app what to play through the beacon: the song, the place, and a few flags that
-tell the app to wait or fade (for example "in combat"). The only way back into the game is that data
-addon, read when you log in: the app's status and the songs it found, nothing that acts in the game.
+tell the app to wait or fade (for example "in combat"). The Music services settings use the same
+beacon for your music choices and for five fixed requests (connect or disconnect Spotify, the two
+test songs, the YouTube sign-in); no signal carries a web address or any text the app would run. The
+only way back into the game is that data addon, read when you log in: the app's status and the songs
+it found, nothing that acts in the game.
 
 The addon itself uses only the documented add-on API, runs inside the game's add-on sandbox, and
 works without the app.
 
 ## Spotify
 
-NeedleDropper uses the official Spotify Web API. Every app that uses it, including the developer app
-you create for NeedleDropper, falls under Spotify's
+NeedleDropper uses Spotify's official Web API and Web Playback SDK. Every app that uses them,
+including the developer app you create for NeedleDropper, falls under Spotify's
 [Developer Policy](https://developer.spotify.com/policy) and
 [Developer Terms](https://developer.spotify.com/terms).
 
@@ -80,23 +84,29 @@ you create for NeedleDropper, falls under Spotify's
   Spotify's Development Mode, for **your personal, non-commercial use** (up to 5 accounts you add
   yourself). See [why](PROVIDERS.md#why-every-player-creates-their-own-developer-app).
 - **You sign in on Spotify's own page.** NeedleDropper never sees your password (Authorization Code
-  with PKCE) and asks for only two permissions: to see what is playing on your devices and to
-  control playback on them. No library, playlist or profile access.
-- **Premium only.** Spotify allows playback control only for Premium subscribers; NeedleDropper
-  doesn't try to work around that.
+  with PKCE). It asks for the permissions its player needs: to play songs in its own player
+  (`streaming`), to see and control what plays on your devices, your account's plan and country,
+  and the email permission that Spotify's player requires (NeedleDropper never reads or keeps the
+  address). No library, playlist or follower access.
+- **Premium only.** Spotify's player and its playback control work only for Premium subscribers;
+  NeedleDropper doesn't try to work around that.
 
 ### How NeedleDropper uses Spotify
 
-- **The music plays in Spotify's own app**, on your device. NeedleDropper only sends play, pause and
-  volume commands; it never receives, records or saves audio.
+- **The music plays in Spotify's own player.** The app hosts Spotify's Web Playback SDK, unchanged,
+  in its hidden player window; Spotify lists it among your devices as *NeedleDropper*. The audio goes
+  from Spotify's player straight to your speakers: NeedleDropper never receives, records or saves
+  it. Optionally (**Play on**) NeedleDropper controls another Spotify device of yours instead, with
+  play, pause and volume commands.
 - **Searches are for your soundtrack only.** For a drop without a Spotify link, the app searches for
   that one song by artist and title, shortly before it plays, and remembers the result.
-- **Spotify stays visible as the source.** The Spotify app shows the cover art and song details while
-  the song plays, and the NeedleDropper window names the service that is playing.
+- **Spotify stays the source.** Your Spotify apps show the song as playing on *NeedleDropper*, with
+  its cover art and details, and the NeedleDropper window names the service that is playing.
 - **No mixing.** NeedleDropper fades the game's music out before the song starts instead of playing
-  the two together, and never alters the Spotify audio.
+  the two together, and never alters the Spotify audio (only its volume, for the fades).
 - **It adds something Spotify doesn't do.** NeedleDropper picks the moment; Spotify plays the song.
-  It doesn't imitate or replace any part of the Spotify app.
+  It doesn't imitate or replace the Spotify app: there are no Spotify controls, search or browsing in
+  NeedleDropper.
 
 ### Caveats: please read
 
@@ -123,7 +133,8 @@ shape how the player works:
 - **The player is always visible while it plays.** The policies forbid separating the audio from the
   video and playing content from a background player, which is why YouTube songs play in a small
   player window instead of silently in the background, and why you should keep that window in view.
-  YouTube also requires an embedded player to be at least 200 × 200 pixels.
+  YouTube also requires an embedded player to be at least 200 × 200 pixels. The same window hosts
+  Spotify's player while it is hidden, but a YouTube video only ever plays while the window shows.
 - **YouTube's player is left intact.** NeedleDropper doesn't hide, cover or modify the player, its
   controls or YouTube's links and branding.
 - **Ads are never blocked, skipped or changed.** The policies forbid interfering with YouTube's ads, so
@@ -142,8 +153,9 @@ Your use of YouTube itself is governed by YouTube's Terms of Service.
 - **The companion app contains no music.**
 - **Soundtracks and share codes contain only metadata**: song titles, artist names, optional Spotify
   and YouTube links, timings and short notes, never audio files or lyrics.
-- **Songs come from you**: from your own Spotify Premium account, from YouTube (streamed by YouTube,
-  with its ads), or from audio files you own and copy into the game's folder yourself.
+- **Songs come from you**: from your own Spotify Premium account (streamed by Spotify's own player),
+  from YouTube (streamed by YouTube, with its ads), or from audio files you own and copy into the
+  game's folder yourself.
 
 NeedleDropper is a fan project. It is not affiliated with or endorsed by Blizzard Entertainment,
 Spotify or Google/YouTube.

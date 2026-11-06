@@ -8,6 +8,10 @@ local ADDON, ns = ...
 -- Chat addon restriction is active; a FIRE line (with its padding) that waited more than
 -- 10 s is dropped, because the moment it was for has passed. Chat logging is only turned on
 -- when settings.chatlog is (or when the chat-log self-test asks).
+-- v1.2.1 (DESIGN-v1.2.1 2.8): a CONFIG with an ACTION (a request to the app) is padded like
+-- FIRE / CANCEL / PING so it reaches the disk at once, and dropped with its padding after 20 s
+-- in the queue (the app ignores requests older than 45 s anyway); a PREFS-only CONFIG is not
+-- padded and is kept like other lines. HELLO lines carry PREFS once set (Emit.lua).
 
 local C = {}
 ns.ChatLink = C
@@ -17,16 +21,23 @@ local EV = P2.EV
 local RETRY = 1.0           -- seconds between flush attempts while chat is restricted
 local QUEUE_MAX = 512       -- queued records (each with its padding)
 local FIRE_MAX_AGE = 10     -- seconds: an older queued FIRE line is dropped
+local CONFIG_MAX_AGE = 20   -- seconds: an older queued request (CONFIG with an ACTION) is dropped
 local PADDED = { [EV.FIRE] = true, [EV.CANCEL] = true, [EV.PING] = true }
 
 C.FIRE_MAX_AGE = FIRE_MAX_AGE
-C.queue = {}                -- { line =, type =, seq =, at =, pads = } (raw lines: type nil)
+C.CONFIG_MAX_AGE = CONFIG_MAX_AGE
+C.queue = {}                -- { line =, type =, seq =, at =, pads =, action = bool } (raw lines: type nil)
 C.sent = 0                  -- lines handed to SendSystemMessage
 C.dropped = 0               -- records dropped because the queue was full
-C.stale = 0                 -- FIRE records dropped because they waited too long
+C.stale = 0                 -- FIRE and request records dropped because they waited too long
 C.weEnabledLogging = false
 C.filterInstalled = false
 local retryScheduled = false
+
+-- A CONFIG that carries a request (ACTION), as opposed to music choices only.
+local function isRequest(ev)
+  return ev.type == EV.CONFIG and ev.action ~= nil
+end
 
 -- Message filter: hides our own lines. Never looks inside a secret value.
 function C.Filter(self, event, msg, ...)
@@ -123,7 +134,7 @@ function C.Flush()
   local now = GetTime()
   for i = 1, #q do
     local e = q[i]
-    if e.type == EV.FIRE and now - e.at > FIRE_MAX_AGE then
+    if (e.type == EV.FIRE and now - e.at > FIRE_MAX_AGE) or (e.action and now - e.at > CONFIG_MAX_AGE) then
       C.stale = C.stale + 1
     else
       send(e.line)
@@ -150,11 +161,13 @@ function C.Send(ev, opts)
   if not s or type(ev) ~= "table" then return false end
   if not s.chatlog and not (opts and opts.force) then return false end
   local pads = 0
-  if PADDED[ev.type] and not (opts and opts.noPad) then
+  local request = isRequest(ev)
+  if (PADDED[ev.type] or request) and not (opts and opts.noPad) then
     pads = P2.PadLineCount(s.chatlogPadBytes or 0)
   end
   local at = (type(ev.t) == "number") and ev.t or GetTime()
-  enqueue({ line = P2.FormatChatLine(ev), type = ev.type, seq = ev.seq, at = at, pads = pads })
+  enqueue({ line = P2.FormatChatLine(ev), type = ev.type, seq = ev.seq, at = at, pads = pads,
+            action = request or nil })
   C.Flush()
   return true
 end

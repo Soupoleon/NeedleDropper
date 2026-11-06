@@ -33,7 +33,8 @@ RAZOR_HILL = {"mapID": 1411, "areaID": 362, "subzone": "Razor Hill", "artist": "
               "volume": 80}
 # The owner's route ran with the NeedleDropper app (it wrote NeedleDropper_Companion): without it a
 # first-visit drop only shows its title card and is marked "card", not "played" (journey F4).
-APP = {"schema": 1, "appVersion": "1.2.0", "written": 1762365000, "status": {"youtube": True}}
+# 1.2.1: an app older than 1.2.1 counts as outdated (it reads no 1.2.1 frame, DESIGN-v1.2.1 2.11)
+APP = {"schema": 1, "appVersion": "1.2.1", "written": 1762365000, "status": {"youtube": True}}
 
 
 def fresh_troll(**kw) -> AddonHarness:

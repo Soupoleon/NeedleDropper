@@ -73,6 +73,8 @@ local function dialogFrame(name, title, w, h)
   W.ManageInCombat(f)
   return f
 end
+-- Shared with UI\MusicDialog.lua (DESIGN-v1.2.1 1.3) and the report dialog below.
+W.DialogFrame = dialogFrame
 
 local function codeBox(f, height)
   local box = CreateFrame("Frame", nil, f.Inset, "ScrollingEditBoxTemplate")
@@ -436,6 +438,58 @@ local function buildShare()
   end, L["Select all"], L["Selects the whole code again, ready for Ctrl+C."])
   f.SelectButton:SetPoint("RIGHT", f.CloseButton2, "LEFT", -4, 0)
   return f
+end
+
+-- ================================================================= report --
+-- /needle report (decision D16): the plain-text report (SelfTest.ReportText) in a read-only
+-- ScrollingEditBoxTemplate, selected so Ctrl+C copies it; any edit is undone (the Cell pattern).
+
+local R = { frame = nil, text = nil }
+W.Report = R
+
+local function buildReport()
+  if R.frame then return R.frame end
+  local f = dialogFrame("NeedleDropperReportDialog", L["NeedleDropper report"], 560, 460)
+  R.frame = f
+  f.Hint = W.Label(f, L["For a bug report: press Ctrl+C to copy this report, then paste it into your report."],
+    "GameFontHighlightSmall")
+  f.Hint:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -34)
+  f.Code = codeBox(f, 330)
+  f.Code:RegisterCallback("OnTextChanged", function(owner, editBox, userChanged)
+    if userChanged and R.text then
+      f.Code:SetText(R.text)
+      editBox:HighlightText()
+    end
+  end, R)
+  f.Code:RegisterCallback("OnFocusGained", function(owner, editBox) editBox:HighlightText() end, R)
+  f.Note = W.Label(f.Inset, L["It holds no account names, Client IDs or sign-in tokens."], "GameFontNormalSmall")
+  f.Note:SetPoint("TOPLEFT", f.Code, "BOTTOMLEFT", 0, -8)
+  f.Note:SetPoint("RIGHT", f.Inset, "RIGHT", -10, 0)
+  f.CloseButton2 = W.Button(f, CLOSE or L["Close"], 84, function() f:Hide() end, CLOSE or L["Close"])
+  f.CloseButton2:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -8, 3)
+  f.SelectButton = W.Button(f, L["Select all"], 96, function()
+    f.Code:SetFocus()
+    f.Code:GetEditBox():HighlightText()
+  end, L["Select all"], L["Selects the whole report again, ready for Ctrl+C."])
+  f.SelectButton:SetPoint("RIGHT", f.CloseButton2, "LEFT", -4, 0)
+  return f
+end
+
+-- Shows `text` (plain text, no "|" escapes) selected for Ctrl+C.
+function W.OpenReport(text)
+  if type(text) ~= "string" or text == "" then return false end
+  local f = buildReport()
+  R.text = text
+  if f:IsShown() or not W.InCombat() then
+    f:Show()
+    f:Raise()
+  else
+    W.OpenAfterCombat(f)          -- dialogs stay hidden in combat; this one opens when it ends
+  end
+  f.Code:SetText(text)
+  W.FocusBox(f.Code)
+  f.Code:GetEditBox():HighlightText()
+  return true
 end
 
 -- Opens the Share dialog for `ref` (default: the soundtrack selected on the Soundtracks tab, else

@@ -83,6 +83,8 @@ def decode_beacon_bytes(data: bytes) -> Optional[Event]:
     if fletcher16(data[:8]) != (data[8] << 8 | data[9]):
         return None
     t = data[1] & 0x0F
+    if t > 5:  # v1 knows types 0..5; EventType.CONFIG (6) exists only in protocol v2
+        return None
     try:
         etype = EventType(t)
     except ValueError:
@@ -136,6 +138,8 @@ def parse_chat_line(line: str) -> Optional[Event]:
     if fletcher16(body.encode("ascii")) != int(crc, 16):
         return None
     try:
+        if int(t) > 5:  # v1 knows types 0..5; EventType.CONFIG (6) exists only in protocol v2
+            return None
         etype = EventType(int(t))
         seq_i, n_i, h_i, fl_i = int(seq), int(n), int(h), int(fl)
     except ValueError:

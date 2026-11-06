@@ -3276,6 +3276,20 @@ function F.Install(ns, opts)
     return copy(F.tracks[key])
   end
   function C.Imports() return copy(F.imports) end
+  -- 1.2.1 (DESIGN-v1.2.1 1.1): the music block and the version checks MusicServices.lua reads.
+  function C.Music() return F.companion.present and copy(F.companion.music) or nil end
+  function C.AtLeast(version, a, b, c)
+    if type(version) ~= "string" then return false end
+    local x, y, z = string.match(version, "^([0-9]+)%.([0-9]+)%.?([0-9]*)")
+    x, y, z = tonumber(x), tonumber(y), tonumber(z) or 0
+    if not x then return false end
+    if x ~= a then return x > a end
+    if y ~= b then return y > b end
+    return z >= (c or 0)
+  end
+  function C.Supports(feature)
+    return feature == "config" and F.companion.present and C.AtLeast(F.companion.appVersion, 1, 2, 1) or false
+  end
   function C.StatusLine()
     local st = F.companion
     if not st.present then return "NeedleDropper app not found: Spotify and YouTube songs need it" end

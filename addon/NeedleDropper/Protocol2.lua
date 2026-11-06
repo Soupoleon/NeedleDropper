@@ -11,7 +11,7 @@ local ADDON, ns = ...
 -- Frame bytes (docs/PROTOCOL-v2.md section 2):
 --   [1] 0x4E 'N'   [2] 0x20 + type   [3] seq   [4] flags   [5] bodyLen
 --   [6 .. 5+bodyLen] TLVs: tag (uint8), len (uint8), value -- ascending tags, absent omitted
---   then Fletcher-16 of everything before it: s2, s1
+--   then the 4-byte check of everything before it (FrameCheck, uint32 big-endian)
 --
 -- Event table accepted by EncodeFrame / EncodeCells / FormatChatLine:
 --   { type = P2.EV.FIRE, seq = 7, flags = 0x20,
@@ -26,15 +26,22 @@ local ADDON, ns = ...
 --     label = "Elwynn Forest",         -- place label for the player card
 --     setId = "azeroth-mixtape",       -- soundtrack set id
 --     prefer = "spotify" | "youtube" } -- not sent: the id the fit rule keeps last (default youtube)
+-- HELLO and CONFIG (DESIGN-v1.2.1 2) also take:
+--     prefs = { order = "spotify-youtube", corner = "topright", fade = true, resume = true },
+--     action = { name = "connect-spotify", at = 1762380123 },   -- CONFIG only
+--     clientId = "0123456789abcdef0123456789abcdef",            -- CONFIG only
+-- and a HELLO carries placeKey (the playing drop's, with DROP_ACTIVE) but no other song field.
 -- Numeric fields must be numbers; anything else counts as absent.
 --
--- Fit rule (DESIGN-v1.2 2.3): EncodeFrame(ev, maxBytes, prefer) keeps the frame within
--- maxBytes (default and maximum MAX_FRAME = 262, i.e. a body of at most 255 bytes) by
--- removing, in this order and only while it is still too long: 1 setId, 2 label, 3 query
--- (when a Spotify or YouTube id is present), 4 dropId (placeKey stays), 5 the query's tail
--- (UTF-8 safe), 6 volume, 7 the provider id that is not preferred. placeKey, start, length,
--- the flags and the last provider id are never removed. The beacon's budget is the capacity
--- of its rows (Capacity / RowsCap / AdaptiveLayout and geom.maxRows below).
+-- Fit rule (DESIGN-v1.2 2.3, findings F3 / F4): EncodeFrame(ev, maxBytes, prefer) keeps the
+-- frame within maxBytes (default and maximum MAX_FRAME = 264, i.e. a body of at most 255
+-- bytes) by removing, in this order and only while it is still too long: 1 setId, 2 label,
+-- 3 query (only when the preferred provider's id is present), 4 dropId (placeKey stays),
+-- 5 shorten the query (artist and title each keep MIN_QUERY_PART bytes and the separator, or
+-- the whole query goes), 6 volume, 7 the provider id that is not preferred. placeKey, start,
+-- length, the flags, the last provider id and PREFS / ACTION / CLIENT_ID are never removed.
+-- The beacon's budget is the capacity of its rows (Capacity / RowsCap / AdaptiveLayout and
+-- geom.maxRows below).
 
 ns = ns or {}
 
@@ -53,23 +60,43 @@ P2.MAGIC = 0x4E
 P2.VERSION = 2
 P2.CHAT_PREFIX = "NDROP2"
 
-P2.EV = { NONE = 0, HELLO = 1, ARM = 2, FIRE = 3, CANCEL = 4, PING = 5 }
-P2.EV_NAME = { [0] = "NONE", "HELLO", "ARM", "FIRE", "CANCEL", "PING" }
+P2.EV = { NONE = 0, HELLO = 1, ARM = 2, FIRE = 3, CANCEL = 4, PING = 5, CONFIG = 6 }
+P2.EV_NAME = { [0] = "NONE", "HELLO", "ARM", "FIRE", "CANCEL", "PING", "CONFIG" }
 P2.FLAG = { IN_COMBAT = 1, IN_INSTANCE = 2, ON_TAXI = 4, DEAD = 8, LOCAL_PLAYBACK = 16, DROP_ACTIVE = 32,
             TEST = 64 }
 
 P2.TAG = { PLACE_KEY = 0x01, DROP_ID = 0x02, SPOTIFY = 0x03, YOUTUBE = 0x04, QUERY = 0x05,
-           START_DS = 0x06, LENGTH_DS = 0x07, VOLUME = 0x08, LABEL = 0x09, SET_ID = 0x0A }
-local MAX_TAG = 0x0A
+           START_DS = 0x06, LENGTH_DS = 0x07, VOLUME = 0x08, LABEL = 0x09, SET_ID = 0x0A,
+           PREFS = 0x0B, ACTION = 0x0C, CLIENT_ID = 0x0D }
+local MAX_TAG = 0x0D
 
 P2.MAX_DROP_ID = 40      -- bytes, sanitized ASCII
 P2.MAX_QUERY = 120       -- bytes, UTF-8 "artist" .. 0x1F .. "title"
 P2.MAX_LABEL = 48        -- bytes, UTF-8
 P2.MAX_SET_ID = 32       -- bytes, sanitized ASCII
 P2.MAX_BODY = 255        -- bodyLen is one byte
-P2.FRAME_OVERHEAD = 7    -- 5 head bytes + 2 checksum bytes
-P2.MAX_FRAME = P2.MAX_BODY + P2.FRAME_OVERHEAD   -- 262
+P2.TRAILER_LEN = 4       -- the frame check, uint32 big-endian
+P2.FRAME_OVERHEAD = 5 + P2.TRAILER_LEN           -- 9: 5 head bytes + the check
+P2.MAX_FRAME = P2.MAX_BODY + P2.FRAME_OVERHEAD   -- 264
 P2.QUERY_SEP = "\031"    -- 0x1F unit separator between artist and title
+P2.MIN_QUERY_PART = 8    -- fit-rule step 5: artist and title each keep this many bytes (or all)
+
+-- The frame check (finding F1): h = CHECK_SEED, then h = (h * 48271 + byte + 1) % (2^31 - 1)
+-- for every byte before the trailer, then CHECK_FINAL_ROUNDS more rounds h = (h * 48271 + 1)
+-- % (2^31 - 1), as if two 0x00 bytes followed (review RP-1: they give the last body byte a large
+-- weight, so +d there and +d on the trailer's low byte no longer cancel). 48271 is a primitive
+-- root mod the prime 2^31 - 1, and every intermediate stays below 2^47, so doubles compute it
+-- exactly (no bit library).
+P2.CHECK_SEED = 1313092163    -- 0x4E443243 "ND2C"
+P2.CHECK_MUL = 48271
+P2.CHECK_MOD = 2147483647
+P2.CHECK_FINAL_ROUNDS = 2
+
+-- PREFS / ACTION codes (DESIGN-v1.2.1 2.3): code = index; PREFS 0 = not set.
+P2.PREFS_ORDERS = { "spotify-youtube", "youtube-spotify", "spotify", "youtube", "none" }
+P2.PREFS_CORNERS = { "topright", "topleft", "bottomright", "bottomleft" }
+P2.ACTIONS = { "connect-spotify", "disconnect-spotify", "test-spotify", "test-youtube", "youtube-sign-in" }
+P2.CLIENT_ID_LEN = 16    -- bytes on the wire: the client id's 32 hex digits
 
 -- Pixel layout (docs/PROTOCOL-v2.md section 4).
 P2.HEADER = { {1, 0, 1}, {0, 1, 0}, {1, 0, 1}, {0, 1, 0} } -- magenta, green, magenta, green
@@ -96,11 +123,16 @@ P2.WHITEN_MUL = 16807
 P2.WHITEN_MOD = 2147483647
 local WHITEN_TOP = 1073741824 -- 2^30: the keystream bit is the state's top bit
 
--- Fields each event type carries (HELLO / PING: none; CANCEL: identity only).
-local ALL_TAGS = { true, true, true, true, true, true, true, true, true, true }
+-- Fields each event type carries (keys are tags): ARM / FIRE the song (never PREFS), CANCEL
+-- the identity, HELLO the playing drop's placeKey and PREFS, CONFIG PREFS / ACTION /
+-- CLIENT_ID, PING / NONE nothing.
+local SONG_TAGS = { true, true, true, true, true, true, true, true, true, true }
 local PLACE_TAGS = { true, true }
+local HELLO_TAGS = { [0x01] = true, [0x0B] = true }
+local CONFIG_TAGS = { [0x0B] = true, [0x0C] = true, [0x0D] = true }
 local NO_TAGS = {}
-P2.TYPE_TAGS = { [0] = NO_TAGS, [1] = NO_TAGS, [2] = ALL_TAGS, [3] = ALL_TAGS, [4] = PLACE_TAGS, [5] = NO_TAGS }
+P2.TYPE_TAGS = { [0] = NO_TAGS, [1] = HELLO_TAGS, [2] = SONG_TAGS, [3] = SONG_TAGS, [4] = PLACE_TAGS,
+                 [5] = NO_TAGS, [6] = CONFIG_TAGS }
 
 local POW2 = {}
 for i = 0, 7 do POW2[i] = 2 ^ i end
@@ -116,7 +148,21 @@ local function clamp(v, lo, hi)
   return v
 end
 
--- Fletcher-16 over the first `n` (default all) values of a byte array.
+-- The frame check over the first `n` (default all) values of a byte array: a polynomial hash
+-- mod 2^31 - 1 (see CHECK_SEED). Unlike Fletcher-16 it sees the column-cover pattern of
+-- finding F1 (-d, +2d, -d in bytes i, i+k, i+2k), since 48271^k is never 1 for such k.
+function P2.FrameCheck(bytes, n)
+  local h = P2.CHECK_SEED
+  for i = 1, n or #bytes do
+    h = (h * 48271 + bytes[i] + 1) % 2147483647
+  end
+  for _ = 1, P2.CHECK_FINAL_ROUNDS do
+    h = (h * 48271 + 1) % 2147483647
+  end
+  return h
+end
+
+-- Fletcher-16 over the first `n` (default all) values of a byte array (placeKey's hash).
 function P2.Fletcher16Bytes(bytes, n)
   local s1, s2 = 0, 0
   for i = 1, n or #bytes do
@@ -181,6 +227,29 @@ end
 
 -- ---------------------------------------------------------------- text / UTF-8 --
 
+-- Length (2..4) of the valid UTF-8 sequence that starts with byte `c` (>= 0x80) at index `i`
+-- of `s`, or 0: bad lead or continuation bytes, overlong forms, UTF-16 surrogates and code
+-- points above U+10FFFF are invalid (RFC 3629 table; Python's strict codec is the same).
+local function seqLen(s, i, c)
+  if c >= 0xC2 and c <= 0xDF then
+    local c2 = sbyte(s, i + 1)
+    if c2 and c2 >= 0x80 and c2 <= 0xBF then return 2 end
+  elseif c >= 0xE0 and c <= 0xEF then
+    local c2, c3 = sbyte(s, i + 1, i + 2)
+    local lo, hi = 0x80, 0xBF
+    if c == 0xE0 then lo = 0xA0 elseif c == 0xED then hi = 0x9F end
+    if c3 and c2 >= lo and c2 <= hi and c3 >= 0x80 and c3 <= 0xBF then return 3 end
+  elseif c >= 0xF0 and c <= 0xF4 then
+    local c2, c3, c4 = sbyte(s, i + 1, i + 3)
+    local lo, hi = 0x80, 0xBF
+    if c == 0xF0 then lo = 0x90 elseif c == 0xF4 then hi = 0x8F end
+    if c4 and c2 >= lo and c2 <= hi and c3 >= 0x80 and c3 <= 0xBF and c4 >= 0x80 and c4 <= 0xBF then
+      return 4
+    end
+  end
+  return 0
+end
+
 -- Text field cleaning: invalid UTF-8 bytes (bad lead/continuation, overlong forms, UTF-16
 -- surrogates, > U+10FFFF) become "?", C0 controls and DEL become a space (so the 0x1F query
 -- separator is unambiguous), and leading/trailing spaces are trimmed. Non-strings -> "".
@@ -190,29 +259,12 @@ function P2.Utf8Clean(s)
   local i, len = 1, #s
   while i <= len do
     local c = sbyte(s, i)
+    n = n + 1
     if c < 0x80 then
-      n = n + 1
       if c < 0x20 or c == 0x7F then out[n] = " " else out[n] = schar(c) end
       i = i + 1
     else
-      local size = 0
-      if c >= 0xC2 and c <= 0xDF then
-        local c2 = sbyte(s, i + 1)
-        if c2 and c2 >= 0x80 and c2 <= 0xBF then size = 2 end
-      elseif c >= 0xE0 and c <= 0xEF then
-        local c2, c3 = sbyte(s, i + 1, i + 2)
-        local lo, hi = 0x80, 0xBF
-        if c == 0xE0 then lo = 0xA0 elseif c == 0xED then hi = 0x9F end
-        if c3 and c2 >= lo and c2 <= hi and c3 >= 0x80 and c3 <= 0xBF then size = 3 end
-      elseif c >= 0xF0 and c <= 0xF4 then
-        local c2, c3, c4 = sbyte(s, i + 1, i + 3)
-        local lo, hi = 0x80, 0xBF
-        if c == 0xF0 then lo = 0x90 elseif c == 0xF4 then hi = 0x8F end
-        if c4 and c2 >= lo and c2 <= hi and c3 >= 0x80 and c3 <= 0xBF and c4 >= 0x80 and c4 <= 0xBF then
-          size = 4
-        end
-      end
-      n = n + 1
+      local size = seqLen(s, i, c)
       if size == 0 then
         out[n] = "?"
         i = i + 1
@@ -223,6 +275,23 @@ function P2.Utf8Clean(s)
     end
   end
   return (smatch(concat(out), "^ *(.-) *$"))
+end
+
+-- True when `s` is a string of strictly valid UTF-8 (the decoders' text check, D5).
+function P2.Utf8Valid(s)
+  if type(s) ~= "string" then return false end
+  local i, len = 1, #s
+  while i <= len do
+    local c = sbyte(s, i)
+    if c < 0x80 then
+      i = i + 1
+    else
+      local size = seqLen(s, i, c)
+      if size == 0 then return false end
+      i = i + size
+    end
+  end
+  return true
 end
 
 -- Longest prefix of `s` with at most `maxBytes` bytes that does not end inside a UTF-8
@@ -251,24 +320,46 @@ function P2.SanitizeId(id, maxLen)
   return s
 end
 
+-- Artist `a` and title `t` within `budget` bytes together (the separator not counted): a part
+-- that fits in half the budget stays whole and the other gets the rest; otherwise the artist
+-- gets half (rounded down) and the title the rest. Each cut is on a UTF-8 boundary.
+local function fairSplit(a, t, budget)
+  if #a + #t <= budget then return a, t end
+  local half = floor(budget / 2)
+  if #a <= half then
+    t = P2.Utf8Truncate(t, budget - #a)
+  elseif #t <= budget - half then
+    a = P2.Utf8Truncate(a, budget - #t)
+  else
+    a = P2.Utf8Truncate(a, half)
+    t = P2.Utf8Truncate(t, budget - #a)
+  end
+  return a, t
+end
+
 -- "artist" .. 0x1F .. "title", at most MAX_QUERY bytes. When both do not fit, the title keeps
 -- at least 60 bytes and the artist at least 59 (each cut on a UTF-8 boundary), so the
 -- separator always survives. Returns nil when both are empty.
 function P2.BuildQuery(artist, title)
   local a, t = P2.Utf8Clean(artist), P2.Utf8Clean(title)
   if a == "" and t == "" then return nil end
-  local budget = P2.MAX_QUERY - 1
-  if #a + #t > budget then
-    local half = floor(budget / 2)
-    if #a <= half then
-      t = P2.Utf8Truncate(t, budget - #a)
-    elseif #t <= budget - half then
-      a = P2.Utf8Truncate(a, budget - #t)
-    else
-      a = P2.Utf8Truncate(a, half)
-      t = P2.Utf8Truncate(t, budget - #a)
-    end
-  end
+  a, t = fairSplit(a, t, P2.MAX_QUERY - 1)
+  return a .. P2.QUERY_SEP .. t
+end
+
+-- Fit-rule step 5 (finding F3): the query `q` ("artist" 0x1F "title") shortened to at most
+-- `budget` bytes, separator included, by fairSplit on its two parts; nil when the budget
+-- cannot leave each part MIN_QUERY_PART bytes (a shorter part: all of it). The separator
+-- always survives, so the companion never reads an artist prefix as a title.
+local function fitQuery(q, budget)
+  local a, t
+  local sep = sfind(q, P2.QUERY_SEP, 1, true)
+  if sep then a, t = ssub(q, 1, sep - 1), ssub(q, sep + 1) else a, t = "", q end
+  local room = budget - 1
+  local minA = #a < P2.MIN_QUERY_PART and #a or P2.MIN_QUERY_PART
+  local minT = #t < P2.MIN_QUERY_PART and #t or P2.MIN_QUERY_PART
+  if room < minA + minT then return nil end
+  a, t = fairSplit(a, t, room)
   return a .. P2.QUERY_SEP .. t
 end
 
@@ -398,7 +489,7 @@ end
 
 local TAG = P2.TAG
 
--- Frame bytes (7 + body) of the TLV values in `vals`.
+-- Frame bytes (FRAME_OVERHEAD = 9, plus the body) of the TLV values in `vals`.
 local function frameSize(vals)
   local n = P2.FRAME_OVERHEAD
   for tag = 1, MAX_TAG do
@@ -425,21 +516,20 @@ local function fitBody(vals, budget, prefer)
   if size <= budget then return size end
   size = removeTag(vals, TAG.LABEL, size)                            -- 2 label
   if size <= budget then return size end
-  if vals[TAG.SPOTIFY] or vals[TAG.YOUTUBE] then                     -- 3 query, if an id is present
-    size = removeTag(vals, TAG.QUERY, size)
+  if vals[prefer == "spotify" and TAG.SPOTIFY or TAG.YOUTUBE] then   -- 3 query, if the preferred
+    size = removeTag(vals, TAG.QUERY, size)                          --   provider's id is present
     if size <= budget then return size end
   end
   size = removeTag(vals, TAG.DROP_ID, size)                          -- 4 dropId (placeKey stays)
   if size <= budget then return size end
   local q = vals[TAG.QUERY]                                          -- 5 shorten the query
   if q then
-    local keep = #q - (size - budget)
-    local nq = keep >= 1 and P2.Utf8Truncate(q, keep) or ""
-    if nq == "" then
-      size = removeTag(vals, TAG.QUERY, size)
-    else
+    local nq = fitQuery(q, #q - (size - budget))
+    if nq then
       vals[TAG.QUERY] = nq
       size = size - (#q - #nq)
+    else
+      size = removeTag(vals, TAG.QUERY, size)
     end
     if size <= budget then return size end
   end
@@ -457,9 +547,58 @@ local function preferOf(prefer)
   return "youtube"
 end
 
+-- 1-based index of `v` in `names` (ASCII case-insensitive), 0 when it is not one of them.
+local function nameCode(v, names)
+  if type(v) ~= "string" then return 0 end
+  v = slower(v)
+  for i = 1, #names do
+    if names[i] == v then return i end
+  end
+  return 0
+end
+
+local function boolCode(v)
+  if v == true then return 1 elseif v == false then return 2 end
+  return 0
+end
+
+local function u32(v)
+  return schar(floor(v / 16777216) % 256, floor(v / 65536) % 256, floor(v / 256) % 256, v % 256)
+end
+
+-- PREFS value (4 code bytes) of ev.prefs, or nil when nothing is set (DESIGN-v1.2.1 2.4).
+local function prefsValue(p)
+  if type(p) ~= "table" then return nil end
+  local o, c = nameCode(p.order, P2.PREFS_ORDERS), nameCode(p.corner, P2.PREFS_CORNERS)
+  local f, r = boolCode(p.fade), boolCode(p.resume)
+  if o + c + f + r == 0 then return nil end
+  return schar(o, c, f, r)
+end
+
+-- ACTION value (code, code XOR 0xFF, issuedAt uint32) of ev.action = { name, at }, or nil.
+local function actionValue(a)
+  if type(a) ~= "table" then return nil end
+  local code = nameCode(a.name, P2.ACTIONS)
+  if code == 0 or not isnum(a.at) then return nil end
+  return schar(code, 255 - code) .. u32(clamp(floor(a.at), 0, 4294967295))
+end
+
+-- CLIENT_ID value (16 bytes) of a client id: ASCII whitespace removed, then exactly 32 hex
+-- digits in either case; otherwise nil.
+local function clientIdValue(s)
+  if type(s) ~= "string" then return nil end
+  s = sgsub(s, "%s", "")
+  if #s ~= 32 or not sfind(s, "^%x+$") then return nil end
+  local out = {}
+  for i = 1, 31, 2 do out[#out + 1] = schar(tonumber(ssub(s, i, i + 1), 16)) end
+  return concat(out)
+end
+
 -- Frame bytes (array of numbers 0..255) for an event table (see the top of this file),
 -- fitted to `maxBytes` (default MAX_FRAME; clamped to FRAME_OVERHEAD..MAX_FRAME) by the fit
 -- rule, which keeps the `prefer` provider id last (default: ev.prefer, else "youtube").
+-- Only the fields of TYPE_TAGS[ev.type] are encoded. Every HELLO and every CONFIG that obeys
+-- DESIGN-v1.2.1 2.2 (no PREFS beside a CLIENT_ID) fits one strip row (<= Capacity(1)).
 function P2.EncodeFrame(ev, maxBytes, prefer)
   if type(ev) ~= "table" then ev = {} end
   local budget = isnum(maxBytes) and clamp(floor(maxBytes), P2.FRAME_OVERHEAD, P2.MAX_FRAME) or P2.MAX_FRAME
@@ -499,6 +638,9 @@ function P2.EncodeFrame(ev, maxBytes, prefer)
     local set = P2.SanitizeId(ev.setId, P2.MAX_SET_ID)
     if set ~= "" then vals[10] = set end
   end
+  if allow[11] then vals[11] = prefsValue(ev.prefs) end
+  if allow[12] then vals[12] = actionValue(ev.action) end
+  if allow[13] then vals[13] = clientIdValue(ev.clientId) end
   fitBody(vals, budget, preferOf(prefer))
 
   local bytes = { P2.MAGIC, P2.VERSION * 16 + t, seq, flags, 0 }
@@ -516,9 +658,11 @@ function P2.EncodeFrame(ev, maxBytes, prefer)
     end
   end
   bytes[5] = n - 5
-  local f = P2.Fletcher16Bytes(bytes, n)
-  bytes[n + 1] = floor(f / 256)
-  bytes[n + 2] = f % 256
+  local h = P2.FrameCheck(bytes, n)
+  bytes[n + 1] = floor(h / 16777216) % 256
+  bytes[n + 2] = floor(h / 65536) % 256
+  bytes[n + 3] = floor(h / 256) % 256
+  bytes[n + 4] = h % 256
   return bytes
 end
 
@@ -526,19 +670,27 @@ local function idOk(v, maxLen)
   return #v >= 1 and #v <= maxLen and sfind(v, "^[A-Za-z0-9:_%.%-]+$") ~= nil
 end
 
+local BOOL_OF = { [1] = true, [2] = false }
+
 -- Validates a frame (byte array) and returns its fields, or nil. Mirrors protocol2.decode_frame:
--- magic, version, known type, exact length, checksum, strictly ascending non-zero tags, and
--- known tags with valid lengths / characters. Unknown tags are skipped (forward compatible)
--- and listed in `unknown` as { tag = t, value = "<bytes>" }.
+-- magic, version, known type (0..6), exact length, the 4-byte check, strictly ascending
+-- non-zero tags, and known tags with valid lengths / characters (strict UTF-8 query and label;
+-- PREFS 4, ACTION 6 with its check byte, CLIENT_ID 16 bytes). Unknown PREFS / ACTION codes
+-- decode as nil fields, not errors. Unknown tags are skipped (forward compatible) and listed
+-- in `unknown` as { tag = t, value = "<bytes>" }. TYPE_TAGS is not enforced here.
+-- Results: prefs = { order, corner, fade, resume }, action = { code, name, at }, clientId.
 function P2.DecodeFrame(bytes)
   if type(bytes) ~= "table" then return nil end
   local n = #bytes
   if n < P2.FRAME_OVERHEAD or bytes[1] ~= P2.MAGIC or floor(bytes[2] / 16) ~= P2.VERSION then return nil end
   local t = bytes[2] % 16
-  if t > 5 then return nil end
+  if t > P2.EV.CONFIG then return nil end
   local bodyLen = bytes[5]
   if n ~= P2.FRAME_OVERHEAD + bodyLen then return nil end
-  if bytes[6 + bodyLen] * 256 + bytes[7 + bodyLen] ~= P2.Fletcher16Bytes(bytes, 5 + bodyLen) then return nil end
+  local s = 5 + bodyLen
+  if ((bytes[s + 1] * 256 + bytes[s + 2]) * 256 + bytes[s + 3]) * 256 + bytes[s + 4] ~= P2.FrameCheck(bytes, s) then
+    return nil
+  end
   local ev = { type = t, seq = bytes[3], flags = bytes[4], unknown = {} }
   local i, stop, last = 6, 5 + bodyLen, 0
   while i <= stop do
@@ -559,7 +711,7 @@ function P2.DecodeFrame(bytes)
       if len ~= 11 or not sfind(v, "^[A-Za-z0-9_%-]+$") then return nil end
       ev.youtube = v
     elseif tag == 5 then
-      if len < 1 or len > P2.MAX_QUERY then return nil end
+      if len < 1 or len > P2.MAX_QUERY or not P2.Utf8Valid(v) then return nil end
       ev.query = v
       local sep = sfind(v, P2.QUERY_SEP, 1, true)
       if sep then
@@ -575,11 +727,25 @@ function P2.DecodeFrame(bytes)
       if len ~= 1 or bytes[i + 2] > 100 then return nil end
       ev.volume = bytes[i + 2]
     elseif tag == 9 then
-      if len < 1 or len > P2.MAX_LABEL then return nil end
+      if len < 1 or len > P2.MAX_LABEL or not P2.Utf8Valid(v) then return nil end
       ev.label = v
     elseif tag == 10 then
       if not idOk(v, P2.MAX_SET_ID) then return nil end
       ev.setId = v
+    elseif tag == 11 then
+      if len ~= 4 then return nil end
+      ev.prefs = { order = P2.PREFS_ORDERS[bytes[i + 2]], corner = P2.PREFS_CORNERS[bytes[i + 3]],
+                   fade = BOOL_OF[bytes[i + 4]], resume = BOOL_OF[bytes[i + 5]] }
+    elseif tag == 12 then
+      local code = bytes[i + 2]
+      if len ~= 6 or bytes[i + 3] ~= 255 - code then return nil end
+      ev.action = { code = code, name = P2.ACTIONS[code],
+                    at = ((bytes[i + 4] * 256 + bytes[i + 5]) * 256 + bytes[i + 6]) * 256 + bytes[i + 7] }
+    elseif tag == 13 then
+      if len ~= P2.CLIENT_ID_LEN then return nil end
+      local hex = {}
+      for k = 1, len do hex[k] = string.format("%02x", bytes[i + 1 + k]) end
+      ev.clientId = concat(hex)
     else
       ev.unknown[#ev.unknown + 1] = { tag = tag, value = v }
     end
@@ -669,7 +835,7 @@ function P2.RowsCap(cellPx)
   return n
 end
 
--- Largest frame (bytes, 7-byte overhead included) that fits `rows` rows of MAX_COLS cells:
+-- Largest frame (bytes, the 9-byte overhead included) that fits `rows` rows of MAX_COLS cells:
 -- floor((rows * 112 - 7) * 3 / 8), at most MAX_FRAME. 2 px (4 rows) = 165, 3 px (3) = 123,
 -- 4 px (2) = 81, one row = 39.
 function P2.Capacity(rows)

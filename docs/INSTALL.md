@@ -18,7 +18,9 @@ so to hear them you need the app.
 [3. The app (optional)](#3-optional-the-needledropper-app) ·
 [4. The Connect page](#4-the-connect-page) ·
 [5. Check the link](#5-check-the-link) ·
+[Music services in game](#music-services-in-game) ·
 [Game settings](#game-settings-for-the-beacon) ·
+[Upgrading from 1.2.0](#upgrading-from-120) ·
 [Upgrading from 1.1](#upgrading-from-11) ·
 [Updating](#updating) ·
 [Uninstalling](#uninstalling)
@@ -29,9 +31,11 @@ so to hear them you need the app.
   Warcraft folder, by default `C:\Program Files (x86)\World of Warcraft\_forever_`.
 - For the app (optional):
   - **Windows 10 or 11** (64-bit), and
-  - something to play the music, at least one of: **Spotify Premium** and the Spotify app (a free
-    Spotify account can't be remote-controlled), or **Microsoft Edge** (built into Windows) or
-    **Google Chrome** for YouTube.
+  - something to play the music, at least one of:
+    - **Spotify Premium** and **Google Chrome**. The app plays Spotify songs itself, in a hidden
+      player that runs in Chrome; the Spotify app doesn't have to be open. (Spotify only lets Premium
+      accounts play in apps like this one, and its player needs Chrome: Microsoft Edge can't run it.)
+    - **Microsoft Edge** (built into Windows) or **Google Chrome**, for YouTube.
 
 You do **not** need Python or any command line.
 
@@ -124,8 +128,8 @@ firewall access; if Windows ever asks, you can cancel. It has four cards:
 | Card | What it does |
 |---|---|
 | **World of Warcraft** | Finds your game and shows which addon version is installed. If the addon is missing, it links to CurseForge and offers **Install addon** (close the game first). It doesn't offer to install when an addon manager looks after the addon |
-| **Spotify** | Optional, needs Premium. Three short steps (open the Spotify developer dashboard, copy the redirect URI, paste your Client ID), then **Sign in**. Afterwards the card shows your account, whether it has Premium, its country, and **Play on**, the device that plays. Details: [Music services](PROVIDERS.md#spotify-premium) |
-| **YouTube** | Nothing to set up. A small player window shows on top of the game, in the top-right corner, while a YouTube song plays, and never takes the focus from the game ([why it must stay visible](PROVIDERS.md#the-player-window-must-stay-visible)) |
+| **Spotify** | Optional, needs Premium and Google Chrome. Three short steps (open the Spotify developer dashboard, copy the redirect URI, paste your Client ID), then **Sign in**. Afterwards the card shows your account, whether it has Premium, its country, **Play on** (*NeedleDropper (this app)*: the app plays Spotify itself) and **Test Spotify**. You can do the same from the game instead ([Music services in game](#music-services-in-game)). Details: [Music services](PROVIDERS.md#spotify-premium) |
+| **YouTube** | Nothing to set up. A small player window shows on top of the game, in the top-right corner (or the corner you choose in game), while a YouTube song plays, and never takes the focus from the game ([why it must stay visible](PROVIDERS.md#the-player-window-must-stay-visible)). **Test YouTube** plays a test song there; **Sign in to YouTube** is optional (YouTube Premium, no ads) |
 | **Check the link** | *In WoW type /needle test*. A tick appears when the app sees the game, normally within 2 seconds ([next step](#5-check-the-link)) |
 
 At the bottom: **Start with Windows** (ticked by default) and **Done**.
@@ -137,9 +141,10 @@ Windows**, **Open log folder** and **Quit**.
 
 With **Start with Windows** ticked, the app starts quietly when you sign in to Windows and waits until
 World of Warcraft: Forever is running; only then does it start reading the game's beacon. It shows a
-notification only when something matters (linked to the game, a test signal, a Spotify sign-in that
-expired, Spotify not starting songs, a song it couldn't find or play, a new version). When its update
-check is on, it looks for a new version once a day; it never installs anything by itself.
+notification only when something matters (linked to the game, a test signal, the result of a
+request you sent from the game, a Spotify sign-in that expired or needs renewing, Spotify not
+starting songs, a song it couldn't find or play, a new version). When its update check is on, it
+looks for a new version once a day; it never installs anything by itself.
 
 The app also works from a command prompt for a few tools (`NeedleDropper.exe --help` lists them):
 it prints into the window you started it from. Windows doesn't wait for it, so in `cmd` type
@@ -155,6 +160,35 @@ it prints into the window you started it from. Windows doesn't wait for it, so i
 
 Then go somewhere new. Don't minimize the game while you play: while WoW is minimized the app can't
 see the beacon, so a song that should start only begins once you bring the game back.
+
+## Music services in game
+
+Everything the Connect page does for Spotify and YouTube can also be done in the game, in
+*Game Menu → Options → AddOns → NeedleDropper*, section **Music services** (search for *Spotify* or
+*YouTube* in the Settings panel):
+
+| Row | What it does |
+|---|---|
+| **NeedleDropper app** | What the app reported when you logged in, for example *Spotify + YouTube ready*. Click it for the **Music services** dialog |
+| **Spotify account** | *Set up Spotify…*, *Connect Spotify*, *Sign in again* or *Manage…*, depending on the state. It opens the dialog or sends the request to the app |
+| **YouTube account** | *Sign in to YouTube…*: optional, see [YouTube](PROVIDERS.md#youtube) |
+| **Play music with** | *Spotify, then YouTube* (the default), *YouTube, then Spotify*, *Spotify only*, *YouTube only* or *Neither* ([more](PROVIDERS.md#which-service-plays-a-drop)) |
+| **YouTube box position** | The corner of the YouTube player box |
+| **Fade songs in and out**, **Resume my Spotify music afterwards** | Fades, and your own Spotify music coming back after a drop |
+| **Test Spotify**, **Test YouTube** | 15 seconds of Toto's *Africa*, played by the app |
+| **Refresh status** | Reloads the interface, so the rows show the app's latest report |
+
+The **Music services** dialog (`/needle music`, or the drum button in the NeedleDropper window's title
+bar) is where you paste your Spotify **Client ID**: the Settings panel has no text boxes. It shows the
+two addresses you need for your Spotify developer app (click a box, then press Ctrl+C) and the
+buttons **Connect Spotify**, **Disconnect…**, **Test Spotify**, **Sign in to YouTube…** and **Test
+YouTube**.
+
+The game sends your choices and requests to the app through the beacon, so the app must be running
+and see the game. The game hears back only when it reads the app's report: at login and after a
+`/reload`. So after **Connect Spotify**, approve NeedleDropper on Spotify's page in your browser (it
+may open behind the game: press Alt+Tab), wait for the Windows notification, then press **Refresh
+status**.
 
 ## Game settings for the beacon
 
@@ -177,11 +211,38 @@ To play your own .mp3 or .ogg files inside WoW, copy them into
 completely: WoW only notices new files when it starts, `/reload` is not enough. Then type the file
 name into a drop's **In-game file** field. Details: [In-game audio files](PROVIDERS.md#in-game-audio-files).
 
+## Upgrading from 1.2.0
+
+- **Update both parts together.** A 1.2.0 app can't read the signals of the 1.2.1 addon (and a 1.2.1
+  app can't read a 1.2.0 addon's): with an old app the window's footer says *Update the NeedleDropper
+  app to 1.2.1 to play Spotify and YouTube songs*; with an old addon the Connect page's World of
+  Warcraft card says *Addon too old*. Update the addon, quit the app (tray icon → **Quit**), replace
+  `NeedleDropper.exe` and start it again ([Updating](#updating)).
+- **Close the old player window.** NeedleDropper 1.2.0 leaves its player window (a small Chrome or
+  Edge window titled *NeedleDropper*) open when it quits. Close it once after quitting 1.2.0, before
+  you start 1.2.1. (1.2.1 closes its own player when it quits, and a player window left over from an
+  earlier start closes itself.)
+- **Sign in to Spotify again, once.** The app now plays Spotify songs itself, and Spotify asks for two
+  more permissions for that. Until you sign in again, Spotify songs play on YouTube, and the Connect
+  page (**Sign in again** on the Spotify card), one notification and the game's Music services rows
+  ask you to. Your Client ID stays.
+- **Google Chrome** is needed for Spotify now. The Spotify app no longer has to be open (and no longer
+  plays the drops, unless you pick it under **Play on**).
+- **Your Spotify developer app from 1.2.0:** open it in the dashboard → **Settings** → **Edit**, tick
+  **Web Playback SDK** too and **Save** (the Redirect URI and the Client ID stay). A new app: tick both
+  **Web API** and **Web Playback SDK** when you create it
+  ([how](PROVIDERS.md#step-1-create-your-developer-app)).
+- **Your settings are kept.** Until you change one in game, the four new music options show what the
+  app already does (Spotify first, fades on, your music resumes, the box in the top-right corner).
+- The YouTube box now loads its player from `http://localhost:8322/player`: many videos that failed
+  with error 150 in 1.2.0 play now. Nothing to do.
+
 ## Upgrading from 1.1
 
-- **Update both parts.** The 1.2 addon needs the 1.2 app for Spotify and YouTube; with an older app
-  the window says *Update the NeedleDropper app to 1.2 to play Spotify and YouTube songs*. The 1.2
-  app, in turn, expects the 1.2 addon.
+- **Update both parts.** The 1.2.1 addon needs the 1.2.1 app for Spotify and YouTube; with an older
+  app the window says *Update the NeedleDropper app to 1.2.1 to play Spotify and YouTube songs*. The
+  1.2.1 app, in turn, expects the 1.2.1 addon. Everything in
+  [Upgrading from 1.2.0](#upgrading-from-120) applies too.
 - **Your data is kept.** At the first login the addon keeps your settings, the places you have heard
   and your journal. A beacon cell size of 4 (the 1.1 default) becomes 3.
 - **The soundtrack is now Azeroth Mixtape.** The 1.1 addon played Azeroth Unbound; to keep it, turn
@@ -206,7 +267,7 @@ holds everything you change, and the app has only the Connect page and its tray 
 | 1.1 control panel | In 1.2 |
 |---|---|
 | **Status** | In game: the window's footer, the add-on compartment tooltip and `/needle status`. On the PC: the tray menu's status line and the **Check the link** card |
-| **Music services** | The **Spotify** and **YouTube** cards on the Connect page. There is no order to set any more ([how a source is picked](PROVIDERS.md#which-service-plays-a-drop)) |
+| **Music services** | The **Spotify** and **YouTube** cards on the Connect page, and the **Music services** section of the game's settings, where *Play music with* sets the order ([how a source is picked](PROVIDERS.md#which-service-plays-a-drop)) |
 | **Soundtrack** | In game: the window's **Drops** and **Soundtracks** tabs ([Soundtracks](PACKS.md)) |
 | **Game & addon** | The **World of Warcraft** card on the Connect page |
 | **Advanced** | The beacon and chat-log options in the game's Settings panel; **Open log folder** in the tray menu |
@@ -229,7 +290,9 @@ holds everything you change, and the app has only the Connect page and its tray 
 3. Delete the app's data folder: paste `%APPDATA%\NeedleDropper` into the address bar of a File
    Explorer window and delete it. It holds your app settings, the encrypted Spotify login, logs,
    caches, backup copies of the addon's saved data (`backups`), the player window's browser profile
-   and, from 1.1, the `packs` and `media` folders (back up any audio files you put there).
+   (`deck-browser`: Spotify's player data, a copy of Chrome's Widevine component and, if you signed
+   in to YouTube there, your Google sign-in) and, from 1.1, the `packs` and `media` folders (back up
+   any audio files you put there).
 4. Delete the addon: `World of Warcraft\_forever_\Interface\AddOns\NeedleDropper` (or remove it in
    your addon manager) and the app's data addon `...\AddOns\NeedleDropper_Companion`.
    `NeedleDropper_Local` next to them holds *your own* audio files; delete it only if you don't need

@@ -5,10 +5,17 @@ local ADDON, ns = ...
 --   * an "Open NeedleDropper" row at the top (the window is where soundtracks are edited);
 --   * a "Preview" button for the title card (its size / position sliders re-lay out a card
 --     that is showing, so the effect is visible while dragging);
---   * "Send a test signal" under Companion link (PING + TEST: the app shows a notification).
+--   * "Send a test signal" under Companion link (PING + TEST: the app shows a notification);
+--   * the Music services section (DESIGN-v1.2.1 1.2): rows 1-3 (the app's status, the Spotify
+--     account, the YouTube sign-in), the four music settings, rows 8-10 (Test Spotify, Test
+--     YouTube, Refresh status). Button texts and tooltips are functions (forever's
+--     SettingsButtonControlMixin:EvaluateName and Settings.InitTooltip call them each time the row
+--     is shown), each row adds its own search tags, and the rows that send a request to the app
+--     are disabled (AddModifyPredicate) while the app can't take one.
 -- Every Settings call is guarded; if the API is missing or changed, the addon stays fully
 -- usable through /needle settings and /needle set, and a missing header or button never
--- costs a setting.
+-- costs a setting (without button initializers only the four music settings appear; /needle
+-- music opens the Music services dialog).
 
 local O = {}
 ns.Options = O
@@ -23,6 +30,7 @@ O.extras = 0          -- section headers and buttons added to the panel
 -- Section header shown above the setting with this key.
 local SECTIONS = {
   enabled = "Needle drops",
+  musicOrder = "Music services",
   combatFadeSec = "Playback",
   toast = "Title card",
   beacon = "Companion link",
@@ -30,6 +38,15 @@ local SECTIONS = {
 }
 local PREVIEW_AFTER = "toastSeconds"   -- the title card's Preview button follows this setting
 local SIGNAL_AFTER = "chatlogPadBytes" -- "Send a test signal" ends the Companion link section
+local MUSIC_BEFORE = "musicOrder"      -- Music services rows 1-3 sit between the header and this setting
+local MUSIC_AFTER = "resumeMyMusic"    -- rows 8-10 follow this one
+-- Search tags of the four music settings (their labels are searched anyway).
+local SETTING_TAGS = {
+  musicOrder = { "Spotify", "YouTube" },
+  youtubeCorner = { "YouTube", "corner", "player" },
+  musicFade = { "fade" },
+  resumeMyMusic = { "Spotify", "resume" },
+}
 
 local L = ns.L or setmetatable({}, { __index = function(_, k) return k end })
 
@@ -61,19 +78,27 @@ function O.FormatSliderValue(meta, v)
   return tostring(math.floor(v + 0.5))
 end
 
+-- Adds search tags to an initializer that takes them (Blizzard_Settings.lua: strings only).
+local function addTags(initializer, tags)
+  if type(initializer) == "table" and type(initializer.AddSearchTags) == "function" and type(tags) == "table" then
+    pcall(initializer.AddSearchTags, initializer, unpack(tags))
+  end
+end
+
 local function addControl(category, meta)
   local default = ns.DEFAULTS[meta.key]
   local variable = "NeedleDropper_" .. meta.key
   local setting = Settings.RegisterAddOnSetting(category, variable, meta.key, ns.settings,
-    settingVarType(meta, default), meta.label, default)
+    settingVarType(meta, default), L[meta.label], default)
   if type(setting) ~= "table" then error("RegisterAddOnSetting returned nothing for " .. meta.key) end
   if setting.SetValueChangedCallback then
     setting:SetValueChangedCallback(valueChanged(meta.key))
   elseif Settings.SetOnValueChangedCallback then
     Settings.SetOnValueChangedCallback(variable, valueChanged(meta.key))
   end
+  local initializer
   if meta.type == "boolean" then
-    Settings.CreateCheckbox(category, setting, meta.tip)
+    initializer = Settings.CreateCheckbox(category, setting, L[meta.tip])
   elseif meta.type == "number" then
     local options = Settings.CreateSliderOptions(meta.min, meta.max, meta.step or 1)
     if options and options.SetLabelFormatter and MinimalSliderWithSteppersMixin
@@ -82,15 +107,16 @@ local function addControl(category, meta)
         return O.FormatSliderValue(meta, v)
       end)
     end
-    Settings.CreateSlider(category, setting, options, meta.tip)
+    initializer = Settings.CreateSlider(category, setting, options, L[meta.tip])
   elseif meta.options then
     local function getOptions()
       local container = Settings.CreateControlTextContainer()
-      for i = 1, #meta.options do container:Add(meta.options[i][1], meta.options[i][2]) end
+      for i = 1, #meta.options do container:Add(meta.options[i][1], L[meta.options[i][2]]) end
       return container:GetData()
     end
-    Settings.CreateDropdown(category, setting, getOptions, meta.tip)
+    initializer = Settings.CreateDropdown(category, setting, getOptions, L[meta.tip])
   end
+  addTags(initializer, SETTING_TAGS[meta.key])
 end
 
 -- Adds a non-setting element (header, button) to the panel's layout; optional everywhere.
@@ -119,10 +145,18 @@ function O.PreviewClicked()
   if ns.Toast and ns.Toast.Preview then ns.Toast.Preview() end
 end
 
-local function addButton(what, name, text, onClick, tip)
+-- A button row. `text` and `tip` may be functions (evaluated each time the row is shown); `tags`
+-- are extra search strings; `predicate` (a function returning a plain boolean) disables the button
+-- while it returns false.
+local function addButton(what, name, text, onClick, tip, tags, predicate)
   if type(CreateSettingsButtonInitializer) ~= "function" then return false end
   return addExtra(what, function()
-    return CreateSettingsButtonInitializer(name, text, onClick, tip, true)
+    local initializer = CreateSettingsButtonInitializer(name, text, onClick, tip, true)
+    addTags(initializer, tags)
+    if predicate and type(initializer) == "table" and type(initializer.AddModifyPredicate) == "function" then
+      pcall(initializer.AddModifyPredicate, initializer, predicate)
+    end
+    return initializer
   end)
 end
 
@@ -157,6 +191,113 @@ local function addSignalButton()
     L["Sends a test signal through the beacon (and the chat log when it is on). Your NeedleDropper app shows a notification within 2 seconds if it can see the game."])
 end
 
+-- ------------------------------------------------------ Music services rows --
+-- DESIGN-v1.2.1 1.2. Every text comes from ns.MusicServices at the time the row is shown; the
+-- status lines are escaped there.
+
+local DOT = " \194\183 "
+
+local function music()
+  local MS = ns.MusicServices
+  if type(MS) == "table" then return MS end
+  return nil
+end
+
+-- Calls MusicServices.<name>(...), or returns `fallback` when it is missing or fails.
+local function ms(name, fallback, ...)
+  local MS = music()
+  if not (MS and type(MS[name]) == "function") then return fallback end
+  local ok, v = pcall(MS[name], ...)
+  if ok and v ~= nil then return v end
+  return fallback
+end
+
+-- "<text>" plus, when the app can't take requests now, why not (the disabled rows' tooltips).
+local function withReason(text)
+  local why = ms("SendBlocker", nil)
+  if type(why) == "string" and why ~= "" then return text .. "\n\n" .. why end
+  return text
+end
+
+function O.MusicStatusText() return ms("StatusWord", L["Music services"]) end
+function O.SpotifyText() return ms("SpotifyButtonText", L["Set up Spotify\226\128\166"]) end
+function O.CanSendActions() return ms("CanSendActions", false) == true end
+
+function O.MusicClicked() ms("OpenDialog") end
+function O.SpotifyClicked() ms("SpotifyButtonClicked") end
+function O.YouTubeSignInClicked() ms("Confirm", nil, "NEEDLEDROPPER_YOUTUBE_SIGNIN") end
+function O.TestSpotifyClicked() ms("Send", nil, "test-spotify") end
+function O.TestYouTubeClicked() ms("Send", nil, "test-youtube") end
+-- DESIGN-v1.2 4.9: ReloadUI only from a click, inside pcall.
+function O.RefreshClicked() pcall(ReloadUI) end
+
+function O.MusicStatusTip()
+  local lines = {}
+  for _, line in ipairs(ms("StatusLines", {})) do
+    if line ~= "" then lines[#lines + 1] = line end
+  end
+  lines[#lines + 1] = L["Click to open Music services."]
+  return table.concat(lines, "\n")
+end
+
+function O.SpotifyTip()
+  local MS = music()
+  if not MS then return L["Music services are not available."] end
+  local app = MS.App()
+  local _, kind = MS.SpotifyButton()
+  if app.state == "connected" then
+    local text = string.format(L["Connected as %s"], app.account and ns.EscapeText(app.account) or L["your account"])
+    if app.product then text = text .. string.format(L[" (%s)"], app.product == "premium" and L["Premium"] or ns.EscapeText(app.product)) end
+    local id = app.clientId or MS.StoredClientId()
+    if id then text = text .. DOT .. string.format(L["Client ID %s"], MS.ShortId(id)) end
+    return text .. ". " .. L["Click for Disconnect and Test."]
+  end
+  if kind == "connect" then
+    return L["The NeedleDropper app opens Spotify's sign-in page in your web browser. Approve it there."]
+  end
+  if not MS.KnownClientId() then
+    return withReason(L["Create your own free Spotify developer app and paste its Client ID: about 5 minutes, once."])
+  end
+  return MS.SpotifyLine(app) .. "\n" .. L["Click to open Music services."]
+end
+
+function O.YouTubeTip()
+  return withReason(L["Optional. The NeedleDropper app opens YouTube's sign-in page in its player box's browser. Signed in with YouTube Premium, YouTube songs play without ads."])
+end
+
+function O.TestSpotifyTip()
+  local app = ms("App", {})
+  if app.mode == "connect" then
+    return withReason(L["The NeedleDropper app plays 15 seconds of Toto \226\128\147 Africa on Spotify, or a Windows notification says why it can't."])
+  end
+  return withReason(L["The NeedleDropper app plays 15 seconds of Toto \226\128\147 Africa in its own Spotify player (no Spotify app needed), or a Windows notification says why it can't."])
+end
+
+function O.TestYouTubeTip()
+  return withReason(L["The NeedleDropper app opens the YouTube box in your corner and plays 15 seconds of Toto \226\128\147 Africa."])
+end
+
+-- Rows 1-3: between the section header and "Play music with".
+local function addMusicHead()
+  addButton("music status", L["NeedleDropper app"], O.MusicStatusText, O.MusicClicked, O.MusicStatusTip,
+    { "app", "companion", "status", "music" })
+  addButton("spotify account", L["Spotify account"], O.SpotifyText, O.SpotifyClicked, O.SpotifyTip,
+    { "Spotify", "account", "Client ID", "connect", "sign in", "Premium" })
+  addButton("youtube account", L["YouTube account"], L["Sign in to YouTube\226\128\166"], O.YouTubeSignInClicked,
+    O.YouTubeTip, { "YouTube", "sign in", "Premium", "ads" }, O.CanSendActions)
+end
+
+-- Rows 8-10: after "Resume my Spotify music afterwards".
+local function addMusicTail()
+  addButton("test spotify", L["Test Spotify"], L["Test Spotify"], O.TestSpotifyClicked, O.TestSpotifyTip,
+    { "test", "Spotify" }, O.CanSendActions)
+  addButton("test youtube", L["Test YouTube"], L["Test YouTube"], O.TestYouTubeClicked, O.TestYouTubeTip,
+    { "test", "YouTube" }, O.CanSendActions)
+  addButton("refresh status", L["Refresh status"], L["Reload UI"], O.RefreshClicked,
+    L["The game reads the NeedleDropper app's report only when the interface loads. Reload now to see the latest status here. Your soundtrack edits are saved first."],
+    { "reload", "refresh", "status" })
+end
+
 local function build()
   local category, layout = Settings.RegisterVerticalLayoutCategory("NeedleDropper")
   if type(category) ~= "table" then error("RegisterVerticalLayoutCategory returned nothing") end
@@ -165,7 +306,8 @@ local function build()
   for i = 1, #ns.SETTINGS do
     local meta = ns.SETTINGS[i]
     if not meta.advanced then
-      if SECTIONS[meta.key] then addHeader(SECTIONS[meta.key]) end
+      if SECTIONS[meta.key] then addHeader(L[SECTIONS[meta.key]]) end
+      if meta.key == MUSIC_BEFORE then addMusicHead() end
       local ok, err = pcall(addControl, category, meta)
       if ok then
         O.controls = O.controls + 1
@@ -176,6 +318,7 @@ local function build()
     end
     if meta.key == PREVIEW_AFTER then addPreviewButton() end
     if meta.key == SIGNAL_AFTER then addSignalButton() end
+    if meta.key == MUSIC_AFTER then addMusicTail() end
   end
   Settings.RegisterAddOnCategory(category)
   O.category = category

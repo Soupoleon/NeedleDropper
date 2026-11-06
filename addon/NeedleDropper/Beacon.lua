@@ -10,12 +10,22 @@ local ADDON, ns = ...
 -- pixel-to-UI factor and the frame's effective scale, with pixel-grid snapping on.
 --
 -- What is on screen (B.Pump):
---   * transient frames, first in first out, each held at least: FIRE 3 s, CANCEL / PING 1 s;
+--   * transient frames (FIFO A), first in first out, each held at least: FIRE 3 s, CANCEL / PING 1 s;
+--   * then an ARM's full-song window (below);
+--   * then CONFIG frames (queue B, DESIGN-v1.2.1 2.7): at most 4 waiting, each held 3 s (with an
+--     ACTION) or 2 s (PREFS only), shown only while FIFO A is empty and no ARM is in its full-song
+--     window. A FIFO-A event or a new ARM takes the screen at once; the CONFIG goes back to the head
+--     of queue B with its full hold. 8 s after an ACTION CONFIG first completes its hold, the same
+--     event is queued once more for 2 s (a capture missed behind an overlay, finding F2). With the
+--     beacon off, an ACTION CONFIG is shown anyway (ForceShow), like "Send a test signal";
 --   * otherwise the steady state of the newest event: HELLO (idle), ARM (the full song for 3 s
 --     of drawn time, then an ARM carrying only the placeKey), after a FIRE a HELLO with
 --     DROP_ACTIVE, after a CANCEL a HELLO. Synthesized steady frames reuse their event's seq
 --     (they are re-renderings, never emitted: no ns.Events entry, no chat line); TEST is
 --     cleared in them, and LOCAL_PLAYBACK unless DROP_ACTIVE is set.
+--   * Every HELLO drawn (emitted or synthesized) carries the music choices B.SetPrefs stored
+--     (PREFS) and, while DROP_ACTIVE is set, the playing drop's placeKey (decision D3, finding F2:
+--     if the FIRE's 3 s were covered, the app can still start the song it cached at ARM).
 --
 -- Clearance guard: the gap between the screen top and the player / target frame art is
 -- measured on PLAYER_ENTERING_WORLD, UI_SCALE_CHANGED, DISPLAY_SIZE_CHANGED, Edit Mode exit and
@@ -37,15 +47,24 @@ local MIN_PX, MAX_PX, DEFAULT_PX = 2, 4, 3   -- beaconCellPx range and default
 local MAX_CELLS = P2.MAX_COLS * P2.RowsCap(MIN_PX)   -- 448 textures at most
 local SONG_HOLD = 3.0                 -- ARM: full song this long (drawn time); FIRE: at least this long
 local SHORT_HOLD = 1.0                -- CANCEL / PING: at least this long
+local PLAYING_HOLD = 3.0              -- the playing HELLO (D3) before the next ARM's song window takes over
 local CLEAR_MARGIN = 2                -- physical px kept free above the measured art
 local CLEAR_LEFT = MAX_CELLS          -- art further right than 448 px is never under the strip
 local REMEASURE_AFTER = 1.0           -- measure once more after the UI has settled
 local FIFO_MAX = 64
 local EPS = 0.001
+local CONFIG_ACTION_HOLD = 3.0        -- queue B: a CONFIG with an ACTION
+local CONFIG_PREFS_HOLD = 2.0         -- queue B: a PREFS-only CONFIG
+local CONFIG_RESHOW_AFTER = 8.0       -- an ACTION CONFIG is shown once more this long after its hold
+local CONFIG_RESHOW_HOLD = 2.0
+local CONFIG_MAX = 4                  -- queue B holds this many
+local CONFIG_FORCE_MARGIN = 0.5       -- beacon off: an ACTION CONFIG is forced visible for hold + this
 
 local TRANSIENT_HOLD = { [EV.FIRE] = SONG_HOLD, [EV.CANCEL] = SHORT_HOLD, [EV.PING] = SHORT_HOLD }
 
 B.SONG_HOLD, B.SHORT_HOLD, B.MAX_CELLS = SONG_HOLD, SHORT_HOLD, MAX_CELLS
+B.CONFIG_ACTION_HOLD, B.CONFIG_PREFS_HOLD, B.CONFIG_RESHOW_AFTER, B.CONFIG_RESHOW_HOLD, B.CONFIG_MAX =
+  CONFIG_ACTION_HOLD, CONFIG_PREFS_HOLD, CONFIG_RESHOW_AFTER, CONFIG_RESHOW_HOLD, CONFIG_MAX
 B.CLEAR_MARGIN, B.CLEAR_LEFT, B.MIN_PX, B.MAX_PX, B.DEFAULT_PX = CLEAR_MARGIN, CLEAR_LEFT, MIN_PX, MAX_PX, DEFAULT_PX
 -- Regions whose top edge limits the strip's height, each falling back to its frame.
 B.CLEARANCE_REGIONS = {
@@ -63,6 +82,12 @@ B.gap = nil           -- measured clearance above the art (physical px), nil = n
 B.measured = nil      -- { at =, regions = { "PlayerFrame.FrameTexture", ... } }
 B.forceUntil = 0
 B.dropped = 0         -- transients dropped because the queue was full
+B.cfgQueue = {}       -- queue B: { ev =, hold =, action = bool, reshow = bool } waiting for the screen
+B.cfg = nil           -- { entry =, holdUntil = } the CONFIG on screen
+B.cfgReshows = {}     -- { entry =, at = } re-shows waiting for their time
+B.configDropped = 0   -- CONFIGs dropped because queue B was full
+B.prefs = nil         -- the music choices every drawn HELLO carries (B.SetPrefs), or nil
+B.playingKey = nil    -- placeKey of the last FIRE shown, while a drop plays (fallback for D3)
 local warnings = {}   -- [code] = text
 local laid = nil      -- { cols, cell, corner, placed } of the textures' current positions
 local gen = 0         -- wake-up generation: only the newest scheduled timer acts
@@ -356,16 +381,54 @@ local function shortArm(ev)
   return { type = EV.ARM, seq = ev.seq, flags = ev.flags, placeKey = pk, synthesized = "arm", t = ev.t }
 end
 
--- HELLO with DROP_ACTIVE after a FIRE's hold.
+-- placeKey of the drop that plays now: the Director's active drop, else the last FIRE shown.
+local function playingKey()
+  local D = ns.Director
+  local a = type(D) == "table" and D.active or nil
+  if type(a) == "table" and type(a.drop) == "table" then
+    local pk = P2.PlaceKey(a.drop.id)
+    if pk then return pk end
+  end
+  return B.playingKey
+end
+
+-- A HELLO as the beacon draws it (beacon-owned, never emitted): the music choices of B.SetPrefs and,
+-- while DROP_ACTIVE is set, the playing drop's placeKey (D3).
+local function hello(src, flags, placeKey, kind)
+  local f = type(flags) == "number" and floor(flags) % 256 or 0
+  if not P2.HasFlag(f, FLAG.DROP_ACTIVE) then placeKey = nil end
+  return { type = EV.HELLO, seq = src.seq, flags = f, placeKey = placeKey, prefs = B.prefs, synthesized = kind,
+           t = src.t }
+end
+
+-- HELLO with DROP_ACTIVE after a FIRE's hold, with the FIRE's placeKey.
 local function playingHello(ev)
   local f = type(ev.flags) == "number" and floor(ev.flags) % 256 or 0
   if not P2.HasFlag(f, FLAG.DROP_ACTIVE) then f = f + FLAG.DROP_ACTIVE end
-  return { type = EV.HELLO, seq = ev.seq, flags = quietFlags(f), synthesized = "playing", t = ev.t }
+  local pk = ev.placeKey
+  if type(pk) ~= "number" then pk = P2.PlaceKey(ev.dropId) end
+  return hello(ev, quietFlags(f), pk, "playing")
 end
 
--- HELLO after a CANCEL's hold (DROP_ACTIVE stays when another drop is still playing).
+-- LOCAL_PLAYBACK as the drop that plays now has it (the Director's active drop): a CANCEL of another
+-- place carries DROP_ACTIVE but not the playing drop's LOCAL_PLAYBACK (Emit.ComputeFlags), yet the HELLO
+-- drawn after it describes the playing drop -- without the flag a D3 late start would play its song
+-- over the in-game file (DESIGN-v1.2.1 2.7; review INGAME-3).
+local function playingLocal(flags)
+  if not P2.HasFlag(flags, FLAG.DROP_ACTIVE) then return flags end
+  local D = ns.Director
+  local a = type(D) == "table" and D.active or nil
+  if type(a) ~= "table" then return flags end
+  local has = P2.HasFlag(flags, FLAG.LOCAL_PLAYBACK)
+  if a.isLocal and not has then return flags + FLAG.LOCAL_PLAYBACK end
+  if not a.isLocal and has then return flags - FLAG.LOCAL_PLAYBACK end
+  return flags
+end
+
+-- HELLO after a CANCEL's hold. DROP_ACTIVE stays when another drop is still playing; then the HELLO
+-- carries that drop's placeKey and LOCAL_PLAYBACK, not the cancelled one's.
 local function idleHello(ev)
-  return { type = EV.HELLO, seq = ev.seq, flags = quietFlags(ev.flags), synthesized = "idle", t = ev.t }
+  return hello(ev, playingLocal(quietFlags(ev.flags)), playingKey(), "idle")
 end
 
 local function schedule(at)
@@ -378,6 +441,16 @@ local function schedule(at)
   end)
 end
 
+-- Schedules the next B.Pump at `at` or at the first CONFIG re-show due before it; nothing to wait
+-- for cancels the pending wake-up.
+local function wake(at)
+  local list = B.cfgReshows
+  for i = 1, #list do
+    if at == nil or list[i].at < at then at = list[i].at end
+  end
+  if at then schedule(at) else gen = gen + 1 end
+end
+
 local function pauseSteady(now)
   local st = B.steady
   if st and st.fullUntil then
@@ -386,39 +459,127 @@ local function pauseSteady(now)
   end
 end
 
+-- ----------------------------------------------------------------- queue B ----
+
+-- Keeps queue B at CONFIG_MAX: the oldest CONFIG without an ACTION goes first, else the oldest.
+local function trimConfigs()
+  local q = B.cfgQueue
+  while #q > CONFIG_MAX do
+    local victim = 1
+    for i = 1, #q do
+      if not q[i].action then
+        victim = i
+        break
+      end
+    end
+    table.remove(q, victim)
+    B.configDropped = B.configDropped + 1
+  end
+end
+
+local function queueConfig(entry, atHead)
+  if atHead then table.insert(B.cfgQueue, 1, entry) else B.cfgQueue[#B.cfgQueue + 1] = entry end
+  trimConfigs()
+end
+
+-- The CONFIG on screen gives way (to FIFO A or an ARM's song window): back to the head of queue B
+-- with its full hold.
+local function preemptConfig()
+  local c = B.cfg
+  if not c then return end
+  B.cfg = nil
+  queueConfig(c.entry, true)
+end
+
+-- A CONFIG completed its hold: an ACTION CONFIG's first showing earns one re-show.
+local function finishConfig(c)
+  B.cfg = nil
+  local e = c.entry
+  if e.action and not e.reshow and not e.reshowQueued then
+    e.reshowQueued = true
+    local again = { ev = e.ev, hold = CONFIG_RESHOW_HOLD, action = true, reshow = true }
+    B.cfgReshows[#B.cfgReshows + 1] = { entry = again, at = c.holdUntil + CONFIG_RESHOW_AFTER }
+  end
+end
+
+-- Re-shows whose time has come join queue B.
+local function promoteReshows(now)
+  local list = B.cfgReshows
+  local i = 1
+  while i <= #list do
+    if list[i].at <= now + EPS then
+      queueConfig(table.remove(list, i).entry)
+    else
+      i = i + 1
+    end
+  end
+end
+
+-- With the beacon setting off, an ACTION CONFIG is shown anyway (the "Send a test signal" pattern).
+local function forceConfig(entry)
+  if not entry.action or (ns.settings and ns.settings.beacon) then return end
+  local seconds = entry.hold + CONFIG_FORCE_MARGIN
+  if GetTime() + seconds > B.forceUntil then B.ForceShow(seconds) end
+end
+
 -- Draws whatever is due now and schedules the next change.
 function B.Pump()
   ensureFrame()
   local now = GetTime()
+  promoteReshows(now)
+  -- 1. a transient within its hold
   local tr = B.transient
   if tr and now < tr.holdUntil - EPS then
     draw(tr.ev, "transient")
-    schedule(tr.holdUntil)
-    return
+    return wake(tr.holdUntil)
   end
   B.transient = nil
+  -- 2. the next transient (FIFO A) takes the screen, from a CONFIG too
   local nextEv = table.remove(B.fifo, 1)
   if nextEv then
+    preemptConfig()
     pauseSteady(now)
     B.transient = { ev = nextEv, holdUntil = now + (nextEv.holdFor or TRANSIENT_HOLD[nextEv.type] or SHORT_HOLD) }
     draw(nextEv, "transient")
-    schedule(B.transient.holdUntil)
-    return
+    return wake(B.transient.holdUntil)
   end
+  -- 3. an ARM's full-song window comes before any CONFIG
   local st = B.steady
-  if st then
-    if st.fullLeft and st.fullLeft > EPS then
-      if not st.fullUntil then st.fullUntil = now + st.fullLeft end
-      if now < st.fullUntil - EPS then
-        draw(st.ev, "full")
-        schedule(st.fullUntil)
-        return
-      end
-      st.fullLeft, st.fullUntil = 0, nil
-    end
-    if st.after then draw(st.after, "short") else draw(st.ev, "steady") end
+  if st and st.fullUntil and now >= st.fullUntil - EPS then st.fullLeft, st.fullUntil = 0, nil end
+  if st and st.fullLeft and st.fullLeft > EPS then
+    preemptConfig()
+    if not st.fullUntil then st.fullUntil = now + st.fullLeft end
+    draw(st.ev, "full")
+    return wake(st.fullUntil)
   end
-  gen = gen + 1  -- nothing left to wait for
+  -- 4. queue B: the CONFIG on screen until its hold is over, then the next one
+  local c = B.cfg
+  if c and now >= c.holdUntil - EPS then
+    finishConfig(c)
+    c = nil
+  end
+  if not c then
+    local entry = table.remove(B.cfgQueue, 1)
+    if entry then
+      c = { entry = entry, holdUntil = now + entry.hold }
+      B.cfg = c
+      forceConfig(entry)
+    end
+  end
+  if c then
+    draw(c.entry.ev, "config")
+    return wake(c.holdUntil)
+  end
+  -- 5. the steady state
+  if st then
+    if st.after then
+      draw(st.after, "short")
+    else
+      draw(st.ev, "steady")
+      if not st.drawnAt then st.drawnAt = now end
+    end
+  end
+  return wake(nil)
 end
 
 -- Drops one queued transient when the queue is full: the oldest PING, else the oldest.
@@ -434,8 +595,9 @@ local function trimFifo(q)
   B.dropped = B.dropped + 1
 end
 
--- Shows Protocol2 event `ev` (from ns.Emit): FIRE / CANCEL / PING join the transient queue;
--- every event but PING also sets the steady state.
+-- Shows Protocol2 event `ev` (from ns.Emit): FIRE / CANCEL / PING join the transient queue (FIFO A),
+-- CONFIG joins queue B (it never changes the steady state); every other event but PING sets the
+-- steady state.
 function B.Show(ev)
   if type(ev) ~= "table" then return end
   -- A self-test sample (B.ShowSample) gives way to any real event at once.
@@ -444,21 +606,63 @@ function B.Show(ev)
     if B.fifo[i].sample then table.remove(B.fifo, i) end
   end
   local t = ev.type
+  if t == EV.CONFIG then
+    local action = ev.action ~= nil
+    queueConfig({ ev = ev, action = action, hold = action and CONFIG_ACTION_HOLD or CONFIG_PREFS_HOLD })
+    B.Pump()
+    return
+  end
   if TRANSIENT_HOLD[t] then
     local q = B.fifo
     q[#q + 1] = ev
     if #q > FIFO_MAX then trimFifo(q) end
   end
   if t == EV.ARM then
+    -- The Director arms the next place as soon as it fires one (a landmark, then the zone at the same
+    -- spot): the playing HELLO the FIRE's hold leads to would never be drawn, and with it the D3 late
+    -- start of a FIRE a cover hid. It gets its time on screen first, after the FIRE (review RP-3).
+    local prev = B.steady
+    if prev and type(prev.ev) == "table" and prev.ev.synthesized == "playing" then
+      local need = PLAYING_HOLD - (prev.drawnAt and (GetTime() - prev.drawnAt) or 0)
+      if need > EPS then
+        local q = B.fifo
+        local again = {}
+        for k, v in pairs(prev.ev) do again[k] = v end
+        again.holdFor = need
+        q[#q + 1] = again
+        if #q > FIFO_MAX then trimFifo(q) end
+      end
+    end
     B.steady = { ev = ev, fullLeft = SONG_HOLD, after = shortArm(ev) }
   elseif t == EV.FIRE then
-    B.steady = { ev = playingHello(ev) }
+    local h = playingHello(ev)
+    B.playingKey = h.placeKey
+    B.steady = { ev = h }
   elseif t == EV.CANCEL then
+    if not P2.HasFlag(ev.flags, FLAG.DROP_ACTIVE) then B.playingKey = nil end
     B.steady = { ev = idleHello(ev) }
+  elseif t == EV.HELLO then
+    if not P2.HasFlag(ev.flags, FLAG.DROP_ACTIVE) then B.playingKey = nil end
+    B.steady = { ev = hello(ev, ev.flags, playingKey(), nil) }
   elseif t ~= EV.PING then
     B.steady = { ev = ev }
   end
   B.Pump()
+end
+
+-- The music choices every HELLO the beacon draws carries (MusicServices: the four music settings
+-- once set in game), or nil. The HELLO on screen changes at once.
+function B.SetPrefs(prefs)
+  if type(prefs) == "table" then
+    B.prefs = { order = prefs.order, corner = prefs.corner, fade = prefs.fade, resume = prefs.resume }
+  else
+    B.prefs = nil
+  end
+  local st = B.steady
+  if st and type(st.ev) == "table" and st.ev.type == EV.HELLO then st.ev.prefs = B.prefs end
+  layoutVersion = layoutVersion + 1
+  local d = B.drawn
+  if d and B.frame then draw(d.ev, d.variant) end
 end
 
 -- /needle selftest beacon (DESIGN-v1.2 6.4 step 2): draws event `ev` -- never emitted, never part
@@ -487,7 +691,8 @@ function B.Layout()
   B.UpdateVisibility()
 end
 
--- Self-test: show the strip for `seconds` even if the beacon is disabled.
+-- Self-test, test signal and music requests: show the strip for `seconds` even if the beacon is
+-- disabled.
 function B.ForceShow(seconds)
   seconds = (type(seconds) == "number" and seconds > 0) and seconds or 60
   B.forceUntil = GetTime() + seconds
@@ -534,6 +739,11 @@ function B.Status()
     current = d and d.ev or nil,
     queued = #B.fifo,
     dropped = B.dropped,
+    configQueued = #B.cfgQueue,
+    configReshows = #B.cfgReshows,
+    configDropped = B.configDropped,
+    configShown = B.cfg ~= nil,
+    prefs = B.prefs,
     warnings = B.Warnings(),
   }
 end

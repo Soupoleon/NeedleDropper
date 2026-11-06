@@ -700,7 +700,8 @@ def test_options_panel_has_title_card_sliders_headers_and_a_preview_button():
         for v, text in labels.items():
             assert o.formatter(v) == text, (key, v)
     headers = [e["name"] for e in els if e["kind"] == "header"]
-    assert headers == ["Needle drops", "Playback", "Title card", "Companion link", "Troubleshooting"]
+    # 1.2.1: the Music services section sits between Needle drops and Playback (DESIGN-v1.2.1 1.2)
+    assert headers == ["Needle drops", "Music services", "Playback", "Title card", "Companion link", "Troubleshooting"]
     i = next(i for i, e in enumerate(els) if e["kind"] == "header" and e["name"] == "Title card")
     section = [(e["kind"], e["variable"] or e["buttonText"]) for e in els[i + 1:i + 6]]
     assert section == [("checkbox", "NeedleDropper_toast"), ("slider", "NeedleDropper_toastScale"),
@@ -708,8 +709,9 @@ def test_options_panel_has_title_card_sliders_headers_and_a_preview_button():
                        ("button", "Preview")]
     shown = [m for m in h.from_lua(h.ns.SETTINGS) if not m.get("advanced")]   # beaconCorner: /needle set only
     assert h.ns.Options.controls == len(shown) and h.ns.Options.controlErrors == 0
-    # 5 section headers + Open NeedleDropper + the title card Preview + Send a test signal
-    assert h.ns.Options.extras == 8
+    # 6 section headers + Open NeedleDropper + the title card Preview + Send a test signal + the six
+    # Music services buttons (1.2.1: rows 1-3 and 8-10 of DESIGN-v1.2.1 1.2)
+    assert h.ns.Options.extras == 15
     button = els[i + 5]
     button["click"]()                                    # Preview: a card for where you are
     assert h.toast_texts() == ["D U R O T A R", "Preview"]

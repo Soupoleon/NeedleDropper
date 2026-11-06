@@ -14,7 +14,8 @@ lua51 = pytest.importorskip("lupa.lua51")
 
 UI_DIR = ADDON_DIR / "UI"
 UI_FILES = sorted(p.name for p in UI_DIR.glob("*.lua"))
-EXPECTED = ["Drops.lua", "Journal.lua", "ShareDialogs.lua", "Soundtracks.lua", "Window.lua"]
+# 1.2.1: MusicDialog.lua, the Music services dialog (DESIGN-v1.2.1 1.3), joins the window's files.
+EXPECTED = ["Drops.lua", "Journal.lua", "MusicDialog.lua", "ShareDialogs.lua", "Soundtracks.lua", "Window.lua"]
 
 ALLOWED_TEMPLATES = {
     "ButtonFrameTemplate": "Frame", "PanelTabButtonTemplate": "Button", "PanelResizeButtonTemplate": "Button",
@@ -84,7 +85,7 @@ def _without_comments(src):
     return "".join(out)
 
 
-def test_ui_folder_holds_exactly_the_five_files():
+def test_ui_folder_holds_exactly_the_six_files():  # 1.2.1: five became six (MusicDialog.lua)
     assert UI_FILES == EXPECTED
 
 

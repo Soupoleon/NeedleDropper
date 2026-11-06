@@ -25,7 +25,7 @@ Before pasting:
 | License | MIT |
 | Source code | <https://github.com/Soupoleon/NeedleDropper> |
 | Issues | <https://github.com/Soupoleon/NeedleDropper/issues> |
-| The app (download) | <https://github.com/Soupoleon/NeedleDropper/releases/latest> |
+| The app (download) | <https://github.com/Soupoleon/NeedleDropper/releases> |
 | Main category | Audio & Video |
 
 Other summaries, if a site wants a shorter or a longer one:
@@ -70,19 +70,21 @@ In *Death Stranding*, Hideo Kojima saves his licensed songs for a few rare momen
 - **Share codes:** a whole soundtrack as one piece of text to paste into Discord. Friends see a preview before they import it.
 - **A journal** of every song you've heard, with replay and "play again next visit".
 - **Three ways to play:** Spotify Premium or YouTube through the free NeedleDropper app, or your own audio files right inside WoW.
+- **Music services in the game's settings:** see the app's status, set up Spotify, choose *Play music with* (Spotify first, YouTube first, only one, or neither) and the YouTube box's corner, and test both services without leaving the game.
+- **`/needle report`** gives you a text report of your setup to paste into a bug report.
 
 ## How it works
 
 1. **You curate in game.** The NeedleDropper window shows which song plays where. Change one, add a place or switch soundtracks.
 2. **The addon notices** when you arrive somewhere new (the game's "Discovered: …" message, or a short stay in a zone you've never explored) and waits for a calm moment.
 3. **The moment comes:** it fades out the zone music, shows the title card, and either plays your own audio file in WoW or hands the song to the app through a tiny strip of coloured squares in the top-left corner of the game window.
-4. **The app plays it.** The optional NeedleDropper app for Windows reads that strip from the screen and plays the song in your Spotify app, or in a small YouTube player window. It never touches the game itself.
+4. **The app plays it.** The optional NeedleDropper app for Windows reads that strip from the screen and plays the song in its own hidden Spotify player (no Spotify window, and the game keeps the focus), or in a small YouTube player window. It never touches the game itself.
 
 ## Requirements
 
 - **World of Warcraft: Forever.** On its own, the addon shows the title cards and plays songs from your own audio files (.mp3 or .ogg, copied into `Interface\AddOns\NeedleDropper_Local\media`).
-- **For Spotify and YouTube songs, the free NeedleDropper app** for Windows 10 and 11 (64-bit). It is a separate download from GitHub and is **not included in this addon download**: [download the app](https://github.com/Soupoleon/NeedleDropper/releases/latest). It needs no installation; its one-time Connect page sets everything up, then it waits in the tray.
-  - **Spotify:** Spotify Premium, the Spotify app, and a free Spotify developer app of your own. The Connect page walks you through it in about two minutes. NeedleDropper ships no shared Spotify key.
+- **For Spotify and YouTube songs, the free NeedleDropper app** for Windows 10 and 11 (64-bit). It is a separate download from GitHub and is **not included in this addon download**: [download the app](https://github.com/Soupoleon/NeedleDropper/releases). It needs no installation; its one-time Connect page sets everything up, then it waits in the tray.
+  - **Spotify:** Spotify Premium, Google Chrome (the app's Spotify player runs in it; the Spotify app doesn't need to be open), and a free Spotify developer app of your own. The Connect page, or the Music services section in the game's settings, walks you through it in about two minutes. NeedleDropper ships no shared Spotify key.
   - **YouTube:** nothing to set up. A small player window shows the video while the song plays; YouTube's rules say it must stay visible.
 - Built-in songs are Spotify and YouTube songs, so to hear them you need the app.
 
@@ -112,7 +114,10 @@ The app isn't code-signed yet, so Windows SmartScreen doesn't know it. Click **M
 Spotify only lets registered apps control playback, and a new app allows at most 5 users. One shared NeedleDropper app would stop working after the fifth player, so each player registers a free app of their own. The Connect page shows you how.
 
 **Does it work with free Spotify?**
-No: Spotify only allows playback control for Premium accounts. YouTube works for everyone.
+No: Spotify's player for apps works only for Premium accounts. YouTube works for everyone.
+
+**Does a Spotify window pop up?**
+No. The app plays Spotify songs in a hidden player of its own (it needs Google Chrome), and Spotify lists it among your devices as *NeedleDropper*. The only window NeedleDropper ever shows while you play is the small YouTube box, while a YouTube song plays.
 
 **Will it play songs all the time?**
 No. A song plays only the first time you arrive somewhere, at most every 10 minutes by default, and only at a calm moment. Most of the time, the world is as quiet as you're used to.
@@ -140,7 +145,7 @@ NeedleDropper is a fan project. It is not affiliated with or endorsed by Blizzar
 
 ## Links
 
-- **The NeedleDropper app (Windows):** https://github.com/Soupoleon/NeedleDropper/releases/latest
+- **The NeedleDropper app (Windows):** https://github.com/Soupoleon/NeedleDropper/releases
 - **Install guide:** https://github.com/Soupoleon/NeedleDropper/blob/main/docs/INSTALL.md
 - **Troubleshooting:** https://github.com/Soupoleon/NeedleDropper/blob/main/docs/TROUBLESHOOTING.md
 - **Report a bug or suggest an idea:** https://github.com/Soupoleon/NeedleDropper/issues
@@ -156,7 +161,7 @@ mentioning in one line:
 
 > NeedleDropper's title cards and in-game audio files work on their own. For Spotify and YouTube
 > songs, also install the free NeedleDropper app for Windows from
-> <https://github.com/Soupoleon/NeedleDropper/releases/latest> (not included in this download).
+> <https://github.com/Soupoleon/NeedleDropper/releases> (not included in this download).
 
 ## Checklist before publishing the page
 

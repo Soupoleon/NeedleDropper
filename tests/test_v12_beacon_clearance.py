@@ -78,7 +78,8 @@ def test_design_clearance_table_keeps_three_rows_at_3_px(ui_scale, phys_h, gap):
     assert h.status()["gap"] == pytest.approx(gap, abs=0.06)
     assert h.status()["maxRows"] == 3
     h.emit(ET.FIRE, LIONS_PRIDE)
-    assert drawn(h) == (3, 3, 113) and warnings(h) == []
+    # 4-byte frame check (F1): every frame 2 bytes longer (was 113)
+    assert drawn(h) == (3, 3, 115) and warnings(h) == []
 
 
 def test_no_art_measured_means_the_nominal_caps():
@@ -86,7 +87,7 @@ def test_no_art_measured_means_the_nominal_caps():
     st = h.status()
     assert "gap" not in st and st["maxRows"] == 3
     h.emit(ET.FIRE, LIONS_PRIDE)
-    assert drawn(h) == (3, 3, 113)
+    assert drawn(h) == (3, 3, 115)  # 4-byte frame check (F1): every frame 2 bytes longer (was 113)
 
 
 def test_smallest_gap_of_player_and_target_frames_counts():
@@ -130,14 +131,14 @@ def test_falls_back_to_the_frame_when_the_art_is_missing_or_unreadable():
 def test_remeasured_on_each_trigger_and_again_after_a_second(trigger):
     h = harness(art={"topPx": 20})
     h.emit(ET.FIRE, LIONS_PRIDE)
-    assert drawn(h) == (3, 3, 113)
+    assert drawn(h) == (3, 3, 115)  # 4-byte frame check (F1): every frame 2 bytes longer (was 113)
     h.art("PlayerFrame", topPx=6)  # the player moved the frame up in Edit Mode
     if trigger == "EditMode.Exit":
         h.trigger_registry("EditMode.Exit")
     else:
         h.fire(trigger)
     assert h.status()["gap"] == pytest.approx(6)
-    assert drawn(h) == (2, 2, 59)  # redrawn at once for the new clearance
+    assert drawn(h) == (2, 2, 61)  # redrawn at once for the new clearance (59 before the 4-byte check, F1)
     h.art("PlayerFrame", topPx=30)
     h.advance(1.1)  # the second measurement, once the UI has settled
     assert h.status()["gap"] == pytest.approx(30)
@@ -151,21 +152,24 @@ def test_edit_mode_callback_is_registered_with_an_owner_table():
 # ------------------------------------------------------------ the policy --
 
 @pytest.mark.parametrize("gap,px,event,want", [
+    # Every frame is 2 bytes longer with the 4-byte frame check (finding F1): 115 / 61 / 143 / 9 / 34
+    # were 113 / 59 / 141 / 7 / 32. Rows and cell sizes are unchanged except the CANCEL below.
     # ample clearance: the nominal frame at the configured size
-    (30, 3, "fire", (3, 3, 113, 1)),
-    (30, 4, "fire", (4, 2, 59, 1)),
-    (30, 2, "fire", (2, 4, 141, 1)),
+    (30, 3, "fire", (3, 3, 115, 1)),
+    (30, 4, "fire", (4, 2, 61, 1)),
+    (30, 2, "fire", (2, 4, 143, 1)),
     # 8 px: 3 px x 2 rows only -- small frames stay at 3 px, the song moves to 2 px cells (3 rows)
-    (8, 3, "hello", (3, 1, 7, 1)),
-    (8, 3, "fire", (2, 3, 113, 2)),
+    (8, 3, "hello", (3, 1, 9, 1)),
+    (8, 3, "fire", (2, 3, 115, 2)),
     # 6 px: one 3 px row / two 2 px rows -- the song is fitted to two rows of 2 px cells (<= 81 B)
-    (6, 3, "fire", (2, 2, 59, 3)),
-    (6, 3, "cancel", (3, 1, 38, 1)),
-    (6, 4, "fire", (2, 2, 59, 2)),
-    (6, 2, "fire", (2, 2, 59, 3)),
+    (6, 3, "fire", (2, 2, 61, 3)),
+    # the 25-character id's CANCEL is 40 B now (38 before), over one row's 39 B: two 2 px rows
+    (6, 3, "cancel", (2, 2, 40, 2)),
+    (6, 4, "fire", (2, 2, 61, 2)),
+    (6, 2, "fire", (2, 2, 61, 3)),
     # 5 px: one row at any size -- the song is fitted to one row of 2 px cells (39 B: YouTube kept)
-    (5, 3, "fire", (2, 1, 32, 3)),
-    (5, 3, "hello", (3, 1, 7, 1)),
+    (5, 3, "fire", (2, 1, 34, 3)),
+    (5, 3, "hello", (3, 1, 9, 1)),
 ])
 def test_rows_and_cell_size_follow_the_clearance(gap, px, event, want):
     h = harness(px, art={"topPx": gap})
@@ -189,7 +193,8 @@ def test_preferred_provider_decides_which_id_survives_one_row():
     ev = h.emit(ET.FIRE, LIONS_PRIDE)
     assert ev["prefer"] == "spotify"
     st = h.status()
-    assert (st["cellPx"], st["lastFrameBytes"], st["rows"], st["overflow"]) == (2, 43, 2, True)  # 43 B > 39 B
+    # 45 B > 39 B (43 before the 4-byte frame check, F1)
+    assert (st["cellPx"], st["lastFrameBytes"], st["rows"], st["overflow"]) == (2, 45, 2, True)
     f = h.beacon_decoded()
     assert f.spotify_id == SPOTIFY_ID and f.youtube_id is None and (f.start_ds, f.length_ds) == (120, 950)
     assert any("does not fit above your player frame" in w for w in warnings(h))
@@ -198,7 +203,8 @@ def test_preferred_provider_decides_which_id_survives_one_row():
     h.set_companion("premium-required")
     h.emit(ET.FIRE, LIONS_PRIDE)
     f = h.beacon_decoded()
-    assert h.status()["lastFrameBytes"] == 32 and f.youtube_id == YT_ID and f.spotify_id is None
+    # 34 B: 32 before the 4-byte frame check (F1)
+    assert h.status()["lastFrameBytes"] == 34 and f.youtube_id == YT_ID and f.spotify_id is None
 
 
 @pytest.mark.parametrize("gap", [3.9, 3, 1, -4])
@@ -207,7 +213,8 @@ def test_warning_when_even_one_2px_row_overlaps(gap):
     assert warnings(h) == [OVERLAP]
     h.emit(ET.FIRE, LIONS_PRIDE)
     st = h.status()
-    assert (st["cellPx"], st["rows"]) == (2, 1) and st["lastFrameBytes"] == 32  # one row anyway
+    # one row anyway; 34 B (32 before the 4-byte frame check, F1)
+    assert (st["cellPx"], st["rows"]) == (2, 1) and st["lastFrameBytes"] == 34
     assert h.beacon_decoded() is not None
     h.art("PlayerFrame", topPx=30)  # moved down in Edit Mode: the warning clears
     h.trigger_registry("EditMode.Exit")
@@ -227,7 +234,7 @@ def test_other_corners_are_not_measured():
     h.set_setting("beaconCorner", "BOTTOMRIGHT")
     assert "gap" not in h.status() and h.status()["maxRows"] == 3
     h.emit(ET.FIRE, LIONS_PRIDE)
-    assert drawn(h) == (3, 3, 113)
+    assert drawn(h) == (3, 3, 115)  # 4-byte frame check (F1): every frame 2 bytes longer (was 113)
 
 
 @pytest.mark.parametrize("scale", [1.0, 1.25, 1.5])
@@ -250,7 +257,8 @@ def test_choose_is_a_pure_function_of_event_px_and_gap():
                   "artist": "Low Roar", "title": "I'll Keep Coming", "startMs": 12000, "lengthMs": 95000,
                   "volume": 80, "label": "Lion's Pride Inn", "setId": "my-drops"})
     choose = h.ns.Beacon.Choose
-    for px, gap, want in [(3, None, (3, 113, 1)), (3, 8, (2, 113, 2)), (3, 6, (2, 59, 3)), (4, None, (4, 59, 1)),
-                          (2, 6, (2, 59, 3)), (9, None, (4, 59, 1)), (1, None, (2, 141, 1)), (3, 5, (2, 32, 3))]:
+    # each frame 2 bytes longer than with the old 2-byte trailer (finding F1)
+    for px, gap, want in [(3, None, (3, 115, 1)), (3, 8, (2, 115, 2)), (3, 6, (2, 61, 3)), (4, None, (4, 61, 1)),
+                          (2, 6, (2, 61, 3)), (9, None, (4, 61, 1)), (1, None, (2, 143, 1)), (3, 5, (2, 34, 3))]:
         c = choose(ev, px, gap, "TOPLEFT")
         assert (c.px, len(c.bytes), c.step) == want, (px, gap)

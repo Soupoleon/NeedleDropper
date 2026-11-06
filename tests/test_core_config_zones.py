@@ -17,13 +17,16 @@ def test_default_config_matches_spec():
         "packs": [str(config.REPO_ROOT / "packs" / "azeroth-unbound.json")],
         "packsDisabled": [],
         "providers": ["spotify", "local", "youtube"],
-        "spotify": {"enabled": True, "clientId": "", "redirectPort": 8321, "deviceName": "", "fade": True,
+        # 1.2.1 (D6): "device" -- Spotify plays in the app's own player ("app") or on a Connect device
+        "spotify": {"enabled": True, "clientId": "", "redirectPort": 8321, "device": "app", "deviceName": "", "fade": True,
                     "restorePrevious": True, "volume": None},
         "local": {"enabled": True, "mediaDir": "%APPDATA%\\NeedleDropper\\media"},
         "youtube": {"enabled": True},
         # playerCorner: where the YouTube player window shows (real-client #8: top-right by default)
         "deck": {"port": 8322, "autoOpen": "youtube", "browser": "edge", "playerPosition": "",
                  "playerCorner": "topright", "panelOnStart": "first-run"},
+        # 1.2.1 (DESIGN-v1.2.1 3.2): the music choices the game sends ("Play music with", fade)
+        "music": {"order": "spotify-youtube", "fade": True, "fromGame": False},
         # v1.2: the capture region is the client area's top-left 512 x 48 px (DESIGN-v1.2 2.3)
         "transport": {"pixel": {"enabled": True, "method": "auto", "hz": 4, "regionW": 512, "regionH": 48},
                       "chatlog": {"enabled": True, "pollMs": 250, "match": "strict"}},

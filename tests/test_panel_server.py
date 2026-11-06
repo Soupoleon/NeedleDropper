@@ -169,7 +169,7 @@ def test_api_errors_are_reported_not_fatal(deck):
 
 def test_playback_commands_go_to_player_clients_only(deck):
     panel = SSE(deck.port, "panel").pump()
-    player = SSE(deck.port, "player").pump()
+    player = SSE(deck.port, "player", key=deck.player_key).pump()  # v1.2.1 ON-1: the launch key
     try:
         assert wait_for(lambda: deck.panel_count == 1 and deck.player_count == 1)
         assert deck.send({"cmd": "play", "playId": "p", "source": "youtube", "videoId": "x"}) == 1
@@ -190,7 +190,17 @@ def test_open_panels_do_not_count_as_a_player(deck):
     try:
         assert wait_for(lambda: deck.panel_count == 1)
         assert not deck.connected and not deck.page_open and deck.player_count == 0
-        player = SSE(deck.port, None)  # no ?client= -> a player (v1.0 pages)
+        # v1.2.1 review ON-1: a player page without this start's launch key (left by an earlier start, a v1.0
+        # page, opened by hand) is told to retire and never counts as the player
+        stale = SSE(deck.port, None)
+        try:
+            assert stale.status == 200 and stale.next_data() == {"cmd": "retire"}
+            with pytest.raises(EOFError):
+                stale.next_data(timeout=2)
+            assert not deck.player_connected and not deck.page_open
+        finally:
+            stale.close()
+        player = SSE(deck.port, None, key=deck.player_key)  # no ?client= -> a player
         try:
             assert wait_for(lambda: deck.player_connected)
             assert deck.connected and deck.page_open
@@ -207,7 +217,7 @@ def test_panels_are_nudged_when_a_player_connects(deck):
     panel = SSE(deck.port, "panel").pump()
     try:
         assert wait_for(lambda: deck.panel_count == 1)
-        player = SSE(deck.port, "player")
+        player = SSE(deck.port, "player", key=deck.player_key)  # v1.2.1 ON-1: the launch key
         assert wait_for(lambda: any(m == {"cmd": "state", "what": "player"} for m in panel.messages))
         player.close()
     finally:
@@ -217,7 +227,7 @@ def test_panels_are_nudged_when_a_player_connects(deck):
 def test_replay_differs_by_client_kind(deck):
     deck.send({"cmd": "show", "dropId": "zone:1", "label": "L"})
     deck.send({"cmd": "play", "playId": "p1", "source": "local", "url": "u", "startMs": 0})
-    panel, player = SSE(deck.port, "panel"), SSE(deck.port, "player")
+    panel, player = SSE(deck.port, "panel"), SSE(deck.port, "player", key=deck.player_key)  # ON-1 key
     try:
         assert panel.next_data()["cmd"] == "show"
         assert [player.next_data()["cmd"], player.next_data()["cmd"]] == ["show", "play"]
@@ -236,7 +246,8 @@ def test_open_player_builds_the_app_window_command(deck, monkeypatch, tmp_path):
     assert deck.open_player() == "edge"
     args = deck.launched[-1]
     assert args[0].endswith("msedge.exe")
-    assert f"--app=http://127.0.0.1:{deck.port}/player" in args
+    # D12: YouTube error 150 from 127.0.0.1; ON-1 / RCOMP-3: the launch key in the address fragment
+    assert f"--app=http://localhost:{deck.port}/player#k={deck.player_key}" in args
     assert "--window-size=420,380" in args and "--window-position=1500,40" in args
     assert f"--user-data-dir={tmp_path / 'deck-browser'}" in args
     deck.configure_player(clear_position=True)

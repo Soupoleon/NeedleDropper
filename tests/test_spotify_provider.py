@@ -56,17 +56,19 @@ def test_pick_device_order():
 
 def test_available_and_can_play(tmp_path):
     drop = make_drop()
-    no_id = SpotifyProvider({"clientId": ""}, SimpleNamespace(app_dir=tmp_path), http=FakeHTTP())
+    # connect mode: without the in-app player (no deck) app mode could never play (test_spotify_inapp.py)
+    cm = {"device": "connect"}
+    no_id = SpotifyProvider({"clientId": "", **cm}, SimpleNamespace(app_dir=tmp_path), http=FakeHTTP())
     assert not no_id.available() and "setup" in no_id.unavailable_reason()
-    not_logged = SpotifyProvider({"clientId": "cid"}, SimpleNamespace(app_dir=tmp_path), http=FakeHTTP())
+    not_logged = SpotifyProvider({"clientId": "cid", **cm}, SimpleNamespace(app_dir=tmp_path), http=FakeHTTP())
     assert not not_logged.available() and not not_logged.can_play(drop)
     assert "spotify-login" in not_logged.unavailable_reason()
     save_tokens(tmp_path)
-    p = SpotifyProvider({"clientId": "cid"}, SimpleNamespace(app_dir=tmp_path), http=FakeHTTP())
+    p = SpotifyProvider({"clientId": "cid", **cm}, SimpleNamespace(app_dir=tmp_path), http=FakeHTTP())
     assert p.available() and p.can_play(drop)
     assert p.can_play(make_drop(spotify=None))                      # title + artist -> search
     assert not p.can_play(make_drop(spotify=None, artist=""))
-    other = SpotifyProvider({"clientId": "someone-else"}, SimpleNamespace(app_dir=tmp_path), http=FakeHTTP())
+    other = SpotifyProvider({"clientId": "someone-else", **cm}, SimpleNamespace(app_dir=tmp_path), http=FakeHTTP())
     assert not other.available()                                     # token belongs to another app
 
 

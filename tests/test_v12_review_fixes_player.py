@@ -101,8 +101,10 @@ def test_the_window_is_found_by_the_launched_process_tree_and_made_never_activat
     assert pw.hwnd == 9
     style = win32.styles[9]
     assert style & W.WS_EX_NOACTIVATE and style & W.WS_EX_TOOLWINDOW and not style & W.WS_EX_APPWINDOW
+    # parked: shown off every monitor, not topmost (D14 fallback: the SDK plays nothing in a hidden window)
     hide = win32.calls[-1]
-    assert hide[0] == "pos" and hide[1] == 9 and hide[5] & W.SWP_HIDEWINDOW and hide[5] & W.SWP_NOACTIVATE
+    assert hide[0] == "pos" and hide[1] == 9 and hide[5] & W.SWP_SHOWWINDOW and hide[5] & W.SWP_NOACTIVATE
+    assert not hide[5] & W.SWP_HIDEWINDOW and hide[2] == W.HWND_NOTOPMOST and hide[3] < 0 and hide[4] < 0
     assert not pw.shown
 
 
@@ -138,7 +140,8 @@ def test_show_is_topmost_at_the_games_monitor_corner_and_never_activates():
     pw.position = (100, 200)                                        # deck.playerPosition wins
     pw.show()
     assert win32.calls[-1][3:5] == (100, 200)
-    assert pw.hide() and win32.calls[-1][5] & W.SWP_HIDEWINDOW
+    # parked off screen instead of hidden (D14 fallback)
+    assert pw.hide() and win32.calls[-1][2] == W.HWND_NOTOPMOST and win32.calls[-1][3] < 0
 
 
 def test_hide_later_is_cancelled_by_a_new_song():
@@ -154,7 +157,7 @@ def test_hide_later_is_cancelled_by_a_new_song():
     win32.calls.clear()
     gate.set()
     time.sleep(0.2)
-    assert not any(c[0] == "pos" and c[5] & W.SWP_HIDEWINDOW for c in win32.calls)
+    assert not any(c[0] == "pos" and c[2] == W.HWND_NOTOPMOST for c in win32.calls)  # no park (D14 fallback)
 
 
 def test_a_closed_window_is_forgotten_and_close_posts_wm_close():
@@ -351,6 +354,7 @@ def test_the_app_prepares_the_player_window_when_youtube_is_on():
                                                             player_opening=False),
                                  providers=[types.SimpleNamespace(name="youtube")], _player_thread=None)
     fake._youtube_enabled = lambda: Companion._youtube_enabled(fake)
+    fake._player_needed = lambda: Companion._player_needed(fake)  # 1.2.1: in-app Spotify needs it too (D6)
     Companion._prepare_player(fake)
     fake._player_thread.join(2)
     assert calls == [1]
@@ -359,9 +363,13 @@ def test_the_app_prepares_the_player_window_when_youtube_is_on():
     Companion._prepare_player(fake)
     assert fake._player_thread is None and calls == [1]
     fake.deck.auto_open = "youtube"
-    fake.providers = [types.SimpleNamespace(name="spotify")]       # no YouTube: no window
+    fake.providers = [types.SimpleNamespace(name="spotify", mode="connect")]  # no YouTube, no in-app Spotify
     Companion._prepare_player(fake)
     assert fake._player_thread is None
+    fake.providers = [types.SimpleNamespace(name="spotify", mode="app")]  # in-app Spotify plays in the window
+    Companion._prepare_player(fake)
+    fake._player_thread.join(2)
+    assert calls == [1, 1]
 
 
 

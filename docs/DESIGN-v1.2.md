@@ -133,7 +133,7 @@ Secondary channels, none of them needed for playback:
 
 | Event | When | TLVs |
 |---|---|---|
-| HELLO | idle; after a drop ends | none. 7 bytes. While a drop plays: flag `DROP_ACTIVE` |
+| HELLO | idle; after a drop ends | none. 9 bytes (v1.2.1: 7 with 1.2.0's 2-byte trailer). While a drop plays: flag `DROP_ACTIVE` and (v1.2.1) the playing drop's `PLACE_KEY`; once music choices are set in game, `PREFS` (DESIGN-v1.2.1) |
 | ARM | the Director arms a candidate | first 3 s: the full song; afterwards: `PLACE_KEY` only |
 | FIRE | first-visit drop, Test, Replay, `/needle play`, `/needle test` (drop id `test`) | the full song, fitted (§2.3); `TEST` flag for Test, Replay and `/needle test`; `LOCAL_PLAYBACK` when the game plays the file itself |
 | CANCEL | disarm, stop, skip, long combat, death | `PLACE_KEY`, `DROP_ID` |
@@ -185,7 +185,8 @@ height     rows × cellPx ≤ 9 px:  2 px → 4 rows, 3 px → 3 rows, 4 px → 
 width      columns are a multiple of 16, 16..112, chosen per frame:
            rows = ceil(cells / 112) (capped as above); cols = 16 · ceil(ceil(cells / rows) / 16),
            where cells = 7 lead cells + ceil(frameBytes · 8 / 3).
-capacity   at 112 columns under the 9 px cap: 2 px = 165 B, 3 px = 123 B, 4 px = 81 B (frame bytes, 7-byte overhead included).
+capacity   at 112 columns under the 9 px cap: 2 px = 165 B, 3 px = 123 B, 4 px = 81 B (frame bytes, 9-byte overhead
+           included since v1.2.1's 4-byte frame check; 7 bytes before).
 anchors    P2.CORNERS (TOPLEFT, TOPRIGHT, BOTTOMLEFT, BOTTOMRIGHT) stay in the protocol. Only TOPLEFT appears
            in the UI. beaconCorner is an ns.SETTINGS entry flagged advanced = true: Options.lua skips such
            entries, and /needle set beaconCorner still accepts it. Bottom-left likely overlaps Forever's
@@ -194,25 +195,27 @@ anchors    P2.CORNERS (TOPLEFT, TOPRIGHT, BOTTOMLEFT, BOTTOMRIGHT) stay in the p
            an estimate).
 ```
 
-**Measured** by running `Protocol2.lua` under lupa (`P2.EncodeFrame` / `P2.RowsFor`):
+**Measured** by running `Protocol2.lua` under lupa (`P2.EncodeFrame` / `P2.RowsFor`), with v1.2.1's 4-byte frame check
+(every frame 2 bytes longer than in 1.2.0; docs/PROTOCOL-v2.md §4.3 keeps this table current):
 
 | Frame | Bytes | Rows at 112 cols | Strip at 3 px |
 |---|---|---|---|
-| HELLO | 7 | 1 | 96 × 3 |
-| CANCEL `zone:1429` | 22 | 1 | 240 × 3 |
-| FIRE, bundled Mixtape drop (YouTube + query + length) | 60 | 2 | 288 × 6 |
-| ... same plus label and setId | 86 | 3 | 240 × 9 |
-| FIRE Spotify + YouTube + query + start + length + volume | 95 | 3 | 288 × 9 |
-| FIRE user drop with every field (`sub:1429:lion-s-pride-inn`) | 141 | 4, over the cap | fitted to 113 B → 336 × 9 |
-| Worst case (all fields at their caps) | 262 | 7 | fitted to ≤ 123 B |
+| HELLO | 9 | 1 | 96 × 3 |
+| CANCEL `zone:1429` | 24 | 1 | 240 × 3 |
+| FIRE, bundled Mixtape drop (YouTube + query + length) | 62 | 2 | 288 × 6 |
+| ... same plus label and setId | 88 | 3 | 288 × 9 |
+| FIRE Spotify + YouTube + query + start + length + volume | 97 | 3 | 288 × 9 |
+| FIRE user drop with every field (`sub:1429:lion-s-pride-inn`) | 143 | 4, over the cap | fitted to 115 B → 336 × 9 |
+| Worst case (all fields at their caps) | 224 (chat) | 6 | fitted to ≤ 123 B |
 
 **Fit rule.** When the frame is over capacity, remove fields in this order until it fits:
 
 1. Drop `setId`.
 2. Drop `label`.
-3. Drop `query`, if a Spotify or YouTube id is present.
+3. Drop `query`, if the preferred provider's id is present (v1.2.1, finding F4; before: any id).
 4. Drop `dropId` (`placeKey` stays).
-5. Shorten `query` on a UTF-8 boundary (`P2.Utf8Truncate`).
+5. Shorten `query`: artist and title separately, each on a UTF-8 boundary and keeping at least 8 bytes, the
+   `0x1F` separator always kept; else drop the whole query (v1.2.1, finding F3; before: cut the tail).
 6. Drop `volume`.
 7. Keep only the preferred provider's id: Spotify if `NeedleDropper_Companion` says Spotify is connected, else YouTube.
 
@@ -257,7 +260,8 @@ This order **replaces** the 255-byte fit order now in `Protocol2.lua` and `proto
 - **Large strip on screen:** about 6 s per drop, with drops at least 10 minutes apart (default cooldown).
 - **Texture pool:** created lazily, up to 448 cells (112 × 4).
 - **Companion acceptance:** two identical valid reads (the v1 rule).
-  - Valid means: header, geometry, whitening pad bits, magic, version, TLV structure and Fletcher-16.
+  - Valid means: header, geometry, whitening pad bits, magic, version, TLV structure and the frame check (v1.2.1: a
+    4-byte polynomial check replaced Fletcher-16, finding F1; docs/PROTOCOL-v2.md §4.2).
   - Capture region: the top-left 512 × 48 px of the client area.
   - The whitened magic and checksum reject foreign strips such as CraftPresence or Dwow (top-left; neither ships a 16001 TOC) [companions].
 - **Privacy:** no character names, chat or realm in frames. Labels are place names.
@@ -419,6 +423,7 @@ This keeps SPEC-v1.2 §A's override and disable rules but reverses the order: th
   - `tinsert(UISpecialFrames, "NeedleDropperFrame")`, and the same for each dialog, so Escape closes them through `CloseSpecialWindows` (L1104-L1116).
   - Never `ShowUIPanel`, never `UIPanelWindows`.
 - **Combat:** hide on `PLAYER_REGEN_DISABLED`; reopen on `PLAYER_REGEN_ENABLED` if the player hadn't closed the window (WeakAuras pattern [in-game-editors]). Text being edited is kept, because no frame is destroyed.
+- **v1.2.1:** a 16 px drum (`Interface\Icons\INV_Misc_Drum_01`) left of the gear opens the Music services dialog (DESIGN-v1.2.1 §1.3); `/needle report` opens a report dialog built like Share (DESIGN-v1.2.1 §1.6a).
 - **Tabs:**
   - Three `PanelTabButtonTemplate` buttons: **Drops | Soundtracks | Journal**.
   - Tab 1 is anchored `TOPLEFT` to the frame's `BOTTOMLEFT` (5, 2).
@@ -530,6 +535,7 @@ With no link and no companion, the tooltip explains: "Spotify and YouTube songs 
 - Add an **Open NeedleDropper** row at the top (`CreateSettingsButtonInitializer(name, text, onClick, tooltip, true)`).
 - "Companion link": pixel beacon, beacon cell size (2-4), chat-log channel, padding, and **Send a test signal** (PING + TEST; "your NeedleDropper app shows a notification within 2 seconds if it can see the game").
 - No content editing goes in Settings: canvas pages aren't searchable, and closing Settings returns to the Game Menu [in-game-editors].
+- v1.2.1: a **Music services** section between "Needle drops" and "Playback" (DESIGN-v1.2.1 §1.2): the app's status, the Spotify and YouTube accounts, the four music settings, Test Spotify, Test YouTube, Refresh status.
 
 ### 4.8 Entry points (changes to `Core.lua`)
 
@@ -538,7 +544,8 @@ With no link and no companion, the tooltip explains: "Spotify and YouTube songs 
   - `help` lists the commands;
   - new: `add [Artist - Title | link]`, `soundtracks`, `journal` (opens the tab; `journal print` gives the old chat list), `import`, `share [name]`;
   - `selftest` gains `share`;
-  - every existing subcommand keeps working.
+  - every existing subcommand keeps working;
+  - v1.2.1: `music [status|connect [clientId]|disconnect|test spotify|test youtube|youtube]` and `report` (DESIGN-v1.2.1 §1.6, §1.6a).
 - **Compartment** (TOC lines in §4.1):
   - `NeedleDropper_OnAddonCompartmentClick(addonName, buttonName)`: left-click opens or closes the window, right-click opens Settings.
   - `…Enter(addonName, button)`: `GameTooltip:SetOwner(button, "ANCHOR_LEFT")`. Lines: what's playing or waiting, or the cooldown; the active soundtracks; app status; "Left-click: open · Right-click: settings".

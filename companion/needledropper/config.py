@@ -26,6 +26,23 @@ v1.2 keys (the Connect page changes only ``wowRoot``, ``setupComplete``,
   soundtracks; these only feed ``needledropper validate`` / ``test-drop`` and the
   one-time migration of v1.1 packs into the game.
 
+v1.2.1 keys:
+
+* ``spotify.device`` -- where Spotify songs play: ``"app"`` (default) in the app's own
+  player, the Spotify Web Playback SDK in the hidden player window (the Connect device
+  "NeedleDropper"; it needs Google Chrome and a sign-in from 1.2.1 or later), or
+  ``"connect"`` to control another Spotify Connect device (the desktop app, a phone;
+  ``spotify.deviceName`` picks one), the 1.2.0 behaviour.
+* ``music`` -- the player's music choices, **set in game** (Options > AddOns > NeedleDropper >
+  Music services; DESIGN-v1.2.1 3.2): the game sends them and the app writes them here, together
+  with ``deck.playerCorner`` (the YouTube box position) and ``spotify.restorePrevious`` ("Resume
+  my Spotify music afterwards"). ``music.order`` is "Play music with": ``"spotify-youtube"``
+  (default), ``"youtube-spotify"``, ``"spotify"``, ``"youtube"`` or ``"none"``; ``music.fade``
+  (default ``true``) fades songs in and out (``fadeInMs`` / ``fadeOutMs``; ``false`` starts and
+  stops them at once); ``music.fromGame`` is ``true`` once the game has sent its choices (from
+  then on the game's fade choice also rules Spotify's own ``spotify.fade``). Values edited here
+  are replaced by the game's at its next choice.
+
 v1.1 keys:
 
 * ``deck.autoOpen`` -- the small YouTube player window: ``"youtube"`` (default) and
@@ -87,6 +104,10 @@ DEFAULT_FLAVOR = "_forever_"
 BUNDLED_PREFIX = "builtin:"
 
 AUTO_OPEN_MODES = ("youtube", "always", "never")
+#: ``spotify.device``: play in the app's own player (the Web Playback SDK) or control a Connect device.
+SPOTIFY_DEVICE_MODES = ("app", "connect")
+#: ``music.order``: "Play music with" (the same names and order as protocol2.PREFS_ORDERS).
+MUSIC_ORDERS = ("spotify-youtube", "youtube-spotify", "spotify", "youtube", "none")
 PLAYER_CORNERS = ("topright", "topleft", "bottomright", "bottomleft")
 PANEL_ON_START_MODES = ("first-run", "always", "never")
 CHATLOG_MATCH_MODES = ("strict", "anywhere")
@@ -99,12 +120,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "packs": [str(DEFAULT_PACK)],
     "packsDisabled": [],
     "providers": ["spotify", "local", "youtube"],
-    "spotify": {"enabled": True, "clientId": "", "redirectPort": 8321, "deviceName": "", "fade": True,
+    "spotify": {"enabled": True, "clientId": "", "redirectPort": 8321, "device": "app", "deviceName": "", "fade": True,
                 "restorePrevious": True, "volume": None},
     "local": {"enabled": True, "mediaDir": "%APPDATA%\\NeedleDropper\\media"},
     "youtube": {"enabled": True},
     "deck": {"port": 8322, "autoOpen": "youtube", "browser": "edge", "playerPosition": "",
              "playerCorner": "topright", "panelOnStart": "first-run"},
+    "music": {"order": "spotify-youtube", "fade": True, "fromGame": False},
     "transport": {"pixel": {"enabled": True, "method": "auto", "hz": 4, "regionW": 512, "regionH": 48},
                   "chatlog": {"enabled": True, "pollMs": 250, "match": "strict"}},
     "fadeInMs": 2500,
@@ -232,6 +254,13 @@ def normalize_config(cfg: dict[str, Any]) -> dict[str, Any]:
     corner = deck.get("playerCorner")
     deck["playerCorner"] = _enum(corner.strip().lower().replace("-", "") if isinstance(corner, str) else corner,
                                  PLAYER_CORNERS, "topright")
+    spotify = _section(cfg, "spotify")
+    spotify["device"] = _enum(spotify.get("device"), SPOTIFY_DEVICE_MODES, "app")
+    music = _section(cfg, "music")
+    music["order"] = _enum(music.get("order"), MUSIC_ORDERS, "spotify-youtube")
+    for key, default in (("fade", True), ("fromGame", False)):
+        if not isinstance(music.get(key), bool):
+            music[key] = default
     transport = _section(cfg, "transport")
     chat = transport.get("chatlog")
     if isinstance(chat, dict):
@@ -280,6 +309,39 @@ def provider_enabled(cfg: dict[str, Any], name: str) -> bool:
     """The panel's per-service switch (``<name>.enabled``, default on)."""
     sec = cfg.get(name)
     return not (isinstance(sec, dict) and sec.get("enabled") is False)
+
+
+def _int_ms(value: Any, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return default
+
+
+def effective_fades(cfg: dict[str, Any]) -> tuple[int, int]:
+    """``(fade_in_ms, fade_out_ms)`` for the engine: ``fadeInMs`` / ``fadeOutMs`` while
+    ``music.fade`` (the game's "Fade songs in and out") is on, ``(0, 0)`` when it is off."""
+    music = cfg.get("music") if isinstance(cfg.get("music"), dict) else {}
+    if music.get("fade") is False:
+        return 0, 0
+    return (_int_ms(cfg.get("fadeInMs", 2500), 2500), _int_ms(cfg.get("fadeOutMs", 3000), 3000))
+
+
+def music_choices(cfg: dict[str, Any]) -> dict[str, Any]:
+    """The music choices in effect (DESIGN-v1.2.1 3.10 ``music.prefs``): ``order``, ``corner``,
+    ``fade``, ``resume`` and ``fromGame`` (whether the game has sent them yet)."""
+    music = cfg.get("music") if isinstance(cfg.get("music"), dict) else {}
+    deck = cfg.get("deck") if isinstance(cfg.get("deck"), dict) else {}
+    spotify = cfg.get("spotify") if isinstance(cfg.get("spotify"), dict) else {}
+    order = music.get("order")
+    corner = deck.get("playerCorner")
+    return {"order": order if order in MUSIC_ORDERS else "spotify-youtube",
+            "corner": corner if corner in PLAYER_CORNERS else "topright",
+            "fade": music.get("fade") is not False,
+            "resume": spotify.get("restorePrevious") is not False,
+            "fromGame": music.get("fromGame") is True}
 
 
 def parse_position(value: Any) -> Optional[tuple[int, int]]:

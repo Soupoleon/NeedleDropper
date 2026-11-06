@@ -261,7 +261,14 @@ def build_providers(cfg: dict, paths: Paths, deck: Any, *, out: Out = say, spoti
                     out(f"  Spotify support is not available ({exc}); continuing without it.")
                     continue
                 kw = {"http": spotify_http} if spotify_http is not None else {}
-                result.append(SpotifyProvider(cfg.get("spotify") or {}, paths, **kw))
+                sp_cfg = dict(cfg.get("spotify") or {})
+                music = cfg.get("music") if isinstance(cfg.get("music"), dict) else {}
+                if music.get("fromGame") is True and isinstance(music.get("fade"), bool):
+                    # The game's "Fade songs in and out" also rules Spotify's own fade switch
+                    # (DESIGN-v1.2.1 3.2); "off" is enforced by the engine's zero fades anyway.
+                    sp_cfg["fade"] = music["fade"]
+                # deck: in-app Spotify plays in the deck's player page (D6)
+                result.append(SpotifyProvider(sp_cfg, paths, deck=deck, **kw))
             elif name == "local":
                 result.append(LocalProvider(cfg.get("local") or {}, paths, deck))
             elif name == "youtube":
@@ -608,7 +615,7 @@ def cmd_spotify_login(args: argparse.Namespace, ctx: Optional[Ctx] = None) -> in
     port = int(sp.get("redirectPort") or 8321)
     if not sp.get("clientId"):
         say("Spotify needs a (free) developer app of your own:\n"
-            "  1. Open https://developer.spotify.com/dashboard and create an app (Web API).\n"
+            "  1. Open https://developer.spotify.com/dashboard and create an app (tick Web API and Web Playback SDK).\n"
             f"  2. Add the redirect URI exactly: http://127.0.0.1:{port}/callback\n"
             "  3. Copy the app's Client ID here. (Playback control requires Spotify Premium.)\n"
             "  (Easier: open the Connect page with `needledropper setup`.)")
@@ -843,6 +850,10 @@ def _serve(ctx: Ctx, args: argparse.Namespace, session: _LogSession, Deck: Any, 
                f"NeedleDropper another port in {ctx.config_file or config_path()} (\"deck\": {{\"port\": 8323}}).",
                dialog=tray_mode)
         return EXIT_FAIL
+    # The never-activating player window manager (deck/window.py): without it the player window stays a
+    # normal visible Chrome window that took the focus, and Quit leaves its browser running. Before the
+    # Companion, whose _configure_deck gives it the corner.
+    attach_player_window(deck)
     app = Companion(ctx.cfg, ctx.paths, deck=deck, config_file=ctx.config_file,
                     out=(say if sys.stdout is not None else None))
     quit_event = threading.Event()
@@ -1067,7 +1078,8 @@ def _test_drop(ctx: Ctx, args: argparse.Namespace) -> int:
     try:
         if getattr(frame, "youtube_id", None) and any(p.name == "youtube" for p in providers) and not args.no_window:
             how = deck.open_player()
-            say(f"  Player: {deck.player_url} ({'opened' if how != 'none' else 'open it yourself'})")
+            # the address with its launch key: a page opened without it is told to retire (review ON-1)
+            say(f"  Player: {deck.player_launch_url} ({'opened' if how != 'none' else 'open it yourself'})")
             say("  Waiting up to 15 s for the player window to connect...")
             deck.wait_player(15)
         from .engine import Engine

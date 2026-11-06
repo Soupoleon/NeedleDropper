@@ -12,7 +12,8 @@ LOGIN_TIME = 1762365600  # time() at login in the shim (SHIM.EPOCH)
 
 
 def data(**kw):
-    d = {"schema": 1, "appVersion": "1.2.0", "written": LOGIN_TIME - 125,
+    # 1.2.1: an app older than 1.2.1 counts as outdated (it reads no 1.2.1 frame, DESIGN-v1.2.1 2.11)
+    d = {"schema": 1, "appVersion": "1.2.1", "written": LOGIN_TIME - 125,
          "status": {"spotify": "connected", "youtube": True, "transports": {"pixel": True, "chatlog": False}},
          "tracks": {}}
     d.update(kw)
@@ -43,17 +44,19 @@ def test_no_app_data():
 def test_current_app_status_line():
     h = harness(data())
     st = h.call1("Companion.Status")
-    assert st == {"present": True, "appVersion": "1.2.0", "written": LOGIN_TIME - 125, "spotify": "connected",
+    assert st == {"present": True, "appVersion": "1.2.1", "written": LOGIN_TIME - 125, "spotify": "connected",
                   "youtube": True, "transports": {"pixel": True, "chatlog": False}, "outdated": False}
-    assert h.call1("Companion.StatusLine") == "App seen 2 min before login · Spotify connected"
+    # 1.2.1: the line also says whether YouTube plays (DESIGN-v1.2.1 1.1, Companion.StatusLine)
+    assert h.call1("Companion.StatusLine") == "App seen 2 min before login · Spotify connected · YouTube ready"
     assert h.call1("Companion.SpotifyConnected") is True
 
 
+# 1.2.1: every line ends with the YouTube part (DESIGN-v1.2.1 1.1, Companion.StatusLine)
 @pytest.mark.parametrize("age, spotify, line", [
-    (5, "not-connected", "App seen just before login · Spotify not connected"),
-    (3 * 3600 + 5, "premium-required", "App seen 3 h before login · Spotify needs Premium"),
-    (4 * 86400, "error", "App seen 4 days before login · Spotify needs you to sign in again"),
-    (-30, None, "App seen just before login"),
+    (5, "not-connected", "App seen just before login · Spotify not connected · YouTube ready"),
+    (3 * 3600 + 5, "premium-required", "App seen 3 h before login · Spotify needs Premium · YouTube ready"),
+    (4 * 86400, "error", "App seen 4 days before login · Spotify needs you to sign in again · YouTube ready"),
+    (-30, None, "App seen just before login · YouTube ready"),
 ])
 def test_status_line_variants(age, spotify, line):
     status = {"youtube": True}
@@ -63,16 +66,18 @@ def test_status_line_variants(age, spotify, line):
     assert h.call1("Companion.StatusLine") == line
 
 
+# 1.2.1: 1.2.0 and 1.2.1 frames can't read each other (D1 / D2), so the minimum app is 1.2.1.
 @pytest.mark.parametrize("version, outdated", [
     ("1.1.0", True), ("1.1.9-beta", True), ("0.9", True), ("1", True), ("garbage", True),
-    ("1.2.0", False), ("1.2", False), ("1.10.0", False), ("2.0.0", False), ("1.2.0-rc1", False),
+    ("1.2.0", True), ("1.2", True), ("1.2.0-rc1", True), ("1.2.1", False), ("1.2.1-rc1", False),
+    ("1.2.1.dev0", False), ("1.2.10", False), ("1.10.0", False), ("2.0.0", False),
 ])
 def test_old_apps_are_asked_to_update(version, outdated):
     h = harness(data(appVersion=version))
     assert h.call1("Companion.IsOutdated", version) is outdated
     line = h.call1("Companion.StatusLine")
     if outdated:
-        assert line == "Update the NeedleDropper app to 1.2 to play Spotify and YouTube songs"
+        assert line == "Update the NeedleDropper app to 1.2.1 to play Spotify and YouTube songs"
     else:
         assert line.startswith("App seen")
 

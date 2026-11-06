@@ -37,7 +37,25 @@ def test_not_found_names_the_song_as_the_drop_spells_it(shell):
     assert "No match for Low Roar – I'll Keep Coming (Elwynn Forest) on Spotify" in note.text
 
 
-def test_a_stuck_spotify_app_is_reported_once_per_half_hour(shell):
+def test_a_stuck_spotify_app_is_reported_once_per_half_hour(tmp_path, _needledropper_home):
+    # connect mode (the desktop app): 1.2.1 plays Spotify in the app by default, which words it otherwise
+    shell = make_shell(tmp_path, Path(_needledropper_home), cfg_extra={"spotify": {"device": "connect"}})
+    try:
+        _stuck_spotify_app_reported_once(shell)
+    finally:
+        shell.close()
+
+
+def test_a_stuck_in_app_spotify_names_no_spotify_app(shell):
+    on_status = shell.engines.current.on_status
+    on_status({"running": True, "change": {"kind": "spotifyStuck", "provider": "spotify", "artist": "Toto",
+                                           "title": "Africa", "detail": "no progress within 3 s"}})
+    note = [n for n in shell.app.notifier.history if n.kind == tray.NOTE_SPOTIFY_STUCK][-1]
+    assert note.title == "Spotify didn't start" and "NeedleDropper's player" in note.text
+    assert "restart" not in note.text.lower() and "YouTube plays" in note.text
+
+
+def _stuck_spotify_app_reported_once(shell):
     on_status = shell.engines.current.on_status
     change = {"kind": "spotifyStuck", "provider": "spotify", "artist": "Toto", "title": "Africa",
               "detail": STUCK_MESSAGE}

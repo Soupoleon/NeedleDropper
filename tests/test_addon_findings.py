@@ -32,7 +32,8 @@ DROPS = [
      "title": "Dust", "artist": "Farmer", "durationMs": 30000},
 ]
 SET = make_set(DROPS)
-APP = {"schema": 1, "appVersion": "1.2.0", "written": 1762365000, "status": {"spotify": "connected", "youtube": True}}
+# 1.2.1: an app older than 1.2.1 counts as outdated (it reads no 1.2.1 frame, DESIGN-v1.2.1 2.11)
+APP = {"schema": 1, "appVersion": "1.2.1", "written": 1762365000, "status": {"spotify": "connected", "youtube": True}}
 
 
 def ids(evs):

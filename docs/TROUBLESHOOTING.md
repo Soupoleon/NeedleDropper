@@ -15,11 +15,13 @@ Start with three quick checks:
    only checks the link. No notification? See [Beacon not detected](#beacon-not-detected).
 
 You only need the app for Spotify and YouTube songs. Title cards and in-game audio files work
-without it.
+without it. Reporting a problem? `/needle report` gives you a text to paste
+([more](#where-the-logs-are)).
 
 **Contents:** [Beacon not detected](#beacon-not-detected) · [Drops don't start](#drops-dont-start) ·
 [Zone music](#zone-music-doesnt-come-back) · [Editing drops](#editing-drops-in-game) ·
-[Share codes](#share-codes) · [Spotify](#spotify) · [YouTube](#youtube) ·
+[Share codes](#share-codes) · [Music services in game](#music-services-in-game) ·
+[Spotify](#spotify) · [YouTube](#youtube) ·
 [Chat-log link](#chat-log-link) · [The app](#the-needledropper-app) ·
 [Installing the addon](#installing-the-addon) · [Logs](#where-the-logs-are) ·
 [Command reference](#needle-command-reference) · [In-game options](#in-game-options) ·
@@ -31,13 +33,20 @@ without it.
 Spotify or YouTube song follows.
 
 The app reads the **beacon**: a strip of coloured squares in the very top-left corner of the game
-window. Most of the time it is a 96 × 3 pixel strip; when a song starts it grows to at most
-336 × 9 pixels for a few seconds, because it carries the song itself. Anything that hides or
-changes those pixels breaks the link.
+window. Most of the time it is a 96 × 3 pixel strip (144 × 3 once you choose a music setting in
+game, and while a drop plays); when a song starts it grows to at most 336 × 9 pixels for a few
+seconds, because it carries the song itself. A request from the game's Music services (Connect, a
+test) shows a one-row strip of up to 336 × 3 pixels for a few seconds. (All sizes are for the
+default 3 px squares.) Anything that hides or changes those pixels breaks the link.
 
 1. **Is the app running?** Look for the NeedleDropper icon in the notification area of the taskbar
    (it may be under the **^** arrow). The app waits quietly until the World of Warcraft: Forever
    window exists and only then starts reading; give it a few seconds after the game opens.
+   **Just updated?** The addon and the app must be the same version family: from 1.2.1 on, an older
+   addon and a newer app (or the other way round) can't read each other's signals. The Connect page's
+   World of Warcraft card then says *Addon too old*, the tray tooltip says *Update the NeedleDropper
+   addon*, and in game the footer says *Update the NeedleDropper app*. Update the one that is older,
+   then restart World of Warcraft.
 2. **Run `/needle selftest beacon`.** It sends a test signal (the app shows its notification), shows
    the largest song strip for 10 seconds and prints the beacon's cell size, rows, strip size and the
    measured gap above your player frame. It waits while a song (or the `/needle test` card) is
@@ -85,7 +94,7 @@ warns: *the beacon overlaps your player frame: move the frame in Edit Mode or se
   bottom of the screen; the **Classic** layout keeps it in the top-left corner.
 - **`beaconCorner`** is an advanced setting (`/needle set beaconCorner …`, not in the Settings
   panel) that moves the strip to another corner of the screen. Leave it at `topleft`: the
-  NeedleDropper 1.2 app looks for the beacon in the top-left corner.
+  NeedleDropper app looks for the beacon in the top-left corner.
 
 ## Drops don't start
 
@@ -120,15 +129,18 @@ state in words: *heard* (with a tick), *needs a song*, *off*, *overridden*.
 - Does the drop have a source? The letters next to it in the Drops tab show what it has: **S**
   Spotify, **Y** YouTube, **F** in-game file. A drop with only Artist and Title plays only through
   Spotify (the app searches for it), so without Spotify it stays silent.
-- Did the app show a notification such as *song not found on Spotify* or *YouTube video can't be
-  embedded*? See [Spotify](#spotify) and [YouTube](#youtube).
-- The footer says *Update the NeedleDropper app to 1.2 to play Spotify and YouTube songs*: the app
-  on your PC is older than the addon. Update it ([how](INSTALL.md#updating)).
+- Did the app show a notification such as *song not found on Spotify*, *Spotify didn't start* or
+  *YouTube video can't be embedded*? See [Spotify](#spotify) and [YouTube](#youtube).
+- *Play music with* (Options → AddOns → NeedleDropper → Music services) is *Neither*, or *Spotify
+  only* / *YouTube only* and the drop has nothing for that service: then only the title card shows.
+- The footer says *Update the NeedleDropper app to 1.2.1 to play Spotify and YouTube songs*: the app
+  on your PC is older than the addon, and a 1.2.0 app can't read a 1.2.1 addon's signals. Update it
+  ([how](INSTALL.md#updating)).
 - The zone music keeps playing under the title card, and `/needle status` says *card only (zone
-  music left on)*: when the game started, NeedleDropper had no word from a 1.2 app (the footer says
-  *NeedleDropper app not found*), so it doesn't fade the zone music for a song that nothing may
-  play. Start the app before the game, or turn on *Fade zone music without the app*
-  (`/needle set duckWithoutApp on`) if the app runs anyway.
+  music left on)*: when the game started, NeedleDropper had no word from a 1.2.1 app (the footer says
+  *NeedleDropper app not found*, or asks you to update it), so it doesn't fade the zone music for a
+  song that nothing may play. Start the app before the game, or turn on *Fade zone music without the
+  app* (`/needle set duckWithoutApp on`) if the app runs anyway.
 
 **Music plays but there is no title card:** title cards may be off (`/needle toast on`), or the
 game UI is hidden (Alt+Z hides the card with the rest of the UI). `/needle toast` shows a preview.
@@ -201,46 +213,85 @@ When you already have the same soundtrack from the same author and the code is n
 offers **Update <name>** instead, which keeps its on/off state and its place in your list. More
 in [Share codes](PACKS.md#share-codes).
 
+## Music services in game
+
+The **Music services** section of *Options → AddOns → NeedleDropper* and its dialog (`/needle music`)
+send requests to the app through the beacon (or the chat-log link). The game learns the result only
+when it reads the app's report again, at login or after **Refresh status** (which reloads the
+interface); the Windows notifications tell you at once.
+
+| You see | What it means | What to do |
+|---|---|---|
+| *Sent to the NeedleDropper app (…)*, then nothing for 10 seconds | The app didn't get the request: it isn't running, or it can't see the beacon | Check its tray icon, then **Send a test signal** (the app should show a notification). See [Beacon not detected](#beacon-not-detected) |
+| Spotify's sign-in page doesn't show after **Connect Spotify** | Windows opened it behind the game (borderless games keep the front) | Press Alt+Tab, or click the app's *Spotify sign-in* notification: it brings the page forward |
+| *Not sent: update the NeedleDropper app to 1.2.1 first.* | The app's last report came from an older version | [Update the app](INSTALL.md#updating), then **Refresh status** |
+| *Not sent: install the NeedleDropper app first (see the addon page).* | The game has never seen a report from the app | [Install the app](INSTALL.md#3-optional-the-needledropper-app), start it before the game (or restart the game once) |
+| *Just sent: give it a moment.* | The same button was pressed less than 5 seconds ago | Wait a moment |
+| *A Client ID is 32 characters: digits and the letters a-f…* | The Client ID box holds something else, often the Client secret or a part of the ID | Copy the **Client ID** from your app's page in the [Spotify dashboard](https://developer.spotify.com/dashboard) again |
+| Last request: *…the NeedleDropper app didn't receive this request…* | The app's report is newer than the request but doesn't mention it | Check the link with **Send a test signal**, then try again |
+| Last request: *…no report from the NeedleDropper app since…* | The game hasn't read a report written after the request | Wait for the Windows notification, then press **Refresh status** |
+| Notification: *NeedleDropper ignored a repeated request from the game* | The same request came too often (each at most once per 10 seconds; Connect and the YouTube sign-in at most 5 times in 10 minutes) | Wait a minute and try again |
+| Notification: *NeedleDropper ignored a Disconnect for a different Spotify app* | The Disconnect named another Client ID than the app's | Use **Sign out of Spotify** on the Connect page |
+| **Disconnect…** stays greyed out: *Disconnect it on the app's Connect page.* | The app's Client ID isn't a standard 32-character one, so the game can't name it | Use **Sign out of Spotify** on the Connect page |
+| A test doesn't play (the notification and the *Last request* line say why) | For example *Needle drops are paused in the NeedleDropper app (tray menu): resume them to test.*, *A needle drop is playing. Try the test when it ends.*, or the app's player isn't running yet | Do what it says, then test again |
+| The rows show an old state | They show the app's report from your login | Press **Refresh status** |
+
 ## Spotify
 
-Setup steps and details: [Music services → Spotify](PROVIDERS.md#spotify-premium).
+Setup steps and details: [Music services → Spotify](PROVIDERS.md#spotify-premium). NeedleDropper
+plays Spotify songs in its own hidden player (Google Chrome needed), shown in Spotify's device lists
+as **NeedleDropper**, unless you picked another device under **Play on**.
 
 | Error or notification | Meaning | Fix |
 |---|---|---|
 | **403** (*Premium needed* on the Spotify card) | Not a Premium account, or the app's owner no longer has Premium. The card's **Premium** line says which plan the account has | Use Premium |
 | *Account not allowed* on the Spotify card | The account isn't on your developer app's **User Management** list | [Add the account](PROVIDERS.md#signing-in-with-a-different-spotify-account-user-management) to your app |
-| **Sign in again** on the Spotify card | Your sign-in comes from NeedleDropper 1.1, which didn't ask for the account's plan and country (Spotify then answers searches with "Insufficient client scope") | Click **Sign in again** and approve |
-| Notification: *Spotify isn't starting songs — restart the Spotify app* | Spotify accepted the song but never started it (its buttons often look greyed out). On the test PC Spotify's Windows app did this with every song, from the Microsoft Store and from spotify.com alike, while Spotify's Web Player played them. The drop then played on YouTube, if it has a video, and YouTube plays first for the rest of the session; the app checks Spotify quietly as you approach places and uses it again once it plays | Quit the Spotify app completely and start it again, play and pause any song once. If it keeps happening, open Spotify's Web Player (`open.spotify.com`) in a browser, play and pause a song there, and pick it under **Play on** on the Connect page. The notification comes at most every 30 minutes |
-| **404** / no active device | No Spotify device is online | Open the Spotify app on this PC, play and pause any song once, then pick it under **Play on** on the Spotify card |
+| **Sign in again** on the Spotify card (*Needs attention*); *Spotify: sign in again* in game; the notification *Sign in to Spotify again* | Your sign-in comes from NeedleDropper 1.2.0 or older. Playing in the app needs two more permissions (`streaming`, `user-read-email`); a 1.1 sign-in also lacks the plan and country (Spotify then answers searches with "Insufficient client scope"). Meanwhile Spotify songs play on YouTube | Click **Sign in again** and approve. Your Client ID stays |
+| *Spotify can't play in NeedleDropper's player: install Google Chrome, or wait a minute for Chrome's Widevine component* (in game: *Spotify needs Google Chrome*) | The app's Spotify player runs in Google Chrome and needs its Widevine component. Microsoft Edge can't run it | Install Google Chrome. If it is installed, start it once and wait a minute (it downloads Widevine), then quit and restart the NeedleDropper app |
+| *NeedleDropper's player isn't running yet: it starts by itself when World of Warcraft isn't the window in front* | The player window is made only while the game is not in front (a new window takes the focus for a moment) | Start the app before the game, or switch away from the game for a moment: the app makes the player within a few minutes |
+| *NeedleDropper's player is switched off (deck.autoOpen is "never" in config.json)* | You switched the player window off | Set `deck.autoOpen` back to `youtube` in `config.json` and restart the app |
+| *Spotify's player could not load (offline, or blocked by a firewall)* | Chrome couldn't load Spotify's player script from `sdk.scdn.co` | Check the connection; let Chrome reach `sdk.scdn.co` and `*.spotify.com` through your firewall or filter |
+| Notification: *Spotify didn't start*; in game *Spotify: a song didn't start in NeedleDropper's player* | Spotify accepted a song, but the app's player didn't start it within 3 seconds. The drop played on YouTube, and YouTube plays first for the rest of the session; the app checks its player again by itself, at most once a minute | **Test Spotify** (in game or on the Connect page) checks it. If it keeps happening, quit the app and start it again, and look for `Spotify` lines in `needledropper.log` |
+| *Spotify refused NeedleDropper's player even with a fresh sign-in* | Spotify's player rejected the sign-in twice | Sign in to Spotify again on the Connect page |
+| Notification: *Spotify isn't starting songs — restart the Spotify app* | Only when **Play on** is another device: Spotify accepted the song but never started it (its buttons often look greyed out). On the test PC Spotify's Windows app did this with every song, from the Microsoft Store and from spotify.com alike, while Spotify's Web Player played them. The drop then played on YouTube, if it has a video, and YouTube plays first for the rest of the session | Pick **NeedleDropper (this app)** under **Play on**. Or quit the Spotify app completely and start it again, play and pause any song once. The notification comes at most every 30 minutes |
+| **404** / no active device | **Play on** is another device and no Spotify device is online (with *NeedleDropper (this app)*: the app's player went offline for a moment; it reconnects by itself) | Open the Spotify app on the device, play and pause any song once, then pick it under **Play on** on the Spotify card |
 | **429** / rate limited | Too many requests in a short time, or Spotify's `QUOTA_EXCEEDED` | Wait a few minutes; NeedleDropper already waits when Spotify asks it to |
 | **INVALID_CLIENT: Invalid redirect URI** | The redirect URI in your developer app isn't exactly right | Set it to `http://127.0.0.1:8321/callback` (127.0.0.1, http, no `/` at the end) |
 | **INVALID_CLIENT: Invalid client** | Wrong Client ID, or the developer app was deleted | Copy it again from the [dashboard](https://developer.spotify.com/dashboard) |
 | Notification: Spotify sign-in expired | Spotify ended the login (password change, removed access, a long break) | Click the notification (or tray icon → **Open setup…**) and **Sign in** again on the Spotify card |
 | Notification: song not found on Spotify | The drop has no Spotify link, and searching for its artist and title found nothing close enough | Paste the song's Spotify link into the drop (for a built-in drop: **Change song here** first). Meanwhile it plays on YouTube if it has a YouTube link |
 | The wrong recording plays | The drop has no Spotify link and the search picked another version | Paste the exact song link. After the next login, the drop's form shows the match the app found (*Spotify match: …* with **Use this exact song**) so you can keep it with one click |
-| The song starts on the wrong device | Another device was active | Choose the device under **Play on** |
+| The song starts on the wrong device | **Play on** is another device, and a different one was active | Choose the device under **Play on**, or **NeedleDropper (this app)** |
+| Your own Spotify music stops when a drop starts | One account plays on one device at a time: Spotify moves your playback to NeedleDropper's player | Normal. With *Resume my Spotify music afterwards* on (in game), it comes back afterwards. The Spotify Windows app may not restart by itself: press play there |
+| A **NeedleDropper** device in the Spotify app's device list | The app's own player, while the app runs | Nothing to do. Picking it plays your own music through the app |
 
-If Spotify can't play a drop, the app falls back to the drop's YouTube video, if it has one.
+If Spotify can't play a drop, the app falls back to the drop's YouTube video, if it has one (and
+*Play music with* allows YouTube).
 
 ## YouTube
 
 | Error | Meaning | Fix |
 |---|---|---|
 | **100** | The video was removed or made private | Paste another upload into the drop (for a built-in drop: **Change song here** first). With Spotify connected, the song plays there instead |
-| **101** or **150** | The video's owner doesn't allow it to be played outside YouTube (embedding is off). The app also shows a notification, and after your next login the drop shows a warning in the window | Same: paste another official upload ([how to check one](PACKS.md#guidelines-for-shared-soundtracks)) |
-| **153** | YouTube didn't learn which page is embedding the player (the "Referer" information was missing) | Use the player window NeedleDropper opens (its address starts with `http://127.0.0.1:8322/`); turn off privacy extensions or settings that strip referrers for `127.0.0.1`; update Edge or Chrome |
+| **101** or **150** | The video's owner doesn't allow it to be played outside YouTube (embedding is off). YouTube also refuses many videos to players on `127.0.0.1`, so since 1.2.1 the box loads from `localhost` (in 1.2.0 most built-in videos failed with 150). The app also shows a notification, and after your next login the drop shows a warning in the window | Update to 1.2.1. A video that still fails: paste another official upload ([how to check one](PACKS.md#guidelines-for-shared-soundtracks)) |
+| **153** | YouTube didn't learn which page is embedding the player (the "Referer" information was missing) | Use the player window NeedleDropper opens (its address is `http://localhost:8322/player`); turn off privacy extensions or settings that strip referrers for `localhost`; update Edge or Chrome |
 | **2** | The video id is malformed | Paste the video's link again |
 | **5** | The browser couldn't play the video | Update Edge or Chrome |
 
 - **No sound:** click once inside the player window (*Click to enable sound*), and check that
   Edge or Chrome isn't muted in the Windows volume mixer.
 - **The player window doesn't show:** it shows only while a YouTube song plays, on top of the game
-  in the top-right corner (`deck.playerCorner` in `config.json` picks another corner). The app makes
-  it when it starts, never while the game is in front (a new browser window takes the focus), and
-  needs Edge or Chrome: it never uses a tab in your default browser. If a tool on your PC redirects
-  Edge to another browser ("Edge Deflector" and similar), NeedleDropper uses Chrome. The browser's
-  own messages are in `logs\browser.log` (tray → **Open log folder**).
-- **Ads** are normal for embedded YouTube videos; NeedleDropper doesn't block them.
+  in the corner chosen in game (*YouTube box position*, top right by default). The app makes it when
+  it starts, never while the game is in front (a new browser window takes the focus), and needs Edge
+  or Chrome: it never uses a tab in your default browser. It runs in Chrome whenever Spotify plays in
+  the app. If a tool on your PC redirects Edge to another browser ("Edge Deflector" and similar),
+  NeedleDropper uses Chrome. The browser's own messages are in `logs\browser.log` (tray → **Open log
+  folder**).
+- **Ads** are normal for embedded YouTube videos; NeedleDropper doesn't block them. Signed in to
+  YouTube Premium through **Sign in to YouTube** (Music services, or the Connect page), the box
+  should play without them.
+- **Sign in to YouTube opens nothing:** the app needs Edge or Chrome for its player box (*NeedleDropper
+  has no Edge or Chrome for its YouTube box*), or the button was pressed too often.
 
 ## Chat-log link
 
@@ -279,12 +330,14 @@ To stop: `/needle chatlog off`, then `/chatlog` until the game says logging is o
   **Open log folder** and **Quit**. While needle drops are paused the app ignores the game, and the
   icon shows the tone arm parked.
 - **Notifications** appear only when they matter: linked to World of Warcraft (once per session), a
-  test signal arrived, Spotify sign-in expired, Spotify isn't starting songs, a song wasn't found on
-  Spotify, a YouTube video can't be embedded, a part of the app stopped because of an error (details
-  in the log), and (if the update check is on) a new version is available.
-- **The YouTube player window** is made once, hidden, when the app starts. It shows only while a
-  YouTube song plays, on top of the game in the top-right corner, and never takes the focus from the
-  game; afterwards it hides again.
+  test signal arrived, the result of a request you sent from the game's Music services, Spotify
+  sign-in expired or needs renewing (*Sign in to Spotify again*), Spotify didn't start or isn't
+  starting songs, a song wasn't found on Spotify, a YouTube video can't be embedded, a part of the app
+  stopped because of an error (details in the log), and (if the update check is on) a new version is
+  available.
+- **The player window** is made once, hidden, when the app starts. Spotify songs play in it while it
+  stays hidden. It shows only while a YouTube song plays, on top of the game in the corner you chose
+  (top right by default), and never takes the focus from the game; afterwards it hides again.
 - **Commands in a terminal** (`NeedleDropper.exe --version`, `diag`, `packs …`) print into the
   window you started them from. Windows doesn't wait for the app, so the prompt can come back before
   the output: in `cmd` use `start /wait NeedleDropper.exe diag`, in PowerShell add `| Out-Host`
@@ -328,10 +381,13 @@ To stop: `/needle chatlog off`, then `/chatlog` until the game says logging is o
 | Game Lua errors | Type `/console scriptErrors 1` to make WoW show addon errors |
 | Taint (the game blocking an action) | `/console taintLog 1`, play, then read `World of Warcraft\_forever_\Logs\taint.log`; `/console taintLog 0` turns it off again |
 
-**Reporting a problem?** Include the app version (`NeedleDropper.exe --version`), the addon version
-(first line of `/needle help`), the output of `/needle status`, and the relevant part of
-`needledropper.log`. The log never contains passwords or tokens, but file paths in it can show your
-Windows user name. A share code of the soundtrack involved helps too.
+**Reporting a problem?** Type `/needle report` in the game: a window opens with a text report,
+already selected. Press Ctrl+C and paste it into your report. It has the addon, game and app
+versions, what the app reported (Spotify and YouTube), the beacon, the settings that matter, your
+last 5 drops and the last error, and no account names, Client IDs or tokens. Add the output of
+`/needle status` and the relevant part of `needledropper.log`. The log never contains passwords or
+tokens, but file paths in it can show your Windows user name, and it names your Spotify account
+(edit those out if you like). A share code of the soundtrack involved helps too.
 
 ## /needle command reference
 
@@ -349,6 +405,7 @@ setting.
 | `/needle journal print [count]` | Print the songs this character has heard in the chat window instead (the last 15, or `count`) |
 | `/needle import` | Open the Import dialog to paste a share code |
 | `/needle share [name]` | Open the Share dialog for one of your soundtracks, by name: `/needle share My Drops` |
+| `/needle music [status\|connect [Client ID]\|disconnect\|test spotify\|test youtube\|youtube]` | On its own, open the **Music services** dialog (Spotify, YouTube and how songs play). `status` prints the app, Spotify, YouTube and last-request lines; `connect` asks the NeedleDropper app to sign in to Spotify (with a Client ID, it is stored first: `/needle music connect 0123…cdef`); `disconnect` signs the app out of Spotify; `test spotify` / `test youtube` play 15 seconds of a test song; `youtube` opens YouTube's sign-in page in the player's browser |
 | `/needle status` | Settings summary, active soundtracks, beacon and chat-log link, where you are, the pending drop and what it waits for, what is playing, cooldown, how many drops you have heard |
 | `/needle where` | Where you stand, for soundtrack authors: zone key and map number, subzone and its by-name id, instance id, the area numbers here, and the drops that match |
 | `/needle replay [id]` | Replay the last drop you heard, or the one with that id. Doesn't change your history |
@@ -361,6 +418,7 @@ setting.
 | `/needle beacon on\|off` | The pixel beacon the app reads |
 | `/needle chatlog on\|off` | The [chat-log link](#chat-log-link) (turns WoW's chat logging on) |
 | `/needle selftest [beacon\|chatlog\|discovery\|music\|share]` | Check your setup: `beacon` (default) sends a test signal, shows the largest beacon for 10 seconds and prints the beacon's size and the gap above your player frame (not while a song or the test card plays); `chatlog` tests the chat-log link; `discovery` prints every discovery message, exploration update and zone change for 120 seconds; `music` fades the zone music out for 8 seconds and back; `share` checks that share codes can be read and written on your client |
+| `/needle report` | A text report of your setup for a bug report (versions, the app's report, the beacon, the settings that matter, the last 5 drops, the last error), selected in a window: press Ctrl+C. It holds no account names, Client IDs or tokens |
 | `/needle debug on\|off` | Diagnostic messages in the chat window |
 | `/needle set <setting> <value>` | Change a setting, for example `/needle set cooldownMin 15` (names below) |
 | `/needle settings` | List every setting with its value and range |
@@ -374,9 +432,10 @@ NeedleDropper*. The Settings panel is searchable. Every option can also be chang
 `/needle set <setting> <value>` (on/off values: `on` or `off`).
 
 The page starts with an **Open NeedleDropper** button, then groups the options under *Needle drops*,
-*Playback*, *Title card* (with a **Preview** button), *Companion link* (with a **Send a test
-signal** button) and *Troubleshooting*. Your soundtracks are edited in the NeedleDropper window, not
-here.
+*Music services* (the app's status, the Spotify and YouTube accounts, the four music options below,
+**Test Spotify**, **Test YouTube** and **Refresh status**), *Playback*, *Title card* (with a **Preview**
+button), *Companion link* (with a **Send a test signal** button) and *Troubleshooting*. Your
+soundtracks are edited in the NeedleDropper window, not here.
 
 | Option | Setting | Default | Values | What it does |
 |---|---|---|---|---|
@@ -389,6 +448,10 @@ here.
 | Play each drop once per | `scope` | character | `character` / `account` | Hear each song once per character, or once per account |
 | Wait while on a flight path | `suppressOnTaxi` | on | on / off | Hold drops until you land |
 | Instance drops | `instanceDrops` | on | on / off | Allow drops for dungeons and raids |
+| Play music with | `musicOrder` | spotify-youtube | `spotify-youtube` / `youtube-spotify` / `spotify` / `youtube` / `none` | Which service the NeedleDropper app uses for a song, and which it tries next. `none` (*Neither*): title cards and in-game files only |
+| YouTube box position | `youtubeCorner` | topright | `topright` / `topleft` / `bottomright` / `bottomleft` | Where the small YouTube player box shows while a YouTube song plays. A top-left box sits below the beacon; a change moves an open box at once |
+| Fade songs in and out | `musicFade` | on | on / off | Off: songs start and stop at once |
+| Resume my Spotify music afterwards | `resumeMyMusic` | on | on / off | When a Spotify needle drop ends, Spotify goes back to what you were listening to |
 | Stop after combat lasting (s) | `combatFadeSec` | 5 | 0 – 120 | Fade out a playing drop when combat lasts longer than this (0 = never) |
 | Length when unknown (s) | `maxDropSec` | 300 | 10 – 1800 | How long a drop counts as playing when its length is unknown |
 | Zone music during a drop | `duckMethod` | silence | `silence` / `volume` / `none` | How the zone music is faded out: a silent track, music volume to 0, or not at all |
@@ -420,10 +483,11 @@ The app keeps its few settings on its Connect page (tray icon → **Open setup�
 
 | Where | Setting | Default |
 |---|---|---|
-| **Spotify** card | Client ID, **Sign in** / **Sign out of Spotify**, **Play on** (the device that plays) | not set up |
-| **YouTube** card | **Play songs from YouTube** | on |
+| **Spotify** card | Client ID, **Sign in** / **Sign out of Spotify**, **Play on** (*NeedleDropper (this app)*, or another Spotify device), **Test Spotify** | not set up; *NeedleDropper (this app)* |
+| **YouTube** card | **Play songs from YouTube**, **Test YouTube**, **Sign in to YouTube** | on |
 | Footer | **Start with Windows** | on |
 | Tray menu | **Pause needle drops**, **Start with Windows** | off, on |
 
 Everything is saved in `%APPDATA%\NeedleDropper\config.json`. Which songs play where is never an app
-setting: that is all in game.
+setting: that is all in game. *Play music with*, the YouTube box position, the fades and *Resume my
+Spotify music afterwards* are set in game too (Music services); the Connect page shows them.

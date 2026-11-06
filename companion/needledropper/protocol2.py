@@ -6,15 +6,17 @@ Cross-component contract with the addon's ``Protocol2.lua``:
 
 Layers
 ------
-* **Frame** (section 2): ``4E | 0x20+type | seq | flags | bodyLen | TLVs | s2 s1`` where the
-  TLV body (``tag, len, value``; tags ascending, absent fields omitted) carries the place key,
-  drop id, Spotify / YouTube ids, an ``artist 0x1F title`` search query, start, play length,
-  volume, place label and soundtrack-set id; the trailer is Fletcher-16 over everything before
-  it. :func:`build_frame` / :func:`frame_from_event` apply exactly the normalisation the Lua
-  encoder applies (link parsing, sanitising, UTF-8-safe truncation, per-type field set, and
-  the fit rule against a frame-byte budget: 262 for the chat line, the row capacity for the
-  beacon -- see :func:`_fit_body`); :func:`encode_frame` serialises; :func:`decode_frame`
-  validates.
+* **Frame** (section 2): ``4E | 0x20+type | seq | flags | bodyLen | TLVs | check (4 bytes)``
+  where the TLV body (``tag, len, value``; tags ascending, absent fields omitted) carries the
+  place key, drop id, Spotify / YouTube ids, an ``artist 0x1F title`` search query, start, play
+  length, volume, place label and soundtrack-set id -- or, in HELLO and CONFIG frames
+  (DESIGN-v1.2.1 2), the music choices (PREFS), a request (ACTION) and a Spotify client id;
+  the trailer is :func:`frame_check` over everything before it (a polynomial hash mod
+  2^31 - 1: protocol-attack finding F1). :func:`build_frame` / :func:`frame_from_event` apply
+  exactly the normalisation the Lua encoder applies (link parsing, sanitising, UTF-8-safe
+  truncation, per-type field set, and the fit rule against a frame-byte budget: 264 for the
+  chat line, the row capacity for the beacon -- see :func:`_fit_body`); :func:`encode_frame`
+  serialises; :func:`decode_frame` validates.
 * **Pixel cells** (section 4): rows of ``cols`` cells; row 0 starts with the header
   ``MAGENTA GREEN MAGENTA GREEN`` and three geometry cells (``cols/16``, ``(rows-1)//8``,
   ``(rows-1)%8``), then the frame bits MSB-first, 3 per cell (R, G, B), zero-padded to the end
@@ -44,13 +46,16 @@ from .protocol import fletcher16
 
 __all__ = [
     "MAGIC", "VERSION", "CHAT_PREFIX", "TAG_PLACE_KEY", "TAG_DROP_ID", "TAG_SPOTIFY", "TAG_YOUTUBE",
-    "TAG_QUERY", "TAG_START_DS", "TAG_LENGTH_DS", "TAG_VOLUME", "TAG_LABEL", "TAG_SET_ID", "TAG_NAMES",
+    "TAG_QUERY", "TAG_START_DS", "TAG_LENGTH_DS", "TAG_VOLUME", "TAG_LABEL", "TAG_SET_ID", "TAG_PREFS",
+    "TAG_ACTION", "TAG_CLIENT_ID", "TAG_NAMES",
     "MAX_DROP_ID", "MAX_QUERY", "MAX_LABEL", "MAX_SET_ID", "MAX_BODY", "MAX_FRAME", "FRAME_OVERHEAD",
+    "TRAILER_LEN", "CHECK_SEED", "CHECK_MUL", "CHECK_MOD", "CHECK_FINAL_ROUNDS", "MIN_QUERY_PART",
     "QUERY_SEP", "HEADER", "HEADER_CODES", "LEAD_CELLS", "MIN_COLS", "MAX_COLS", "COL_STEP", "MAX_ROWS",
     "MIN_CELL_PX", "MAX_CELL_PX", "CORNERS", "CODE_RGB", "KNOWN_PREFIX_CODES", "TYPE_TAGS",
     "MAX_STRIP_PX", "PAD_PREFIX", "PAD_LINE_LEN", "PREFER_SPOTIFY", "PREFER_YOUTUBE",
-    "TLV", "Frame", "Geometry", "CellGrid", "DEFAULT_GEOMETRY",
-    "build_frame", "frame_from_event", "encode_frame", "decode_frame",
+    "PREFS_ORDERS", "PREFS_CORNERS", "ACTIONS", "CLIENT_ID_LEN",
+    "TLV", "Prefs", "Action", "Frame", "Geometry", "CellGrid", "DEFAULT_GEOMETRY",
+    "frame_check", "build_frame", "frame_from_event", "encode_frame", "decode_frame",
     "rows_for", "strip_size", "keystream_bits", "encode_cells", "encode_event_cells", "decode_cell_codes",
     "decode_cells_grid", "capacity", "rows_cap", "adaptive_layout",
     "b64url_encode", "b64url_decode", "format_chat_line", "find_chat_record", "parse_chat_line",
@@ -75,26 +80,55 @@ TAG_LENGTH_DS = 0x07  # uint16 BE, play length in 1/10 s (absent / 0 = whole son
 TAG_VOLUME = 0x08  # uint8 0..100
 TAG_LABEL = 0x09  # UTF-8 place label, 1..48 bytes
 TAG_SET_ID = 0x0A  # ASCII [A-Za-z0-9:_.-], 1..32 bytes
-_MAX_KNOWN_TAG = TAG_SET_ID
+TAG_PREFS = 0x0B  # 4 bytes: order, corner, fade, resume codes (DESIGN-v1.2.1 2.3); HELLO and CONFIG
+TAG_ACTION = 0x0C  # 6 bytes: code, code XOR 0xFF, issuedAt uint32 BE; CONFIG
+TAG_CLIENT_ID = 0x0D  # 16 bytes: the Spotify client id's 32 hex digits; CONFIG
+_MAX_KNOWN_TAG = TAG_CLIENT_ID
 TAG_NAMES = {TAG_PLACE_KEY: "placeKey", TAG_DROP_ID: "dropId", TAG_SPOTIFY: "spotify", TAG_YOUTUBE: "youtube",
              TAG_QUERY: "query", TAG_START_DS: "startDs", TAG_LENGTH_DS: "lengthDs", TAG_VOLUME: "volume",
-             TAG_LABEL: "label", TAG_SET_ID: "setId"}
+             TAG_LABEL: "label", TAG_SET_ID: "setId", TAG_PREFS: "prefs", TAG_ACTION: "action",
+             TAG_CLIENT_ID: "clientId"}
 
 MAX_DROP_ID = 40
 MAX_QUERY = 120
 MAX_LABEL = 48
 MAX_SET_ID = 32
 MAX_BODY = 255
-FRAME_OVERHEAD = 7  # 5 head bytes + 2 checksum bytes
-MAX_FRAME = MAX_BODY + FRAME_OVERHEAD  # 262
+TRAILER_LEN = 4  # the frame check, uint32 BE
+FRAME_OVERHEAD = 5 + TRAILER_LEN  # 9: 5 head bytes + the 4-byte check
+MAX_FRAME = MAX_BODY + FRAME_OVERHEAD  # 264
 QUERY_SEP = "\x1f"
+#: Fit-rule step 5 (finding F3): when the query must be shortened, artist and title each keep at
+#: least this many bytes (or all of a shorter part); otherwise the whole query goes.
+MIN_QUERY_PART = 8
 
-_ALL_TAGS = frozenset(range(1, _MAX_KNOWN_TAG + 1))
-#: Fields each event type carries (anything else is dropped by :func:`build_frame`).
+#: The frame check (finding F1): h = CHECK_SEED; h = (h * CHECK_MUL + byte + 1) % CHECK_MOD over
+#: every byte before the trailer, then :data:`CHECK_FINAL_ROUNDS` more rounds
+#: h = (h * CHECK_MUL + 1) % CHECK_MOD (as if that many 0x00 bytes followed). 48271 is a primitive
+#: root mod the prime 2^31 - 1; every intermediate stays below 2^47, so Lua 5.1 doubles compute it
+#: exactly. The final rounds give the last body byte the weight 48271^2 mod (2^31 - 1) instead of 1:
+#: without them, +d on the last body byte and +d on the trailer's low byte cancelled (review RP-1).
+CHECK_SEED = 0x4E443243  # 1313092163, "ND2C"
+CHECK_MUL = 48271
+CHECK_MOD = 2147483647
+CHECK_FINAL_ROUNDS = 2
+
+#: PREFS codes (DESIGN-v1.2.1 2.3): code = index + 1; 0 = not set (the app keeps its value).
+PREFS_ORDERS = ("spotify-youtube", "youtube-spotify", "spotify", "youtube", "none")
+PREFS_CORNERS = ("topright", "topleft", "bottomright", "bottomleft")
+#: ACTION codes: code = index + 1.
+ACTIONS = ("connect-spotify", "disconnect-spotify", "test-spotify", "test-youtube", "youtube-sign-in")
+CLIENT_ID_LEN = 16  # bytes on the wire (32 hex digits)
+
+_SONG_TAGS = frozenset(range(TAG_PLACE_KEY, TAG_SET_ID + 1))
+#: Fields each event type carries (anything else is dropped by :func:`build_frame`). Song frames
+#: never carry PREFS; a HELLO carries the playing drop's placeKey (with DROP_ACTIVE, D3) and PREFS.
 TYPE_TAGS: dict[EventType, frozenset[int]] = {
-    EventType.NONE: frozenset(), EventType.HELLO: frozenset(), EventType.PING: frozenset(),
-    EventType.ARM: _ALL_TAGS, EventType.FIRE: _ALL_TAGS,
+    EventType.NONE: frozenset(), EventType.PING: frozenset(),
+    EventType.HELLO: frozenset((TAG_PLACE_KEY, TAG_PREFS)),
+    EventType.ARM: _SONG_TAGS, EventType.FIRE: _SONG_TAGS,
     EventType.CANCEL: frozenset((TAG_PLACE_KEY, TAG_DROP_ID)),
+    EventType.CONFIG: frozenset((TAG_PREFS, TAG_ACTION, TAG_CLIENT_ID)),
 }
 
 # Pixel layout.
@@ -125,7 +159,7 @@ _HEAD_CELLS = 14  # cells holding the 5 head bytes (40 bits -> 42)
 WHITEN_SEED = 1313100338  # 0x4E445232 "NDR2"
 WHITEN_MUL = 16807
 WHITEN_MOD = 2147483647
-_KS_LEN = 4096  # bits; a valid strip needs at most (7 rows * 112 - 7) * 3 = 2331
+_KS_LEN = 4096  # bits; a valid strip needs at most (7 rows * 112 - 7) * 3 = 2331 (264 B at 112 cols)
 
 
 def _make_keystream(n: int) -> bytes:
@@ -183,6 +217,26 @@ def _deciseconds(ds: Any, ms: Any) -> Optional[int]:
         return None
     v = _clamp(int(v), 0, 0xFFFF)
     return v or None
+
+
+def frame_check(data: Union[bytes, bytearray, Sequence[int]]) -> int:
+    """The frame trailer's value (``Protocol2.FrameCheck``): starting at :data:`CHECK_SEED`,
+    ``h = (h * 48271 + b + 1) % (2**31 - 1)`` for every byte ``b``, then two final rounds
+    ``h = (h * 48271 + 1) % (2**31 - 1)``; sent as uint32 BE.
+
+    A polynomial hash over a prime field, so unlike Fletcher-16 it sees the column-cover
+    pattern of finding F1 (``-d, +2d, -d`` in bytes ``i, i+k, i+2k``): that pattern is zero
+    only if ``48271**k == 1``, which never holds for a primitive root and ``k < 2**31 - 2``.
+    The final rounds keep every body byte's weight away from small powers of 256, so no change
+    of a few cells across the last body byte and the trailer passes (review RP-1: without them,
+    ``+d`` on the last body byte and ``+d`` on the trailer's low byte left the frame valid).
+    """
+    h = CHECK_SEED
+    for b in data:
+        h = (h * CHECK_MUL + b + 1) % CHECK_MOD
+    for _ in range(CHECK_FINAL_ROUNDS):
+        h = (h * CHECK_MUL + 1) % CHECK_MOD
+    return h
 
 
 # ------------------------------------------------------------------ text utils --
@@ -285,6 +339,24 @@ def place_key_for(drop_id: Any) -> Optional[int]:
     return fletcher16(drop_id.encode("utf-8", "surrogatepass"))
 
 
+def _split_parts(a: bytes, t: bytes, budget: int) -> tuple[bytes, bytes]:
+    """Lua ``fairSplit``: artist ``a`` and title ``t`` within ``budget`` bytes together (the
+    separator not counted). A part that fits in half the budget is kept whole and the other
+    gets the rest; otherwise the artist gets half (rounded down) and the title the rest. Each
+    cut is on a UTF-8 boundary."""
+    if len(a) + len(t) <= budget:
+        return a, t
+    half = budget // 2
+    if len(a) <= half:
+        t = utf8_truncate(t, budget - len(a))
+    elif len(t) <= budget - half:
+        a = utf8_truncate(a, budget - len(t))
+    else:
+        a = utf8_truncate(a, half)
+        t = utf8_truncate(t, budget - len(a))
+    return a, t
+
+
 def build_query(artist: Any, title: Any) -> Optional[bytes]:
     """``artist 0x1F title`` within :data:`MAX_QUERY` bytes (None when both are empty).
 
@@ -294,16 +366,22 @@ def build_query(artist: Any, title: Any) -> Optional[bytes]:
     a, t = clean_text(artist), clean_text(title)
     if not a and not t:
         return None
-    budget = MAX_QUERY - 1
-    if len(a) + len(t) > budget:
-        half = budget // 2
-        if len(a) <= half:
-            t = utf8_truncate(t, budget - len(a))
-        elif len(t) <= budget - half:
-            a = utf8_truncate(a, budget - len(t))
-        else:
-            a = utf8_truncate(a, half)
-            t = utf8_truncate(t, budget - len(a))
+    a, t = _split_parts(a, t, MAX_QUERY - 1)
+    return a + b"\x1f" + t
+
+
+def _fit_query(q: bytes, budget: int) -> Optional[bytes]:
+    """Fit-rule step 5 (Lua ``fitQuery``): the query ``artist 0x1F title`` shortened to at most
+    ``budget`` bytes, separator included, by :func:`_split_parts` on its two parts -- or None
+    when the budget cannot leave each part :data:`MIN_QUERY_PART` bytes (a shorter part: all of
+    it). The separator always survives (finding F3)."""
+    a, sep, t = q.partition(b"\x1f")
+    if not sep:  # never built by build_query; read the whole value as the title
+        a, t = b"", q
+    room = budget - 1
+    if room < min(MIN_QUERY_PART, len(a)) + min(MIN_QUERY_PART, len(t)):
+        return None
+    a, t = _split_parts(a, t, room)
     return a + b"\x1f" + t
 
 
@@ -436,13 +514,154 @@ class TLV:
     value: bytes
 
 
+def _ascii_lower(value: Any) -> Optional[bytes]:
+    """``value`` as UTF-8 bytes with ASCII-only case folding (Lua ``string.lower``), or None."""
+    return value.encode("utf-8", "surrogatepass").lower() if isinstance(value, str) else None
+
+
+def _name_code(value: Any, names: tuple[str, ...]) -> int:
+    """1-based code of ``value`` among ``names`` (ASCII case-insensitive), 0 when not one."""
+    v = _ascii_lower(value)
+    for i, name in enumerate(names):
+        if v == name.encode("ascii"):
+            return i + 1
+    return 0
+
+
+def _bool_code(value: Any) -> int:
+    return 1 if value is True else 2 if value is False else 0
+
+
+def _code_name(code: int, names: tuple[str, ...]) -> Optional[str]:
+    return names[code - 1] if 1 <= code <= len(names) else None
+
+
+@dataclass(frozen=True)
+class Prefs:
+    """The PREFS TLV (0x0B, DESIGN-v1.2.1 2.3): the player's music choices made in game.
+
+    ``order`` is one of :data:`PREFS_ORDERS`, ``corner`` one of :data:`PREFS_CORNERS`, ``fade``
+    and ``resume`` booleans; None means "not set" (the app keeps its own value). Unknown codes
+    from a newer addon decode as None too.
+    """
+
+    order: Optional[str] = None
+    corner: Optional[str] = None
+    fade: Optional[bool] = None
+    resume: Optional[bool] = None
+
+    @classmethod
+    def coerce(cls, value: Any) -> Optional["Prefs"]:
+        """Lua ``EncodeFrame``'s normalisation of ``ev.prefs`` (a mapping with ``order``,
+        ``corner``, ``fade``, ``resume`` or a :class:`Prefs`): names match ASCII
+        case-insensitively, fade / resume must be booleans, anything else is not set. None
+        when nothing is set (no TLV)."""
+        if isinstance(value, Prefs):
+            value = {"order": value.order, "corner": value.corner, "fade": value.fade, "resume": value.resume}
+        if not isinstance(value, Mapping):
+            return None
+        codes = (_name_code(value.get("order"), PREFS_ORDERS), _name_code(value.get("corner"), PREFS_CORNERS),
+                 _bool_code(value.get("fade")), _bool_code(value.get("resume")))
+        return None if not any(codes) else cls.from_codes(bytes(codes))
+
+    @classmethod
+    def from_codes(cls, codes: bytes) -> "Prefs":
+        """Decoder side: four code bytes -> Prefs (unknown or 0 codes -> None)."""
+        o, c, f, r = codes
+        return cls(_code_name(o, PREFS_ORDERS), _code_name(c, PREFS_CORNERS),
+                   {1: True, 2: False}.get(f), {1: True, 2: False}.get(r))
+
+    def codes(self) -> bytes:
+        """The TLV value (strict: an unknown name or a non-bool raises ValueError)."""
+        out = []
+        for v, names, what in ((self.order, PREFS_ORDERS, "order"), (self.corner, PREFS_CORNERS, "corner")):
+            if v is not None and v not in names:
+                raise ValueError(f"prefs.{what} must be one of {', '.join(names)} or None, got {v!r}")
+            out.append(0 if v is None else names.index(v) + 1)
+        for v, what in ((self.fade, "fade"), (self.resume, "resume")):
+            if v is not None and not isinstance(v, bool):
+                raise ValueError(f"prefs.{what} must be a bool or None, got {v!r}")
+            out.append(_bool_code(v))
+        return bytes(out)
+
+    def describe(self) -> str:
+        """``order/corner/fade/resume``, e.g. ``youtube-spotify/topleft/fade/no-resume`` ("-" = not set)."""
+        def onoff(v: Optional[bool], word: str) -> str:
+            return "-" if v is None else word if v else "no-" + word
+        return "/".join((self.order or "-", self.corner or "-", onoff(self.fade, "fade"), onoff(self.resume, "resume")))
+
+
+@dataclass(frozen=True)
+class Action:
+    """The ACTION TLV (0x0C, DESIGN-v1.2.1 2.3): a request the player sent from the game.
+
+    ``code`` is the wire code (1..5 are :data:`ACTIONS`; others decode with ``name`` None and are
+    ignored by the app), ``issued_at`` the game's ``time()`` (Unix seconds) at the click.
+    """
+
+    code: int
+    issued_at: int
+
+    @property
+    def name(self) -> Optional[str]:
+        """``connect-spotify`` ... ``youtube-sign-in``, or None for a code this version does not know."""
+        return _code_name(self.code, ACTIONS)
+
+    @classmethod
+    def named(cls, name: str, issued_at: int) -> "Action":
+        """An action by name (strict: an unknown name raises ValueError)."""
+        code = _name_code(name, ACTIONS)
+        if not code:
+            raise ValueError(f"action must be one of {', '.join(ACTIONS)}, got {name!r}")
+        return cls(code, issued_at)
+
+    @classmethod
+    def coerce(cls, value: Any) -> Optional["Action"]:
+        """Lua ``EncodeFrame``'s normalisation of ``ev.action`` (a mapping ``{name, at}`` or an
+        :class:`Action`): the name must be one of :data:`ACTIONS` (ASCII case-insensitive) and
+        ``at`` a number, floored and clamped to 0..4294967295; otherwise None (no TLV)."""
+        if isinstance(value, Action):
+            value = {"name": value.name, "at": value.issued_at}
+        if not isinstance(value, Mapping):
+            return None
+        code, at = _name_code(value.get("name"), ACTIONS), _num(value.get("at"))
+        if not code or at is None:
+            return None
+        return cls(code, _clamp(int(math.floor(at)), 0, 0xFFFFFFFF))
+
+    def value(self) -> bytes:
+        """The TLV value (strict: a code outside 0..255 or a time outside uint32 raises ValueError)."""
+        if isinstance(self.code, bool) or not isinstance(self.code, int) or not 0 <= self.code <= 255:
+            raise ValueError(f"action code must be 0..255, got {self.code!r}")
+        if isinstance(self.issued_at, bool) or not isinstance(self.issued_at, int) or not 0 <= self.issued_at <= 0xFFFFFFFF:
+            raise ValueError(f"action issued_at must be a uint32, got {self.issued_at!r}")
+        return bytes((self.code, self.code ^ 0xFF)) + self.issued_at.to_bytes(4, "big")
+
+    def describe(self) -> str:
+        return f"{self.name or self.code}@{self.issued_at}"
+
+
+_HEX32_RE = re.compile(rb"[0-9A-Fa-f]{32}\Z")
+
+
+def _client_id(value: Any) -> Optional[str]:
+    """Lua ``clientIdOf``: ASCII whitespace removed, then exactly 32 hex digits (either case) ->
+    lowercase; anything else None (no TLV)."""
+    if not isinstance(value, str):
+        return None
+    b = value.encode("utf-8", "surrogatepass").translate(None, _WS)
+    return b.decode("ascii").lower() if _HEX32_RE.match(b) else None
+
+
 @dataclass(frozen=True)
 class Frame:
     """One v2 addon -> companion message (both transports carry exactly the same bytes).
 
     Absent fields are None. Text fields are ``str``; ``query`` keeps the ``0x1F`` separator
-    (see :attr:`artist` / :attr:`title`). ``extra`` holds TLVs with tags this version does not
-    know (forward compatibility). ``raw`` is the frame as received (not part of equality).
+    (see :attr:`artist` / :attr:`title`). ``prefs`` / ``action`` / ``client_id`` are the
+    DESIGN-v1.2.1 fields (PREFS in HELLO and CONFIG, ACTION and CLIENT_ID in CONFIG; decoders
+    do not enforce which type carries what). ``extra`` holds TLVs with tags this version does
+    not know (forward compatibility). ``raw`` is the frame as received (not part of equality).
     """
 
     type: EventType
@@ -458,6 +677,9 @@ class Frame:
     volume: Optional[int] = None
     label: Optional[str] = None
     set_id: Optional[str] = None
+    prefs: Optional[Prefs] = None
+    action: Optional[Action] = None
+    client_id: Optional[str] = None  # 32 lowercase hex digits
     extra: tuple[TLV, ...] = ()
     raw: bytes = field(default=b"", compare=False, repr=False)
 
@@ -544,6 +766,12 @@ class Frame:
             parts.append(f"label={self.label!r}")
         if self.set_id:
             parts.append(f"set={self.set_id}")
+        if self.prefs is not None:
+            parts.append(f"prefs={self.prefs.describe()}")
+        if self.action is not None:
+            parts.append(f"action={self.action.describe()}")
+        if self.client_id:
+            parts.append(f"client=...{self.client_id[-4:]}")  # the tail only: logs never hold the whole id
         if self.extra:
             parts.append("extra=" + ",".join(f"0x{t.tag:02x}" for t in self.extra))
         return " ".join(parts)
@@ -559,12 +787,14 @@ def _remove(vals: dict[int, bytes], tag: int, size: int) -> int:
 
 
 def _fit_body(vals: dict[int, bytes], budget: int = MAX_FRAME, prefer: str = PREFER_YOUTUBE) -> int:
-    """The fit rule (DESIGN-v1.2 2.3; Lua ``fitBody``): while the frame is over ``budget``
-    bytes, remove in order 1 setId, 2 label, 3 query (when a Spotify or YouTube id is present),
-    4 dropId (placeKey stays), 5 the query's tail (UTF-8 safe), 6 volume, 7 the provider id
-    that is not ``prefer``-red. placeKey, start, length, the flags and the last provider id
-    are never removed. Returns the frame size, over the budget only when those alone exceed
-    it."""
+    """The fit rule (DESIGN-v1.2 2.3 with findings F3 / F4; Lua ``fitBody``): while the frame is
+    over ``budget`` bytes, remove in order 1 setId, 2 label, 3 query (only when the ``prefer``-red
+    provider's id is present: without it the companion may still need the query for a Spotify
+    search), 4 dropId (placeKey stays), 5 shorten the query -- artist and title separately, each
+    keeping :data:`MIN_QUERY_PART` bytes, else the whole query goes (:func:`_fit_query`) -- 6
+    volume, 7 the provider id that is not preferred. placeKey, start, length, the flags, the last
+    provider id and the HELLO / CONFIG fields (PREFS, ACTION, CLIENT_ID) are never removed.
+    Returns the frame size, over the budget only when those alone exceed it."""
     size = _frame_size(vals)
     if size <= budget:
         return size
@@ -574,7 +804,7 @@ def _fit_body(vals: dict[int, bytes], budget: int = MAX_FRAME, prefer: str = PRE
     size = _remove(vals, TAG_LABEL, size)
     if size <= budget:
         return size
-    if TAG_SPOTIFY in vals or TAG_YOUTUBE in vals:
+    if (TAG_SPOTIFY if prefer == PREFER_SPOTIFY else TAG_YOUTUBE) in vals:
         size = _remove(vals, TAG_QUERY, size)
         if size <= budget:
             return size
@@ -583,9 +813,8 @@ def _fit_body(vals: dict[int, bytes], budget: int = MAX_FRAME, prefer: str = PRE
         return size
     q = vals.get(TAG_QUERY)
     if q is not None:
-        keep = len(q) - (size - budget)
-        nq = utf8_truncate(q, keep) if keep >= 1 else b""
-        if not nq:
+        nq = _fit_query(q, len(q) - (size - budget))
+        if nq is None:
             size = _remove(vals, TAG_QUERY, size)
         else:
             vals[TAG_QUERY] = nq
@@ -608,7 +837,7 @@ def _prefer(value: Any) -> str:
 
 
 def _budget(max_bytes: Any) -> int:
-    """Frame-byte budget like Lua: floored, clamped to 7..262; MAX_FRAME when not a number."""
+    """Frame-byte budget like Lua: floored, clamped to 9..264; MAX_FRAME when not a number."""
     b = _num(max_bytes)
     return MAX_FRAME if b is None else _clamp(int(math.floor(b)), FRAME_OVERHEAD, MAX_FRAME)
 
@@ -616,8 +845,8 @@ def _budget(max_bytes: Any) -> int:
 def build_frame(type: Any, *, seq: Any = 0, flags: Any = 0, drop_id: Any = None, place_key: Any = None,
                 spotify: Any = None, youtube: Any = None, artist: Any = None, title: Any = None,
                 start_ms: Any = None, start_ds: Any = None, length_ms: Any = None, length_ds: Any = None,
-                volume: Any = None, label: Any = None, set_id: Any = None, max_bytes: Any = None,
-                prefer: Any = None) -> Frame:
+                volume: Any = None, label: Any = None, set_id: Any = None, prefs: Any = None,
+                action: Any = None, client_id: Any = None, max_bytes: Any = None, prefer: Any = None) -> Frame:
     """A :class:`Frame` normalised exactly like the addon's ``Protocol2.EncodeFrame(ev, maxBytes, prefer)``.
 
     * numbers must be int/float (anything else is absent); ``seq``/``flags`` wrap mod 256;
@@ -629,16 +858,19 @@ def build_frame(type: Any, *, seq: Any = 0, flags: Any = 0, drop_id: Any = None,
       48 bytes on a UTF-8 boundary;
     * ``start_ds`` / ``length_ds`` (1/10 s) win over ``start_ms`` / ``length_ms``; zero values are
       omitted (absent means 0: start of song / whole song); ``volume`` rounded, clamped 0..100;
+    * ``prefs`` (``{order, corner, fade, resume}`` or :class:`Prefs`, :meth:`Prefs.coerce`),
+      ``action`` (``{name, at}`` or :class:`Action`, :meth:`Action.coerce`) and ``client_id``
+      (32 hex digits, ASCII whitespace ignored; stored lowercase) -- each dropped when invalid;
     * only the fields of :data:`TYPE_TAGS` for the event type are kept;
     * if the frame would exceed ``max_bytes`` (default and maximum :data:`MAX_FRAME`, i.e. a
       255-byte body; floored and clamped like Lua) the fit rule applies (:func:`_fit_body`),
       keeping the ``prefer`` provider id (``"spotify"`` / ``"youtube"``, default youtube) last.
 
-    Raises ValueError for an event type outside 0..5 (Python cannot represent it).
+    Raises ValueError for an event type outside 0..6 (Python cannot represent it).
     """
     tv = _num(type)
     t = math.floor(tv) % 16 if tv is not None else 0
-    if t > 5:
+    if t > int(EventType.CONFIG):
         raise ValueError(f"unknown event type {type!r}")
     etype = EventType(t)
     sv, fv = _num(seq), _num(flags)
@@ -687,6 +919,15 @@ def build_frame(type: Any, *, seq: Any = 0, flags: Any = 0, drop_id: Any = None,
         sid = sanitize_id(set_id, MAX_SET_ID)
         if sid:
             vals[TAG_SET_ID] = sid.encode("ascii")
+    pr = Prefs.coerce(prefs) if TAG_PREFS in allow else None
+    if pr is not None:
+        vals[TAG_PREFS] = pr.codes()
+    ac = Action.coerce(action) if TAG_ACTION in allow else None
+    if ac is not None:
+        vals[TAG_ACTION] = ac.value()
+    cid = _client_id(client_id) if TAG_CLIENT_ID in allow else None
+    if cid is not None:
+        vals[TAG_CLIENT_ID] = bytes.fromhex(cid)
     _fit_body(vals, _budget(max_bytes), _prefer(prefer))
 
     def text(tag: int) -> Optional[str]:
@@ -701,21 +942,22 @@ def build_frame(type: Any, *, seq: Any = 0, flags: Any = 0, drop_id: Any = None,
                  drop_id=text(TAG_DROP_ID), spotify_id=text(TAG_SPOTIFY), youtube_id=text(TAG_YOUTUBE),
                  query=text(TAG_QUERY), start_ds=u16(TAG_START_DS), length_ds=u16(TAG_LENGTH_DS),
                  volume=vals[TAG_VOLUME][0] if TAG_VOLUME in vals else None, label=text(TAG_LABEL),
-                 set_id=text(TAG_SET_ID))
+                 set_id=text(TAG_SET_ID), prefs=pr, action=ac, client_id=cid)
 
 
 _EVENT_KEYS = {"seq": "seq", "flags": "flags", "dropId": "drop_id", "placeKey": "place_key",
                "spotify": "spotify", "youtube": "youtube", "artist": "artist", "title": "title",
                "startMs": "start_ms", "startDs": "start_ds", "lengthMs": "length_ms", "lengthDs": "length_ds",
-               "volume": "volume", "label": "label", "setId": "set_id"}
+               "volume": "volume", "label": "label", "setId": "set_id", "prefs": "prefs", "action": "action",
+               "clientId": "client_id"}
 
 
 def frame_from_event(ev: Mapping[str, Any], *, max_bytes: Any = None, prefer: Any = None) -> Frame:
     """:func:`build_frame` from an addon-style event table (camelCase keys as in Lua:
     ``type, seq, flags, dropId, placeKey, spotify, youtube, artist, title, startMs|startDs,
-    lengthMs|lengthDs, volume, label, setId, prefer``; unknown keys are ignored), fitted to
-    ``max_bytes`` like ``Protocol2.EncodeFrame(ev, maxBytes, prefer)``; ``prefer`` defaults to
-    the event's own ``prefer``."""
+    lengthMs|lengthDs, volume, label, setId, prefs, action, clientId, prefer``; unknown keys are
+    ignored), fitted to ``max_bytes`` like ``Protocol2.EncodeFrame(ev, maxBytes, prefer)``;
+    ``prefer`` defaults to the event's own ``prefer``."""
     kwargs = {py: ev[lua] for lua, py in _EVENT_KEYS.items() if lua in ev and ev[lua] is not None}
     return build_frame(ev.get("type"), max_bytes=max_bytes,
                        prefer=ev.get("prefer") if prefer is None else prefer, **kwargs)
@@ -774,9 +1016,22 @@ def encode_frame(frame: Frame) -> bytes:
         tlvs.append((TAG_LABEL, _check_text(frame.label, MAX_LABEL, "label")))
     if frame.set_id is not None:
         tlvs.append((TAG_SET_ID, _check_ascii_id(frame.set_id, MAX_SET_ID, "set_id")))
+    if frame.prefs is not None:
+        if not isinstance(frame.prefs, Prefs):
+            raise ValueError(f"prefs must be a Prefs, got {frame.prefs!r}")
+        tlvs.append((TAG_PREFS, frame.prefs.codes()))
+    if frame.action is not None:
+        if not isinstance(frame.action, Action):
+            raise ValueError(f"action must be an Action, got {frame.action!r}")
+        tlvs.append((TAG_ACTION, frame.action.value()))
+    if frame.client_id is not None:
+        if not isinstance(frame.client_id, str) or not _HEX32_RE.match(frame.client_id.encode("ascii", "replace")):
+            raise ValueError(f"client_id must be 32 hex digits, got {frame.client_id!r}")
+        tlvs.append((TAG_CLIENT_ID, bytes.fromhex(frame.client_id)))
     for x in frame.extra:
         if not (_MAX_KNOWN_TAG < x.tag <= 255) or len(x.value) > 255:
-            raise ValueError(f"extra TLV must use an unknown tag 0x0b..0xff and <= 255 bytes: {x!r}")
+            raise ValueError(f"extra TLV must use an unknown tag 0x{_MAX_KNOWN_TAG + 1:02x}..0xff and <= 255 bytes: "
+                             f"{x!r}")
         tlvs.append((x.tag, bytes(x.value)))
     tlvs.sort(key=lambda tv: tv[0])
     if any(tlvs[i][0] == tlvs[i + 1][0] for i in range(len(tlvs) - 1)):
@@ -785,14 +1040,26 @@ def encode_frame(frame: Frame) -> bytes:
     if len(body) > MAX_BODY:
         raise ValueError(f"frame body is {len(body)} bytes (max {MAX_BODY})")
     head = bytes((MAGIC, (VERSION << 4) | t, seq, flags, len(body))) + body
-    return head + _u16(fletcher16(head))
+    return head + frame_check(head).to_bytes(TRAILER_LEN, "big")
+
+
+def _strict_text(v: bytes) -> Optional[str]:
+    """Decoder text (query, label): strict UTF-8 (D5) -- None for any invalid sequence, which
+    rejects the frame (Python's codec applies the same RFC 3629 table as Lua ``Utf8Valid``)."""
+    try:
+        return v.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
 
 
 def decode_frame(data: Any) -> Optional[Frame]:
     """Validate a complete frame and return it, or None on any problem: magic, version, known
-    event type, exact length, Fletcher-16, TLV structure (non-zero, strictly ascending tags that
-    fit the body) and known-tag formats (lengths, id character sets, volume <= 100). TLVs with
-    unknown tags are skipped into :attr:`Frame.extra`. Never raises."""
+    event type (0..6), exact length, the 4-byte check (:func:`frame_check`), TLV structure
+    (non-zero, strictly ascending tags that fit the body) and known-tag formats (lengths, id
+    character sets, volume <= 100, strict UTF-8 query and label, PREFS 4 / ACTION 6 / CLIENT_ID
+    16 bytes, the ACTION check byte). Unknown PREFS / ACTION codes are not errors (the field
+    decodes as None / an action without a name). TLVs with unknown tags are skipped into
+    :attr:`Frame.extra`. Decoders do not enforce :data:`TYPE_TAGS`. Never raises."""
     try:
         b = bytes(data)
     except (TypeError, ValueError):
@@ -801,13 +1068,13 @@ def decode_frame(data: Any) -> Optional[Frame]:
     if n < FRAME_OVERHEAD or b[0] != MAGIC or (b[1] >> 4) != VERSION:
         return None
     t = b[1] & 0x0F
-    if t > 5:
+    if t > int(EventType.CONFIG):
         return None
     body_len = b[4]
     if n != FRAME_OVERHEAD + body_len:
         return None
     stop = 5 + body_len
-    if fletcher16(b[:stop]) != ((b[stop] << 8) | b[stop + 1]):
+    if frame_check(b[:stop]) != int.from_bytes(b[stop:stop + TRAILER_LEN], "big"):
         return None
     f: dict[str, Any] = {}
     extra: list[TLV] = []
@@ -836,9 +1103,10 @@ def decode_frame(data: Any) -> Optional[Frame]:
                 return None
             f["youtube_id"] = v.decode("ascii")
         elif tag == TAG_QUERY:
-            if not 1 <= ln <= MAX_QUERY:
+            text = _strict_text(v) if 1 <= ln <= MAX_QUERY else None
+            if text is None:
                 return None
-            f["query"] = v.decode("utf-8", "replace")
+            f["query"] = text
         elif tag in (TAG_START_DS, TAG_LENGTH_DS):
             if ln != 2:
                 return None
@@ -848,9 +1116,22 @@ def decode_frame(data: Any) -> Optional[Frame]:
                 return None
             f["volume"] = v[0]
         elif tag == TAG_LABEL:
-            if not 1 <= ln <= MAX_LABEL:
+            text = _strict_text(v) if 1 <= ln <= MAX_LABEL else None
+            if text is None:
                 return None
-            f["label"] = v.decode("utf-8", "replace")
+            f["label"] = text
+        elif tag == TAG_PREFS:
+            if ln != 4:
+                return None
+            f["prefs"] = Prefs.from_codes(v)
+        elif tag == TAG_ACTION:
+            if ln != 6 or v[1] != v[0] ^ 0xFF:
+                return None
+            f["action"] = Action(v[0], int.from_bytes(v[2:6], "big"))
+        elif tag == TAG_CLIENT_ID:
+            if ln != CLIENT_ID_LEN:
+                return None
+            f["client_id"] = v.hex()
         else:
             extra.append(TLV(tag, v))
         last = tag
@@ -872,7 +1153,7 @@ def rows_cap(cell_px: Any) -> int:
 
 
 def capacity(rows: Any) -> int:
-    """Largest frame (bytes, 7-byte overhead included) that fits ``rows`` rows of 112 cells:
+    """Largest frame (bytes, the 9-byte overhead included) that fits ``rows`` rows of 112 cells:
     ``floor((rows * 112 - 7) * 3 / 8)``, at most :data:`MAX_FRAME` (``Protocol2.Capacity``).
     2 px (4 rows) = 165, 3 px (3) = 123, 4 px (2) = 81, one row = 39."""
     r = _num(rows)

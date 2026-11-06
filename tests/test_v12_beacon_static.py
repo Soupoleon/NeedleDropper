@@ -56,8 +56,9 @@ def test_protocol2_exposes_what_v1_callers_need():
     for name in ("HasFlag", "PadLine", "PadLineCount", "FormatChatLine", "EncodeCells", "EncodeFrame",
                  "Capacity", "RowsCap", "AdaptiveLayout"):
         assert callable(P[name]), name
-    assert dict(P.EV.items()) == {"NONE": 0, "HELLO": 1, "ARM": 2, "FIRE": 3, "CANCEL": 4, "PING": 5}
-    assert [P.EV_NAME[i] for i in range(6)] == ["NONE", "HELLO", "ARM", "FIRE", "CANCEL", "PING"]
+    # v1.2.1 adds CONFIG = 6 (DESIGN-v1.2.1 2.2: music choices and requests, never a song)
+    assert dict(P.EV.items()) == {"NONE": 0, "HELLO": 1, "ARM": 2, "FIRE": 3, "CANCEL": 4, "PING": 5, "CONFIG": 6}
+    assert [P.EV_NAME[i] for i in range(7)] == ["NONE", "HELLO", "ARM", "FIRE", "CANCEL", "PING", "CONFIG"]
     assert dict(P.FLAG.items()) == {"IN_COMBAT": 1, "IN_INSTANCE": 2, "ON_TAXI": 4, "DEAD": 8, "LOCAL_PLAYBACK": 16,
                                     "DROP_ACTIVE": 32, "TEST": 64}
     assert h.ns.Protocol is None  # nothing loaded here needs v1

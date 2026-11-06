@@ -33,11 +33,13 @@ ADDON_LUA = sorted(str(p.relative_to(ADDON_DIR)).replace("\\", "/") for p in ADD
 
 # --------------------------------------------------------------- sources --
 
+# 1.2.1 (D15, DESIGN-v1.2.1 6): version 1.2.1, MusicServices.lua after Companion.lua and
+# UI\MusicDialog.lua after UI\ShareDialogs.lua.
 EXPECTED_TOC = """## Interface: 16001
 ## Title: NeedleDropper
 ## Notes: Kojima-style needle drops: curated songs the first time you arrive somewhere.
 ## Author: NeedleDropper
-## Version: 1.2.0
+## Version: 1.2.1
 ## X-License: MIT
 ## X-Curse-Project-ID: 1786392
 ## Category: Audio & Video
@@ -58,6 +60,7 @@ Sets\\AzerothUnbound.lua
 Soundtracks.lua
 Share.lua
 Companion.lua
+MusicServices.lua
 Emit.lua
 Location.lua
 Discovery.lua
@@ -72,6 +75,7 @@ UI\\Drops.lua
 UI\\Soundtracks.lua
 UI\\Journal.lua
 UI\\ShareDialogs.lua
+UI\\MusicDialog.lua
 SelfTest.lua
 """
 
@@ -579,7 +583,9 @@ def test_beacon_selftest_reports_the_v2_geometry_and_shows_the_largest_strip():
     assert h.beacon_decoded().type == ET.PING                       # the test signal first
     assert "gap above your player frame: 14.0 px (measured from PlayerFrame.PlayerFrameContainer.FrameTexture)" in text
     assert "cells: 3 px drawn (setting 3 px); a song strip may use 3 rows; this strip: 96x3 px (1 row)" in text
-    assert "largest song strip (shown for 10 s after the PING): 336x9 px (3 rows x 112 columns of 3 px, 123 bytes)" in text
+    # 122 bytes: with the 4-byte frame check (F1) the title trim lands on a trailing space, which the
+    # text cleaning drops, so the 123-byte cap is not reached exactly; the strip is still 336 x 9
+    assert "largest song strip (shown for 10 s after the PING): 336x9 px (3 rows x 112 columns of 3 px, 122 bytes)" in text
     assert "the strip clears your player frame." in text
     mark = h.mark()
     h.advance(1.1)

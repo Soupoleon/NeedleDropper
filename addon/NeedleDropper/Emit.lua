@@ -46,6 +46,7 @@ end
 
 -- Reports an error from a transport without stopping the other one.
 local function report(err)
+  if type(ns.NoteError) == "function" then pcall(ns.NoteError, err) end
   local h = geterrorhandler and geterrorhandler()
   if h then h(err) end
 end
@@ -102,10 +103,16 @@ local function spotifyConnected(v)
   return false
 end
 
--- "spotify" when the NeedleDropper app says Spotify is connected (ns.Companion status, else
--- the raw NeedleDropper_CompanionData written by the app), otherwise "youtube" (DESIGN 2.3
--- fit rule step 7: the provider id the beacon keeps when only one fits).
+-- The provider id the beacon keeps when only one fits (DESIGN 2.3 fit rule step 7): what "Play
+-- music with" says (ns.MusicServices, DESIGN-v1.2.1 1.5); without it, "spotify" when the
+-- NeedleDropper app says Spotify is connected (ns.Companion status, else the raw
+-- NeedleDropper_CompanionData written by the app), otherwise "youtube".
 function ns.PreferredProvider()
+  local MS = ns.MusicServices
+  if type(MS) == "table" and type(MS.PreferredProvider) == "function" then
+    local ok, p = pcall(MS.PreferredProvider)
+    if ok and (p == "spotify" or p == "youtube") then return p end
+  end
   local C = ns.Companion
   if type(C) == "table" and type(C.Status) == "function" then
     local ok, st = pcall(C.Status)
@@ -204,8 +211,28 @@ end
 --   soundtrack id -> setId; prefer = the provider the beacon's fit rule keeps.
 -- HELLO / PING / NONE carry no drop fields; CANCEL only the identity. The test drop (id
 -- "test") carries its label but no song, so nothing plays. `flags` holds only extraFlags
--- (ns.Emit replaces them with the live flags); `seq` is opts.seq or 0.
--- opts: { seq = n, prefer = "spotify"|"youtube", label = text }.
+-- (ns.Emit passes the live flags); `seq` is opts.seq or 0.
+-- v1.2.1 (DESIGN-v1.2.1 2.9): a HELLO carries the music choices (prefs = MusicServices.WirePrefs(),
+-- nil until the player set one in game); a CONFIG copies opts.prefs / opts.action / opts.clientId
+-- and nothing else; ARM and FIRE leave out the song fields "Play music with" rules out
+-- (MusicServices.Strip: "Neither" never plays; never for LOCAL_PLAYBACK or the test drop).
+-- opts: { seq = n, prefer = "spotify"|"youtube", label = text, prefs =, action =, clientId = }.
+local function musicServices()
+  local MS = ns.MusicServices
+  if type(MS) == "table" then return MS end
+  return nil
+end
+
+local function stripSong(ev, drop, evType)
+  local MS = musicServices()
+  if not (MS and type(MS.Strip) == "function") then return end
+  local ok, strip = pcall(MS.Strip, drop, ev.flags, evType)
+  if not ok or type(strip) ~= "table" then return end
+  if strip.spotify then ev.spotify = nil end
+  if strip.youtube then ev.youtube = nil end
+  if strip.query then ev.artist, ev.title = nil, nil end
+end
+
 function ns.BuildEvent(evType, drop, extraFlags, opts)
   opts = type(opts) == "table" and opts or {}
   local ev = {
@@ -233,8 +260,18 @@ function ns.BuildEvent(evType, drop, extraFlags, opts)
         ev.volume = isnum(drop.volume) and drop.volume or nil
         ev.label = nonEmpty(opts.label) or ns.PlaceLabel(drop)
         ev.setId = nonEmpty(drop.setId)
+        stripSong(ev, drop, evType)
       end
     end
+  end
+  local MS = musicServices()
+  if evType == EV.HELLO and MS and type(MS.WirePrefs) == "function" then
+    local ok, prefs = pcall(MS.WirePrefs)
+    if ok and type(prefs) == "table" then ev.prefs = prefs end
+  elseif evType == EV.CONFIG then
+    if type(opts.prefs) == "table" then ev.prefs = opts.prefs end
+    if type(opts.action) == "table" then ev.action = opts.action end
+    if type(opts.clientId) == "string" then ev.clientId = opts.clientId end
   end
   local prefer = opts.prefer
   if prefer ~= "spotify" and prefer ~= "youtube" then prefer = ns.PreferredProvider() end
@@ -245,7 +282,12 @@ end
 -- Emits one event to every transport (the v1 signature and return value).
 -- opts: { noPad = bool, forceChat = bool } plus the ns.BuildEvent options.
 function ns.Emit(evType, drop, extraFlags, opts)
-  local ev = ns.BuildEvent(evType, drop, extraFlags, opts)
+  -- The live flags first: whether the game plays the drop itself (LOCAL_PLAYBACK) decides what
+  -- BuildEvent may strip. A CONFIG never carries TEST (DESIGN-v1.2.1 2.2): during a test drop the
+  -- live flags would otherwise lend it the drop's TEST bit, and TEST frames are link checks.
+  local flags = ns.ComputeFlags(extraFlags, drop)
+  if evType == EV.CONFIG and P2.HasFlag(flags, FLAG.TEST) then flags = flags - FLAG.TEST end
+  local ev = ns.BuildEvent(evType, drop, flags, opts)
   local db = ns.db
   local last = E.seq
   if type(db) == "table" and isnum(db.lastSeq) then last = db.lastSeq end
@@ -253,7 +295,7 @@ function ns.Emit(evType, drop, extraFlags, opts)
   E.seq = seq
   if type(db) == "table" then db.lastSeq = seq end
   ev.seq = seq
-  ev.flags = ns.ComputeFlags(extraFlags, drop)
+  ev.flags = flags
   ev.t = GetTime()
   ns.LastEvent = ev
   local evs = ns.Events

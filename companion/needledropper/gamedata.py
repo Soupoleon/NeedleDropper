@@ -28,7 +28,20 @@ NeedleDropper::
       imports = {                      -- one-time migration offers (DESIGN-v1.2 4.2); absent when none
         { code = "!NeedleDropper:1!...!", active = true },
       },
+      music = {                        -- v1.2.1, DESIGN-v1.2.1 3.10 (lead decision D17); absent when empty
+        spotify = { clientId = "<32 lowercase hex>", redirectUri = "http://127.0.0.1:8321/callback",
+                    account = "Ethan", product = "premium", state = "connected", mode = "app" },
+        youtube = { enabled = true, player = "chrome", signInOpened = 1762380000 },
+        prefs   = { order = "spotify-youtube", corner = "topright", fade = true, resume = true, fromGame = true },
+        actions = { { id = 1762380123, action = "connect-spotify", result = "connected",
+                      text = "Spotify connected as Ethan (Premium).", at = 1762380150 } },
+      },
     }
+
+``status.spotify`` keeps its four v1.2 values; the detail is ``music.spotify.state`` (connected,
+not-connected, needs-relogin, premium-required, no-player, stuck, error -- the first three of
+v1.2's values map to themselves, the new states read "error" in ``status.spotify``).
+``music.spotify.mode`` is "app" or "connect", ``music.youtube.player`` "chrome", "edge" or "none".
 
 Track keys written by the engine: ``q:<artist>\\031<title>`` (ASCII-lowercased
 text as sent in the beacon query) for Spotify search results, ``sp:<id>`` for
@@ -42,7 +55,8 @@ that, rewriting ``Data.lua`` with :func:`write_companion_data` is enough: the
 game picks it up at the next login or ``/reload``.
 
 Incremental updates -- :func:`record_track`, :func:`set_status`,
-:func:`add_import`, :func:`set_imports`, :func:`touch` -- are validated at
+:func:`add_import`, :func:`set_imports`, :func:`set_music`, :func:`record_music_action`,
+:func:`touch` -- are validated at
 once, then **coalesced**: at most one write per :data:`MIN_WRITE_INTERVAL`
 seconds per AddOns folder, done on a background timer that re-reads the file
 and applies every pending change to it (so changes written by something else
@@ -127,9 +141,19 @@ __all__ = [
     "set_status",
     "add_import",
     "set_imports",
+    "set_music",
+    "record_music_action",
     "touch",
     "flush",
     "flush_all",
+    "MUSIC_SPOTIFY_STATES",
+    "MUSIC_SPOTIFY_PROBLEMS",
+    "MUSIC_SPOTIFY_MODES",
+    "YOUTUBE_PLAYERS",
+    "MUSIC_ORDERS",
+    "MUSIC_CORNERS",
+    "MUSIC_ACTIONS",
+    "MAX_MUSIC_ACTIONS",
 ]
 
 log = logging.getLogger(__name__)
@@ -170,7 +194,36 @@ TRANSPORTS = ("pixel", "chatlog")
 #: Boolean track fields; written only when true.
 TRACK_FLAGS = ("notFound", "notEmbeddable")
 TRACK_FIELDS = ("spotify", "durationMs", "title", "artist") + TRACK_FLAGS
-_TOP_FIELDS = ("schema", "appVersion", "written", "status", "tracks", "imports")
+_TOP_FIELDS = ("schema", "appVersion", "written", "status", "tracks", "imports", "music")
+
+# The music block (v1.2.1, DESIGN-v1.2.1 3.10, lead decision D17). The addon's Companion.lua accepts
+# exactly these values; they equal providers.spotify.MUSIC_STATES, config.SPOTIFY_DEVICE_MODES,
+# config.MUSIC_ORDERS / PLAYER_CORNERS and protocol2.ACTIONS (tested).
+MUSIC_SPOTIFY_STATES = ("connected", "not-connected", "needs-relogin", "premium-required", "no-player", "stuck",
+                        "error")
+MUSIC_SPOTIFY_MODES = ("app", "connect")
+#: ``music.spotify.problem`` (v1.2.1 review ON-3): why the state is "error" when the game can say more than
+#: "sign in again" -- "allowlist": Spotify refused the account for the player's developer app (User Management).
+MUSIC_SPOTIFY_PROBLEMS = ("allowlist",)
+YOUTUBE_PLAYERS = ("chrome", "edge", "none")
+MUSIC_ORDERS = ("spotify-youtube", "youtube-spotify", "spotify", "youtube", "none")
+MUSIC_CORNERS = ("topright", "topleft", "bottomright", "bottomleft")
+MUSIC_ACTIONS = ("connect-spotify", "disconnect-spotify", "test-spotify", "test-youtube", "youtube-sign-in")
+#: ``music.actions`` keeps this many request results (the newest last).
+MAX_MUSIC_ACTIONS = 8
+MAX_ACCOUNT_CHARS = 64
+MAX_ACTION_TEXT_CHARS = 300
+_MAX_UINT32 = 0xFFFFFFFF
+_MUSIC_FIELDS = ("spotify", "youtube", "prefs", "actions")
+_MUSIC_SPOTIFY_FIELDS = ("clientId", "redirectUri", "account", "product", "state", "mode", "problem")
+_MUSIC_YOUTUBE_FIELDS = ("enabled", "player", "signInOpened")
+_MUSIC_PREFS_FIELDS = ("order", "corner", "fade", "resume", "fromGame")
+_MUSIC_ACTION_FIELDS = ("id", "action", "result", "text", "at")
+_CLIENT_ID_RE = re.compile(r"[0-9a-f]{32}")
+_REDIRECT_RE = re.compile(r"http://127\.0\.0\.1:[0-9]{1,5}/callback")
+_PRODUCT_RE = re.compile(r"[a-z]{1,16}")
+_RESULT_RE = re.compile(r"[a-z][a-z-]{0,23}")
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _STATUS_FIELDS = ("spotify", "youtube", "transports")
 _IMPORT_FIELDS = ("code", "active")
 _CODE_RE = re.compile(r"!NeedleDropper:[0-9]{1,9}![A-Za-z0-9+/=]+!")
@@ -427,6 +480,147 @@ def _imports(raw: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _whole(value: Any, what: str, upper: int = _MAX_EXACT_INT) -> int:
+    if isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        value = int(value)
+    if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= upper:
+        raise GameDataError(f"{what} must be a whole number from 0 to {upper}, not {value!r}")
+    return value
+
+
+def _one_of(value: Any, allowed: tuple[str, ...], what: str) -> str:
+    if not isinstance(value, str) or value not in allowed:
+        raise GameDataError(f"{what} must be one of {', '.join(allowed)}, not {value!r}")
+    return value
+
+
+def _matching(value: Any, pattern: "re.Pattern[str]", what: str, shape: str) -> str:
+    if not isinstance(value, str) or not pattern.fullmatch(value):
+        raise GameDataError(f"{what} must be {shape}, not {value!r}")
+    return value
+
+
+def _plain_text(value: Any, what: str, limit: int) -> Optional[str]:
+    """Text for the game: control characters removed, at most ``limit`` characters; None if empty."""
+    if not isinstance(value, str):
+        raise GameDataError(f"{what} must be a string, not {type(value).__name__}")
+    s = _CONTROL_RE.sub("", _clean_text(value)).strip()
+    return s[:limit] or None
+
+
+def _music_spotify(name: str, value: Any) -> Any:
+    what = f"music.spotify.{name}"
+    if name == "clientId":
+        return _matching(value, _CLIENT_ID_RE, what, "32 lowercase hex digits")
+    if name == "redirectUri":
+        return _matching(value, _REDIRECT_RE, what, "http://127.0.0.1:<port>/callback")
+    if name == "account":
+        return _plain_text(value, what, MAX_ACCOUNT_CHARS)
+    if name == "product":
+        return _matching(value, _PRODUCT_RE, what, "1-16 lowercase letters (premium, free, open)")
+    if name == "state":
+        return _one_of(value, MUSIC_SPOTIFY_STATES, what)
+    if name == "problem":
+        return _one_of(value, MUSIC_SPOTIFY_PROBLEMS, what)
+    return _one_of(value, MUSIC_SPOTIFY_MODES, what)  # mode
+
+
+def _music_youtube(name: str, value: Any) -> Any:
+    what = f"music.youtube.{name}"
+    if name == "enabled":
+        return _bool(value, what, False)
+    if name == "player":
+        return _one_of(value, YOUTUBE_PLAYERS, what)
+    return _whole(value, what)  # signInOpened
+
+
+def _music_prefs(name: str, value: Any) -> Any:
+    what = f"music.prefs.{name}"
+    if name == "order":
+        return _one_of(value, MUSIC_ORDERS, what)
+    if name == "corner":
+        return _one_of(value, MUSIC_CORNERS, what)
+    return _bool(value, what, False)  # fade, resume, fromGame
+
+
+_MUSIC_PARTS: dict[str, tuple[tuple[str, ...], Callable[[str, Any], Any]]] = {
+    "spotify": (_MUSIC_SPOTIFY_FIELDS, _music_spotify),
+    "youtube": (_MUSIC_YOUTUBE_FIELDS, _music_youtube),
+    "prefs": (_MUSIC_PREFS_FIELDS, _music_prefs),
+}
+
+
+def _music_part(part: str, raw: Any) -> dict[str, Any]:
+    """One of ``music.spotify`` / ``youtube`` / ``prefs``: unknown fields and wrong values raise; a
+    field that is None (or text that is empty once cleaned) is left out."""
+    if raw is None or (isinstance(raw, Mapping) and not raw):
+        return {}
+    if not isinstance(raw, Mapping):
+        raise GameDataError(f"music.{part} must be a dict, not {type(raw).__name__}")
+    fields, check = _MUSIC_PARTS[part]
+    _check_fields(raw, fields, f"music.{part}")
+    out: dict[str, Any] = {}
+    for name in fields:  # a fixed order in the file
+        if raw.get(name) is None:
+            continue
+        value = check(name, raw[name])
+        if value is not None:
+            out[name] = value
+    return out
+
+
+def _music_action(raw: Any, what: str) -> dict[str, Any]:
+    if not isinstance(raw, Mapping):
+        raise GameDataError(f"{what} must be a dict, not {type(raw).__name__}")
+    _check_fields(raw, _MUSIC_ACTION_FIELDS, what)
+    for name in ("id", "action", "result", "at"):
+        if raw.get(name) is None:
+            raise GameDataError(f"{what}.{name} is missing")
+    out: dict[str, Any] = {
+        "id": _whole(raw["id"], f"{what}.id", _MAX_UINT32),
+        "action": _one_of(raw["action"], MUSIC_ACTIONS, f"{what}.action"),
+        "result": _matching(raw["result"], _RESULT_RE, f"{what}.result", "a result code like \"connected\""),
+    }
+    text = _plain_text(raw["text"], f"{what}.text", MAX_ACTION_TEXT_CHARS) if raw.get("text") is not None else None
+    if text is not None:
+        out["text"] = text
+    out["at"] = _whole(raw["at"], f"{what}.at")
+    return out
+
+
+def _music_actions(raw: Any) -> list[dict[str, Any]]:
+    """The request results, oldest first: one per (id, action) -- a later entry replaces an earlier
+    one, so an interim "opened" becomes the final result -- and the newest :data:`MAX_MUSIC_ACTIONS`."""
+    if raw is None or (isinstance(raw, Mapping) and not raw):
+        return []
+    if not isinstance(raw, (list, tuple)):
+        raise GameDataError(f"music.actions must be a list, not {type(raw).__name__}")
+    out: list[dict[str, Any]] = []
+    for i, item in enumerate(raw):
+        entry = _music_action(item, f"music.actions[{i}]")
+        out = [e for e in out if (e["id"], e["action"]) != (entry["id"], entry["action"])]
+        out.append(entry)
+    return out[-MAX_MUSIC_ACTIONS:]
+
+
+def _music(raw: Any) -> dict[str, Any]:
+    """The ``music`` block (DESIGN-v1.2.1 3.10); ``{}`` when there is nothing in it."""
+    if raw is None or (isinstance(raw, Mapping) and not raw):
+        return {}
+    if not isinstance(raw, Mapping):
+        raise GameDataError(f"music must be a dict, not {type(raw).__name__}")
+    _check_fields(raw, _MUSIC_FIELDS, "music")
+    out: dict[str, Any] = {}
+    for part in ("spotify", "youtube", "prefs"):
+        value = _music_part(part, raw.get(part))
+        if value:
+            out[part] = value
+    actions = _music_actions(raw.get("actions"))
+    if actions:
+        out["actions"] = actions
+    return out
+
+
 def _tracks(raw: Any, max_tracks: int, *, budget: int = _TRACKS_BUDGET) -> dict[str, dict[str, Any]]:
     if raw is None:
         return {}
@@ -473,8 +667,11 @@ def normalize_companion_data(data: Optional[Mapping[str, Any]] = None, *, now: O
     out sorted by key; beyond ``max_tracks`` tracks or the file size budget
     the rest is dropped, and over-long titles / artists are cut (see the
     module docs). ``imports`` is a list of ``{code, active}`` share-code
-    offers (a code listed twice counts once). Raises :class:`GameDataError` for
-    unknown fields, wrong types and invalid values.
+    offers (a code listed twice counts once). ``music`` (v1.2.1) is checked
+    field by field (see the module docs; an empty block is left out, the
+    account name and an action's text lose control characters and are cut to
+    64 / 300 characters, and only the newest 8 actions are kept). Raises
+    :class:`GameDataError` for unknown fields, wrong types and invalid values.
     """
     if data is None:
         data = {}
@@ -500,6 +697,7 @@ def normalize_companion_data(data: Optional[Mapping[str, Any]] = None, *, now: O
         raise GameDataError(f"written must be a unix time (whole seconds, 0 or more), not {written!r}")
     imports = _imports(data.get("imports"))
     imports_bytes = sum(len(i["code"]) + 48 for i in imports)
+    music = _music(data.get("music"))
     out = {
         "schema": SCHEMA,
         "appVersion": version,
@@ -509,6 +707,8 @@ def normalize_companion_data(data: Optional[Mapping[str, Any]] = None, *, now: O
     }
     if imports:
         out["imports"] = imports
+    if music:
+        out["music"] = music
     return out
 
 
@@ -804,7 +1004,64 @@ def _lenient_current(addons_dir: Union[str, os.PathLike]) -> dict[str, Any]:
             except GameDataError:
                 continue
         out["imports"] = kept
+    music = _lenient_music(raw.get("music"))
+    if music:
+        out["music"] = music
     return out
+
+
+def _lenient_music(raw: Any) -> dict[str, Any]:
+    """The valid parts of a ``music`` block read back from ``Data.lua``, field by field."""
+    if not isinstance(raw, Mapping):
+        return {}
+    out: dict[str, Any] = {}
+    for part, (fields, check) in _MUSIC_PARTS.items():
+        sub = raw.get(part)
+        if not isinstance(sub, Mapping):
+            continue
+        good: dict[str, Any] = {}
+        for name in fields:
+            if sub.get(name) is None:
+                continue
+            try:
+                value = check(name, sub[name])
+            except GameDataError:
+                continue
+            if value is not None:
+                good[name] = value
+        if good:
+            out[part] = good
+    actions = raw.get("actions")
+    if isinstance(actions, (list, tuple)):
+        kept = []
+        for i, item in enumerate(actions):
+            try:
+                kept.append(_music_action(item, f"music.actions[{i}]"))
+            except GameDataError:
+                continue
+        if kept:
+            out["actions"] = _music_actions(kept)
+    return out
+
+
+def _merge_music(data: dict[str, Any], parts: Mapping[str, Optional[Mapping[str, Any]]]) -> None:
+    """Merge ``{part: {field: value or None}}`` into ``data["music"]`` (None removes a field)."""
+    music = data.setdefault("music", {})
+    for part, fields in parts.items():
+        if fields is None:
+            continue
+        sub = dict(music.get(part) or {})
+        for name, value in fields.items():
+            if value is None:
+                sub.pop(name, None)
+            else:
+                sub[name] = value
+        if sub:
+            music[part] = sub
+        else:
+            music.pop(part, None)
+    if not music:
+        data.pop("music", None)
 
 
 def _merge_track(tracks: dict[str, dict[str, Any]], key: str, info: Optional[Mapping[str, Any]],
@@ -919,6 +1176,37 @@ class CompanionDataWriter:
         """Replace the whole ``imports`` list (``[]`` removes it from the file)."""
         clean = _imports(list(imports))
         self._queue(lambda d: d.__setitem__("imports", [dict(i) for i in clean]))
+
+    def set_music(self, spotify: Optional[Mapping[str, Any]] = None, youtube: Optional[Mapping[str, Any]] = None,
+                  prefs: Optional[Mapping[str, Any]] = None) -> None:
+        """Merge fields into ``music.spotify`` / ``youtube`` / ``prefs`` (DESIGN-v1.2.1 3.10): a part
+        left out (None) is unchanged, a field set to None is removed. Validated now."""
+        parts: dict[str, Optional[dict[str, Any]]] = {}
+        for part, given in (("spotify", spotify), ("youtube", youtube), ("prefs", prefs)):
+            if given is None:
+                parts[part] = None
+                continue
+            if not isinstance(given, Mapping):
+                raise GameDataError(f"music.{part} must be a dict, not {type(given).__name__}")
+            fields, check = _MUSIC_PARTS[part]
+            _check_fields(given, fields, f"music.{part}")
+            clean: dict[str, Any] = {}
+            for name, value in given.items():
+                clean[name] = None if value is None else check(name, value)
+            parts[part] = clean
+        if all(v is None for v in parts.values()):
+            return
+        self._queue(lambda d: _merge_music(d, parts))
+
+    def record_music_action(self, entry: Mapping[str, Any]) -> None:
+        """Add a request result to ``music.actions`` (``{id, action, result, text, at}``): an entry
+        with the same (id, action) replaces the old one; the newest 8 are kept."""
+        clean = _music_action(entry, "music action")
+
+        def apply(d: dict[str, Any]) -> None:
+            music = d.setdefault("music", {})
+            music["actions"] = _music_actions(list(music.get("actions") or []) + [dict(clean)])
+        self._queue(apply)
 
     def touch(self) -> None:
         """Rewrite the file with a fresh ``written`` time (the addon shows how long ago the app was seen)."""
@@ -1045,6 +1333,21 @@ def add_import(addons_dir: Union[str, os.PathLike], code: str, active: bool = Fa
 def set_imports(addons_dir: Union[str, os.PathLike], imports: Sequence[Mapping[str, Any]]) -> None:
     """Replace the ``imports`` list (coalesced)."""
     writer_for(addons_dir).set_imports(imports)
+
+
+def set_music(addons_dir: Union[str, os.PathLike], **parts: Any) -> None:
+    """Merge ``spotify=`` / ``youtube=`` / ``prefs=`` fields into the ``music`` block (coalesced;
+    see :meth:`CompanionDataWriter.set_music`)."""
+    unknown = sorted(set(parts) - {"spotify", "youtube", "prefs"})
+    if unknown:
+        raise GameDataError(f"set_music: unknown part(s) {', '.join(unknown)} (allowed: spotify, youtube, prefs)")
+    writer_for(addons_dir).set_music(**parts)
+
+
+def record_music_action(addons_dir: Union[str, os.PathLike], entry: Mapping[str, Any]) -> None:
+    """Record the result of a request the player sent from the game (coalesced; see
+    :meth:`CompanionDataWriter.record_music_action`)."""
+    writer_for(addons_dir).record_music_action(entry)
 
 
 def touch(addons_dir: Union[str, os.PathLike]) -> None:

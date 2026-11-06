@@ -859,6 +859,10 @@ class PixelTransport(Transport):
         self._print_failed = False  # PrintWindow raised: wait the long streak before trying it again
         self._needed_w = 0
         self._needed_h = 0
+        #: v1.2.1 (DESIGN-v1.2.1 3.1): called as ``on_baseline(frame, "pixel")``, outside the lock, with
+        #: every frame that becomes the baseline (never emitted): the app applies the music choices a
+        #: baseline HELLO carries, and nothing else.
+        self.on_baseline: Optional[Callable[[Any, str], None]] = None
         # acceptance state
         self._accepted: Optional[tuple] = None  # baseline / last confirmed
         self._candidate: Optional[tuple] = None
@@ -1110,6 +1114,11 @@ class PixelTransport(Transport):
                 self.on_event(emit, self.name)
             except Exception:
                 log.exception("pixel on_event callback failed")
+        elif outcome == "baseline" and self.on_baseline is not None:
+            try:
+                self.on_baseline(event, self.name)
+            except Exception:
+                log.exception("pixel on_baseline callback failed")
         return outcome, emit
 
     def reset_baseline(self) -> None:
@@ -1339,7 +1348,10 @@ class PixelTransport(Transport):
             return f"beacon OK: {cell:g} px cells at ({x},{y}) via {self._method}"
         rep = self._last_report
         if rep is not None and rep.header is not None:
-            return f"beacon header visible but unreadable ({rep.reason})"
+            # A strip that keeps failing the frame check is most often an addon and an app that don't match:
+            # 1.2.1 changed the signal format (review ON-2).
+            return (f"beacon header visible but unreadable ({rep.reason}): an older or newer NeedleDropper addon? "
+                    "Update the addon and the app together")
         if self._frames == 0:
             return "window found; no frame captured yet"
         return ("no beacon visible in the top-left corner - is the addon loaded, '/needle beacon on', "

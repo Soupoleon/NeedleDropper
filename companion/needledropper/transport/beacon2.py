@@ -28,7 +28,8 @@ Decoder outline (the robustness techniques of the v1 locator, :mod:`.pixel`, gen
    the same way).
 5. Sample every cell at the middle pixel of its span, de-whiten and validate: header,
    geometry, rows consistent with the frame length, zero pad bits, magic, version, TLV
-   structure and Fletcher-16 -- a partially covered or half-drawn strip yields None.
+   structure and the 4-byte frame check (:func:`~needledropper.protocol2.frame_check`) -- a
+   partially covered or half-drawn strip yields None.
 6. Only if nothing decoded cheaply (bounded work per frame): per-channel thresholds calibrated
    on the header (HDR / tone shifts), small lattice perturbations, and for crisp 1-3 px cells
    an exact rasterisation solver (:func:`_exact_lattices`) that intersects the constraints
@@ -55,7 +56,7 @@ Capture assumptions (the v1.2 addon, DESIGN-v1.2 2.3 / docs/PROTOCOL-v2.md 4.5):
   :func:`capture_size` (a 448 px strip is 672 px wide at 150 %). Nothing about the geometry
   has to be configured: header and geometry cells say everything, and the pitch is fitted.
 * Song frames are on screen only briefly: the full ARM for 3 s, FIRE for at least 3 s
-  (then a 7-byte HELLO with DROP_ACTIVE), CANCEL / PING for at least 1 s. At 4 Hz that is
+  (then a HELLO with DROP_ACTIVE, 9..19 bytes), CANCEL / PING for at least 1 s. At 4 Hz that is
   about 12 captures for a song frame and 4 for a CANCEL: plenty for the transport's "two
   identical consecutive reads" rule, even with a brief overlay on top of the strip.
 
@@ -349,8 +350,10 @@ _KS_HEAD = tuple((b[0] << 2) | (b[1] << 1) | b[2] for b in
 
 @functools.lru_cache(maxsize=None)
 def _single_row_lengths(cols: int) -> tuple[int, ...]:
-    """Frame lengths that fit in one row of ``cols`` cells, 7 (HELLO / PING) first."""
-    return tuple(n for n in [7] + list(range(9, p2.MAX_FRAME + 1)) if p2.rows_for(n, cols) == 1)
+    """Frame lengths that fit in one row of ``cols`` cells, 9 (an empty HELLO / PING) first. A
+    body is empty or holds at least one 2-byte TLV head, so no frame is 10 bytes long."""
+    lengths = [p2.FRAME_OVERHEAD] + list(range(p2.FRAME_OVERHEAD + 2, p2.MAX_FRAME + 1))
+    return tuple(n for n in lengths if p2.rows_for(n, cols) == 1)
 
 
 @functools.lru_cache(maxsize=None)
@@ -903,7 +906,7 @@ class _Scanner:
                 return got
             if c.rows == 1:
                 # One row: its tail is pad cells whose colours (the whitening keystream) depend
-                # only on the frame length. Try 7 bytes (HELLO / PING, the frames shown most) and
+                # only on the frame length. Try 9 bytes (an empty HELLO / PING, shown most) and
                 # the lengths the candidate lattices read from the frame head, with those colours.
                 lengths = [p2.FRAME_OVERHEAD]
                 for o2, q2 in tried:

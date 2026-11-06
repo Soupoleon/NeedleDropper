@@ -14,7 +14,7 @@ ns.ADDON = ADDON or "NeedleDropper"
 ns.SCHEMA = 2
 ns.PREFIX = "|cff9fd3ffNeedleDropper|r:"
 ns.SILENCE = "Interface\\AddOns\\NeedleDropper\\media\\silence.mp3"
-ns.VERSION = "1.2.0"
+ns.VERSION = "1.2.1"
 do
   local getMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
   if getMeta then
@@ -158,6 +158,12 @@ ns.DEFAULTS = {
   scope = "character",
   suppressOnTaxi = true,
   instanceDrops = true,
+  -- Music services (DESIGN-v1.2.1 1.4): what the NeedleDropper app plays songs with. Sent to the
+  -- app (PREFS) once the player has chosen one of them in game (NeedleDropperDB.music.prefsSet).
+  musicOrder = "spotify-youtube",
+  youtubeCorner = "topright",
+  musicFade = true,
+  resumeMyMusic = true,
   combatFadeSec = 5,
   maxDropSec = 300,
   duckMethod = "silence",
@@ -200,6 +206,19 @@ ns.SETTINGS = {
     tip = "Hold pending drops while you are on a taxi." },
   { key = "instanceDrops", type = "boolean", label = "Instance drops",
     tip = "Allow drops that belong to dungeons and raids." },
+  { key = "musicOrder", type = "string", label = "Play music with",
+    options = { { "spotify-youtube", "Spotify, then YouTube" }, { "youtube-spotify", "YouTube, then Spotify" },
+                { "spotify", "Spotify only" }, { "youtube", "YouTube only" },
+                { "none", "Neither: title cards and in-game files only" } },
+    tip = "Which service the NeedleDropper app uses for a song, and which one it tries next if that can't play it. In-game audio files always play in the game. YouTube only: drops without a YouTube link show just their title card." },
+  { key = "youtubeCorner", type = "string", label = "YouTube box position",
+    options = { { "topright", "Top right" }, { "topleft", "Top left (below the beacon)" },
+                { "bottomright", "Bottom right" }, { "bottomleft", "Bottom left" } },
+    tip = "Where the small YouTube player box appears while a YouTube song plays. YouTube requires the player to stay visible." },
+  { key = "musicFade", type = "boolean", label = "Fade songs in and out",
+    tip = "Off: songs start and stop at once, like a real needle drop." },
+  { key = "resumeMyMusic", type = "boolean", label = "Resume my Spotify music afterwards",
+    tip = "When a Spotify needle drop ends, Spotify goes back to what you were listening to." },
   { key = "combatFadeSec", type = "number", min = 0, max = 120, step = 1, label = "Stop after combat lasting (s)",
     tip = "Fade out a playing drop when combat lasts longer than this. 0 = never." },
   { key = "maxDropSec", type = "number", min = 10, max = 1800, step = 10, label = "Length when unknown (s)",
@@ -316,7 +335,11 @@ end
 
 -- ------------------------------------------------------ SavedVariables ----
 
-local ACCOUNT_DEFAULTS = { schema = ns.SCHEMA, settings = ns.DEFAULTS, accountDone = {}, lastSeq = 0 }
+-- music (DESIGN-v1.2.1 1.4): prefsSet = the player chose a music setting in game (then PREFS
+-- travel to the app), clientId = the Spotify Client ID typed in game (32 lowercase hex, or nil),
+-- requests = the last 8 requests sent to the app ({ action =, at = time() }, oldest first).
+local ACCOUNT_DEFAULTS = { schema = ns.SCHEMA, settings = ns.DEFAULTS, accountDone = {}, lastSeq = 0,
+                           music = { prefsSet = false, requests = {} } }
 local CHAR_DEFAULTS = { schema = ns.SCHEMA, done = {}, scanned = {}, journal = {}, lastFireAt = 0 }
 local JOURNAL_MAX = 200
 ns.JOURNAL_MAX = JOURNAL_MAX
@@ -363,6 +386,30 @@ local function normalizeJournal(j)
   for i = 1, #clean do j[i] = clean[i] end
 end
 
+-- The five requests the game can send the app (DESIGN-v1.2.1 2.3 ACTION codes 1..5).
+ns.MUSIC_ACTIONS = { "connect-spotify", "disconnect-spotify", "test-spotify", "test-youtube", "youtube-sign-in" }
+ns.MUSIC_REQUESTS_MAX = 8
+local MUSIC_ACTION = {}
+for i = 1, #ns.MUSIC_ACTIONS do MUSIC_ACTION[ns.MUSIC_ACTIONS[i]] = true end
+
+-- NeedleDropperDB.music after mergeDefaults (DESIGN-v1.2.1 1.4): a Client ID that is not 32
+-- lowercase hex digits is forgotten; requests keep the valid entries, newest 8.
+local function normalizeMusic(m)
+  if type(m.prefsSet) ~= "boolean" then m.prefsSet = false end
+  local id = m.clientId
+  if not (type(id) == "string" and #id == 32 and string.find(id, "^[0-9a-f]+$")) then m.clientId = nil end
+  local clean = {}
+  local list = type(m.requests) == "table" and m.requests or {}
+  for i = 1, #list do
+    local r = list[i]
+    if type(r) == "table" and MUSIC_ACTION[r.action] and isInt(r.at) and r.at >= 0 then
+      clean[#clean + 1] = { action = r.action, at = r.at }
+    end
+  end
+  while #clean > ns.MUSIC_REQUESTS_MAX do table.remove(clean, 1) end
+  m.requests = clean
+end
+
 -- The drop that was playing when the UI reloaded (Director, baseline finding ND-DIR-01).
 local function normalizePlaying(c)
   local p = c.playing
@@ -390,6 +437,7 @@ local function initDB()
   normalizeDone(db.accountDone)
   if db.savedCVars ~= nil and type(db.savedCVars) ~= "table" then db.savedCVars = nil end
   if not isInt(db.lastSeq) or db.lastSeq < 0 or db.lastSeq > 255 then db.lastSeq = 0 end
+  normalizeMusic(db.music)
 
   if type(NeedleDropperCharDB) ~= "table" then
     NeedleDropperCharDB = {}
@@ -605,7 +653,16 @@ local eventFrame = CreateFrame("Frame", "NeedleDropperEventFrame")
 local handlers = {}
 ns.unsupportedEvents = {}
 
+-- The last error NeedleDropper's own handlers caught, for /needle report (D16): its text (at most
+-- 300 bytes) and time(). Never sent anywhere.
+function ns.NoteError(err)
+  local text = tostring(err)
+  if #text > 300 then text = string.sub(text, 1, 300) end
+  ns.lastError = { text = text, at = (type(time) == "function" and time()) or 0 }
+end
+
 local function onError(err)
+  pcall(ns.NoteError, err)
   local h = geterrorhandler and geterrorhandler()
   if h then
     h(err)
@@ -747,9 +804,9 @@ local function onOff(arg, current)
 end
 
 local COMMANDS
-local ORDER = { "help", "add", "soundtracks", "journal", "import", "share", "status", "where", "replay", "play",
-                "test", "toast", "stop", "skip", "reset", "beacon", "chatlog", "selftest", "debug", "set",
-                "settings", "options" }
+local ORDER = { "help", "add", "soundtracks", "journal", "import", "share", "music", "status", "where", "replay",
+                "play", "test", "toast", "stop", "skip", "reset", "beacon", "chatlog", "selftest", "report", "debug",
+                "set", "settings", "options" }
 
 local USAGE = {
   help = "this list (/needle on its own opens or closes the window)",
@@ -758,6 +815,8 @@ local USAGE = {
   journal = "[print [count]] - open the Journal tab (print: list the songs you heard in chat)",
   import = "paste a share code to import a soundtrack",
   share = "[name] - share one of your soundtracks as a code",
+  music = "[status|connect|disconnect|test spotify|test youtube|youtube] - Spotify and YouTube (opens Music services)",
+  report = "a report of your setup for a bug report (press Ctrl+C to copy it)",
   status = "settings, transports, soundtracks, pending/playing drop, cooldown",
   where = "current zone key, uiMapID, subzone, instance and matching drop ids",
   replay = "[id] - replay the last (or given) drop",
@@ -910,6 +969,16 @@ COMMANDS = {
       return
     end
     U.OpenShare(ref)
+  end,
+  -- DESIGN-v1.2.1 1.6: Music services (MusicServices.lua parses the rest).
+  music = function(arg)
+    local MS = needModule("MusicServices")
+    if MS and MS.Slash then MS.Slash(arg) end
+  end,
+  -- D16: a plain-text report of the setup for bug reports (SelfTest.lua builds it).
+  report = function()
+    local S = needModule("SelfTest")
+    if S and S.Report then S.Report() end
   end,
   status = function()
     local D = needModule("Director")

@@ -132,3 +132,5 @@ def _no_real_desktop_windows(monkeypatch):
     monkeypatch.setattr(spotify, "_default_game_in_front", lambda: False)
     # No real browser either: the app now makes its hidden player window when it starts.
     monkeypatch.setattr(server, "_default_launcher", lambda args, log_file=None: None)
+    # ... and nothing copied from the real Chrome profile (in-app Spotify copies its Widevine, D11)
+    monkeypatch.setattr(server, "chrome_widevine_dir", lambda: None)

@@ -2,7 +2,8 @@ local ADDON, ns = ...
 -- UI/Window.lua: the NeedleDropper window shell and the public ns.UI API (DESIGN-v1.2 §4.3,
 -- CONTRACTS 2.9). One ButtonFrameTemplate window with three PanelTabButtonTemplate tabs
 -- (Drops | Soundtracks | Journal: UI\Drops.lua, UI\Soundtracks.lua, UI\Journal.lua), a gear in the
--- title bar for the Settings panel, a resize grip, and a footer: a status line on the left and
+-- title bar for the Settings panel and a drum for the Music services dialog (UI\MusicDialog.lua),
+-- a resize grip, and a footer: a status line on the left and
 -- the current tab's buttons on the right. Nothing here creates a frame at file load; the window
 -- is built the first time it opens.
 --
@@ -805,15 +806,20 @@ local function build()
   W.SetTooltip(f.CloseButton, W.SimpleTooltip(CLOSE or L["Close"]))
   tinsert(UISpecialFrames, "NeedleDropperFrame")
 
-  -- Title bar: gear (Settings) next to the close button, and a drag handle.
+  -- Title bar: gear (Settings) next to the close button, the drum (Music services, the addon's own
+  -- TOC icon; DESIGN-v1.2.1 1.3) left of it, and a drag handle.
   f.SettingsButton = W.IconButton(f, 16, "Interface\\WorldMap\\GEAR_64GREY", function() W.OpenSettings() end,
     L["Settings"], L["Opens NeedleDropper's page in the game's Settings panel."])
   f.SettingsButton:SetPoint("RIGHT", f.CloseButton, "LEFT", -2, 0)
   f.SettingsButton:SetFrameLevel(f.CloseButton:GetFrameLevel())
+  f.MusicButton = W.IconButton(f, 16, "Interface\\Icons\\INV_Misc_Drum_01", function() UI.OpenMusic() end,
+    L["Music services"], L["Spotify, YouTube and how songs play."])
+  f.MusicButton:SetPoint("RIGHT", f.SettingsButton, "LEFT", -2, 0)
+  f.MusicButton:SetFrameLevel(f.CloseButton:GetFrameLevel())
 
   local drag = CreateFrame("Frame", nil, f)
   drag:SetPoint("TOPLEFT", f, "TOPLEFT", 4, 0)
-  drag:SetPoint("TOPRIGHT", f.SettingsButton, "TOPLEFT", -4, 0)
+  drag:SetPoint("TOPRIGHT", f.MusicButton, "TOPLEFT", -4, 0)
   drag:SetHeight(22)
   drag:EnableMouse(true)
   drag:RegisterForDrag("LeftButton")
@@ -958,6 +964,18 @@ end
 
 function UI.OpenShare(ref)
   if W.OpenShare then return W.OpenShare(ref) end
+  return false
+end
+
+-- The Music services dialog (UI\MusicDialog.lua, DESIGN-v1.2.1 1.3).
+function UI.OpenMusic()
+  if W.OpenMusic then return W.OpenMusic() end
+  return false
+end
+
+-- /needle report (D16): the report text in a read-only box, selected for Ctrl+C.
+function UI.OpenReport(text)
+  if W.OpenReport then return W.OpenReport(text) end
   return false
 end
 

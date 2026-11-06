@@ -131,9 +131,16 @@ class YouTubeProvider(Provider):
             "startMs": int(drop.startMs or 0), "fadeInMs": int(fade_in_ms or 0),
             "volume": int(drop.volume) if drop.volume is not None else 100,
         })
-        st = self.deck.wait_status(play_id=play_id, states=START_STATES, timeout=self.start_timeout)
+        try:
+            st = self.deck.wait_status(play_id=play_id, states=START_STATES, timeout=self.start_timeout)
+        except BaseException:
+            self._abandon(play_id)
+            raise
         hint = None
         if st is not None and st.get("state") == "error":
+            # The "play" command showed the box (Deck._place_window); a failed song must hide it again,
+            # or it stays on top of the game while the next provider plays the drop (review RCOMP-1).
+            self._abandon(play_id)
             raise ProviderError(self.describe_error(st))
         if st is not None and st.get("state") == "autoplay-blocked":
             hint = AUTOPLAY_HINT
@@ -145,6 +152,13 @@ class YouTubeProvider(Provider):
                         hint=hint)
         return PlayHandle(provider=self.name, drop=drop, data={"playId": play_id, "videoId": drop.youtube},
                           now_playing=np)
+
+    def _abandon(self, play_id: str) -> None:
+        """Stop a play that failed to start (no fade): the page drops the video, and the deck hides the box."""
+        try:
+            self.deck.send({"cmd": "stop", "playId": play_id, "fadeOutMs": 0})
+        except Exception as exc:  # noqa: BLE001 - must not mask the original error
+            log.debug("stop after a failed YouTube start: %s", exc)
 
     @staticmethod
     def describe_error(st: dict[str, Any]) -> str:

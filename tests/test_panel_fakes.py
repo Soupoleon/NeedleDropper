@@ -56,12 +56,25 @@ def http_call(port: int, method: str, path: str, body: Any = None, *, token: Opt
     return status, payload, hdrs
 
 
-class SSE:
-    """A minimal EventSource client for /events?client=..."""
+def launch_key(args: list[str]) -> str:
+    """The player's launch key from a deck launch command (``--app=<player url>#k=<key>``), as a browser
+    would have it in the window's address."""
+    for a in args:
+        if a.startswith("--app=") and "#k=" in a:
+            return a.split("#k=", 1)[1]
+    return ""
 
-    def __init__(self, port: int, client: Optional[str] = "player") -> None:
+
+class SSE:
+    """A minimal EventSource client for /events?client=... (a player page sends the deck's launch key
+    ``key``, as player.js does from its address; v1.2.1 review ON-1)."""
+
+    def __init__(self, port: int, client: Optional[str] = "player", *, key: Optional[str] = None) -> None:
         self.conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-        self.conn.request("GET", "/events" + (f"?client={client}" if client else ""))
+        query = [f"client={client}"] if client else []
+        if key is not None:
+            query.append(f"k={key}")
+        self.conn.request("GET", "/events" + ("?" + "&".join(query) if query else ""))
         self.resp = self.conn.getresponse()
         self.status = self.resp.status
         self.messages: list[dict] = []
@@ -126,10 +139,10 @@ class FakePlayer:
 
     def __call__(self, args: list[str]) -> None:  # the deck's launcher
         self.launches.append(list(args))
-        threading.Thread(target=self._run, daemon=True).start()
+        threading.Thread(target=self._run, args=(launch_key(args),), daemon=True).start()
 
-    def _run(self) -> None:
-        sse = SSE(self.deck.port, "player")
+    def _run(self, key: str = "") -> None:
+        sse = SSE(self.deck.port, "player", key=key)  # the key from the --app address, as a browser has it
         self.clients.append(sse)
         try:
             while True:

@@ -71,7 +71,9 @@ def test_fire_holds_at_least_3_seconds_then_hello_with_drop_active(h):
     after = shown(h)
     assert (after.type, after.seq) == (ET.HELLO, ev["seq"])
     assert after.has(Flags.DROP_ACTIVE) and after.has(Flags.LOCAL_PLAYBACK) and not after.has(Flags.TEST)
-    assert h.status()["size"] == "96x3"
+    # D3 (finding F2): the HELLO carries the playing drop's placeKey, 13 bytes instead of 9
+    assert after.place_key == p2.place_key_for(DROP_A["id"])
+    assert h.status()["size"] == "144x3"
 
 
 def test_cancel_and_ping_hold_one_second(h):

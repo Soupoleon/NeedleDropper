@@ -52,7 +52,8 @@ def test_authorize_url_params():
         "code_challenge": "chall",
         "state": "st4te",
         # user-read-private: market=from_token on /search and /tracks, /me's product + country (real client)
-        "scope": "user-modify-playback-state user-read-playback-state user-read-private",
+        # 1.2.1: in-app Spotify (the Web Playback SDK) needs streaming and user-read-email (D9)
+        "scope": "streaming user-modify-playback-state user-read-playback-state user-read-email user-read-private",
     }
     assert "%20" in url and "+" not in url  # scopes space-separated, percent-encoded
     assert sa.redirect_uri_for(8321) == "http://127.0.0.1:8321/callback"
@@ -215,7 +216,7 @@ def test_login_interactive_end_to_end(tmp_path):
     assert token_call.form["code"] == "THE-CODE"
     assert token_call.form["redirect_uri"] == seen["redirect_uri"]
     assert sa.code_challenge_s256(token_call.form["code_verifier"]) == seen["code_challenge"]
-    assert seen["scope"] == "user-modify-playback-state user-read-playback-state user-read-private"
+    assert seen["scope"] == "streaming user-modify-playback-state user-read-playback-state user-read-email user-read-private"  # 1.2.1 scopes (D9)
     stored = sa.TokenStore(tmp_path).load()
     assert stored["refresh_token"] == "RT" and stored["client_id"] == "cid"
     text = "\n".join(out)

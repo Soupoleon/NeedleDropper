@@ -17,8 +17,8 @@ new.
 NeedleDropper is an **addon** that knows where you are, decides when a song should start, and lets
 you choose every song in game: type `/needle`, stand somewhere, press **Add drop here** and paste a
 Spotify or YouTube link. An optional **app** for Windows (`NeedleDropper.exe`) plays the songs through
-**Spotify Premium** or **YouTube**; songs from **your own audio files** play inside WoW itself. It is
-free, open source and [MIT licensed](LICENSE).
+**Spotify Premium** (in its own hidden player: no Spotify window) or **YouTube**; songs from **your own
+audio files** play inside WoW itself. It is free, open source and [MIT licensed](LICENSE).
 
 ---
 
@@ -59,7 +59,7 @@ flowchart LR
     end
     BEACON -- "read-only" --> READ
     ADDON -. "optional chat-log link" .-> READ
-    READ --> SPOTIFY["Spotify Premium<br/>(your Spotify app)"]
+    READ --> SPOTIFY["Spotify Premium<br/>(the app's own hidden player)"]
     READ --> YOUTUBE["YouTube<br/>(small visible player)"]
 ```
 
@@ -71,9 +71,10 @@ flowchart LR
    your own audio file in WoW or writes the song to the **beacon**: a strip of coloured squares, at
    most 336 × 9 pixels, in the top-left corner of the game window.
 4. The **app** reads that strip from the screen a few times per second. It never touches the game
-   itself: no memory reading, no injection, no simulated key presses. It plays the song on Spotify
-   (or YouTube) and fades it out when the song ends or when you get into a long fight. The app holds
-   no soundtrack of its own: everything it needs to know arrives in the beacon.
+   itself: no memory reading, no injection, no simulated key presses. It plays the song on Spotify,
+   in a player of its own that never shows a window, or on YouTube in a small box that shows only
+   while the song plays, and fades it out when the song ends or when you get into a long fight. The
+   app holds no soundtrack of its own: everything it needs to know arrives in the beacon.
 
 ## Features
 
@@ -99,8 +100,12 @@ flowchart LR
   flight paths, death, cinematics and boss encounters.
 - **A journal** of every song you have heard, with replay and "play again next visit".
 - **Three ways to play**: Spotify Premium and YouTube through the app, your own audio files in WoW.
+- **Music services in game**: *Options → AddOns → NeedleDropper* shows the app's status, sets up
+  Spotify (your Client ID goes into the **Music services** dialog, `/needle music`), picks *Play music
+  with* (Spotify first, YouTube first, only one of them, or neither) and the YouTube box's corner, and
+  has **Test Spotify** and **Test YouTube** buttons.
 - **A tiny app**: a one-time Connect page, then just a tray icon that starts with Windows and stays
-  quiet.
+  quiet. Spotify songs play inside it (Google Chrome needed), so no Spotify window ever comes up.
 - **Private and read-only**: nothing leaves your PC except what Spotify and YouTube need to play the
   music, and an optional daily update check that is off unless you set it up
   ([privacy](docs/PRIVACY.md), [policies](docs/POLICY.md)).
@@ -113,10 +118,11 @@ flowchart LR
 2. **Optional, for Spotify and YouTube: install the app.** Unzip `NeedleDropper-<version>-win64.zip`
    somewhere permanent and double-click **`NeedleDropper.exe`**. If Windows says *"Windows protected
    your PC"*, click **More info → Run anyway** ([why](docs/INSTALL.md#windows-protected-your-pc)).
-   On its **Connect** page, sign in to **Spotify** (Premium) or simply use **YouTube**, which needs
-   no setup ([music services](docs/PROVIDERS.md)). Start the app before the game the first time (or
-   restart the game once): the game finds the app's small data addon only when it starts. Then, in
-   the game, type `/needle test`: the page ticks **Check the link**.
+   On its **Connect** page, sign in to **Spotify** (Premium and Google Chrome) or simply use
+   **YouTube**, which needs no setup ([music services](docs/PROVIDERS.md)); you can also set up
+   Spotify later in game (`/needle music`). Start the app before the game the first time (or restart
+   the game once): the game finds the app's small data addon only when it starts. Then, in the game,
+   type `/needle test`: the page ticks **Check the link**.
 3. **Play.** Go somewhere your character has never been. The zone music fades, the title card drifts
    in, and with the app running the song starts. (Without the app you see the title card only; those
    places play their song once the app is installed.)
@@ -136,7 +142,9 @@ Full walk-through: [docs/INSTALL.md](docs/INSTALL.md).
 | `/needle soundtracks` | Open the Soundtracks tab |
 | `/needle journal` | Open the Journal tab: the songs you have heard, with replay |
 | `/needle import` | Paste a share code |
+| `/needle music` | Open **Music services**: Spotify and YouTube, *Play music with*, the test songs |
 | `/needle status` | What is pending or playing, why a drop is waiting, the cooldown, the link to the app |
+| `/needle report` | A text report of your setup to paste into a bug report |
 | `/needle stop` | Stop the song that is playing; nothing else starts here until you move on |
 | `/needle help` | Every command |
 
@@ -148,9 +156,9 @@ commands and settings is in the [command reference](docs/TROUBLESHOOTING.md#need
 
 | Guide | Read it for |
 |---|---|
-| [Install](docs/INSTALL.md) | Installing the addon and the app, the Connect page, updating from 1.1, uninstalling |
+| [Install](docs/INSTALL.md) | Installing the addon and the app, the Connect page, updating from 1.2.0 or 1.1, uninstalling |
 | [Soundtracks](docs/PACKS.md) | The window, adding and changing drops, your own soundtracks, share codes, the pack format |
-| [Music services](docs/PROVIDERS.md) | Connecting Spotify Premium, using YouTube, playing your own audio files in game |
+| [Music services](docs/PROVIDERS.md) | Connecting Spotify Premium (it plays inside the app), using YouTube, *Play music with*, playing your own audio files in game |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | When the link or a song doesn't work, every `/needle` command and option |
 | [Privacy](docs/PRIVACY.md) | What NeedleDropper stores, and what (little) leaves your PC |
 | [Policies](docs/POLICY.md) | Blizzard's add-on policy, the Spotify and YouTube rules, and how NeedleDropper follows them |

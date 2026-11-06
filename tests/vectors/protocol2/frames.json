@@ -1,0 +1,385 @@
+{
+ "about": "Protocol v2 frame vectors (docs/PROTOCOL-v2.md section 7, DESIGN-v1.2.1 2.13), written by protocol2.py; tests/test_protocol2_contract.py checks that Protocol2.lua and protocol2.py both encode every event to these bytes and decode them to 'decoded'.",
+ "check": {
+  "seed": 1313092163,
+  "mul": 48271,
+  "mod": 2147483647,
+  "finalRounds": 2,
+  "trailerBytes": 4
+ },
+ "vectors": [
+  {
+   "name": "hello",
+   "what": "HELLO seq 0 (no music choices set)",
+   "event": {
+    "type": 1,
+    "seq": 0
+   },
+   "bytes": 9,
+   "hex": "4e 21 00 00 00 29 50 ec 87",
+   "chat": "NDROP2 TiEAAAApUOyH",
+   "decoded": {
+    "type": 1,
+    "seq": 0,
+    "flags": 0
+   },
+   "cells": [
+    32,
+    1
+   ]
+  },
+  {
+   "name": "cancel",
+   "what": "CANCEL seq 42, flags DROP_ACTIVE, zone:1429",
+   "event": {
+    "type": 4,
+    "seq": 42,
+    "flags": 32,
+    "dropId": "zone:1429"
+   },
+   "bytes": 24,
+   "hex": "4e 24 2a 20 0f 01 02 51 c8 02 09 7a 6f 6e 65 3a 31 34 32 39 71 b6 90 06",
+   "chat": "NDROP2 TiQqIA8BAlHIAgl6b25lOjE0MjlxtpAG",
+   "decoded": {
+    "type": 4,
+    "seq": 42,
+    "flags": 32,
+    "placeKey": 20936,
+    "dropId": "zone:1429"
+   },
+   "cells": [
+    80,
+    1
+   ]
+  },
+  {
+   "name": "arm",
+   "what": "ARM seq 8: area:87, YouTube link, Sigur Rós / Hoppípolla, start 12 s",
+   "event": {
+    "type": 2,
+    "seq": 8,
+    "dropId": "area:87",
+    "youtube": "https://youtu.be/dQw4w9WgXcQ",
+    "artist": "Sigur Rós",
+    "title": "Hoppípolla",
+    "startMs": 12000
+   },
+   "bytes": 63,
+   "hex": "4e 22 08 00 36 01 02 2f 44 02 07 61 72 65 61 3a 38 37 04 0b 64 51 77 34 77 39 57 67 58 63 51 05 16 53 69 67 75 72 20 52 c3 b3 73 1f 48 6f 70 70 c3 ad 70 6f 6c 6c 61 06 02 00 78 41 3d 15 68",
+   "chat": "NDROP2 TiIIADYBAi9EAgdhcmVhOjg3BAtkUXc0dzlXZ1hjUQUWU2lndXIgUsOzcx9Ib3Bww61wb2xsYQYCAHhBPRVo",
+   "decoded": {
+    "type": 2,
+    "seq": 8,
+    "flags": 0,
+    "placeKey": 12100,
+    "dropId": "area:87",
+    "youtube": "dQw4w9WgXcQ",
+    "query": "Sigur Rós\u001fHoppípolla",
+    "startDs": 120
+   },
+   "cells": [
+    96,
+    2
+   ]
+  },
+  {
+   "name": "hello-playing",
+   "what": "HELLO seq 9 with DROP_ACTIVE and the playing drop's placeKey (zone:1411; D3)",
+   "event": {
+    "type": 1,
+    "seq": 9,
+    "flags": 32,
+    "placeKey": 18367
+   },
+   "bytes": 13,
+   "hex": "4e 21 09 20 04 01 02 47 bf 34 02 85 e7",
+   "chat": "NDROP2 TiEJIAQBAke_NAKF5w",
+   "decoded": {
+    "type": 1,
+    "seq": 9,
+    "flags": 32,
+    "placeKey": 18367
+   },
+   "cells": [
+    48,
+    1
+   ]
+  },
+  {
+   "name": "hello-prefs",
+   "what": "HELLO seq 0, PREFS {spotify-youtube, topright, fade on, resume on}",
+   "event": {
+    "type": 1,
+    "seq": 0,
+    "prefs": {
+     "order": "spotify-youtube",
+     "corner": "topright",
+     "fade": true,
+     "resume": true
+    }
+   },
+   "bytes": 15,
+   "hex": "4e 21 00 00 06 0b 04 01 01 01 01 65 4e 5a ef",
+   "chat": "NDROP2 TiEAAAYLBAEBAQFlTlrv",
+   "decoded": {
+    "type": 1,
+    "seq": 0,
+    "flags": 0,
+    "prefs": {
+     "order": "spotify-youtube",
+     "corner": "topright",
+     "fade": true,
+     "resume": true
+    }
+   },
+   "cells": [
+    48,
+    1
+   ]
+  },
+  {
+   "name": "hello-prefs-flags",
+   "what": "HELLO seq 7, flags 0x20, PREFS {youtube-spotify, bottomleft, fade off, resume on}",
+   "event": {
+    "type": 1,
+    "seq": 7,
+    "flags": 32,
+    "prefs": {
+     "order": "youtube-spotify",
+     "corner": "bottomleft",
+     "fade": false,
+     "resume": true
+    }
+   },
+   "bytes": 15,
+   "hex": "4e 21 07 20 06 0b 04 02 04 02 01 53 9b 69 88",
+   "chat": "NDROP2 TiEHIAYLBAIEAgFTm2mI",
+   "decoded": {
+    "type": 1,
+    "seq": 7,
+    "flags": 32,
+    "prefs": {
+     "order": "youtube-spotify",
+     "corner": "bottomleft",
+     "fade": false,
+     "resume": true
+    }
+   },
+   "cells": [
+    48,
+    1
+   ]
+  },
+  {
+   "name": "hello-playing-prefs",
+   "what": "HELLO seq 9, DROP_ACTIVE, placeKey of zone:1411, PREFS {spotify-youtube, topright, on, on}",
+   "event": {
+    "type": 1,
+    "seq": 9,
+    "flags": 32,
+    "dropId": "zone:1411",
+    "prefs": {
+     "order": "spotify-youtube",
+     "corner": "topright",
+     "fade": true,
+     "resume": true
+    }
+   },
+   "bytes": 19,
+   "hex": "4e 21 09 20 0a 01 02 47 bf 0b 04 01 01 01 01 48 94 80 fc",
+   "chat": "NDROP2 TiEJIAoBAke_CwQBAQEBSJSA_A",
+   "decoded": {
+    "type": 1,
+    "seq": 9,
+    "flags": 32,
+    "placeKey": 18367,
+    "prefs": {
+     "order": "spotify-youtube",
+     "corner": "topright",
+     "fade": true,
+     "resume": true
+    }
+   },
+   "cells": [
+    64,
+    1
+   ]
+  },
+  {
+   "name": "config-prefs",
+   "what": "CONFIG seq 12, PREFS {youtube, topleft, fade on, resume off}",
+   "event": {
+    "type": 6,
+    "seq": 12,
+    "prefs": {
+     "order": "youtube",
+     "corner": "topleft",
+     "fade": true,
+     "resume": false
+    }
+   },
+   "bytes": 15,
+   "hex": "4e 26 0c 00 06 0b 04 04 02 01 02 05 5b 6e d2",
+   "chat": "NDROP2 TiYMAAYLBAQCAQIFW27S",
+   "decoded": {
+    "type": 6,
+    "seq": 12,
+    "flags": 0,
+    "prefs": {
+     "order": "youtube",
+     "corner": "topleft",
+     "fade": true,
+     "resume": false
+    }
+   },
+   "cells": [
+    48,
+    1
+   ]
+  },
+  {
+   "name": "config-prefs-action",
+   "what": "CONFIG seq 13, PREFS {spotify-youtube, topright, on, on} + test-youtube issued at 1762380000",
+   "event": {
+    "type": 6,
+    "seq": 13,
+    "prefs": {
+     "order": "spotify-youtube",
+     "corner": "topright",
+     "fade": true,
+     "resume": true
+    },
+    "action": {
+     "name": "test-youtube",
+     "at": 1762380000
+    }
+   },
+   "bytes": 23,
+   "hex": "4e 26 0d 00 0e 0b 04 01 01 01 01 0c 06 04 fb 69 0b c8 e0 10 62 81 25",
+   "chat": "NDROP2 TiYNAA4LBAEBAQEMBgT7aQvI4BBigSU",
+   "decoded": {
+    "type": 6,
+    "seq": 13,
+    "flags": 0,
+    "prefs": {
+     "order": "spotify-youtube",
+     "corner": "topright",
+     "fade": true,
+     "resume": true
+    },
+    "action": {
+     "code": 4,
+     "at": 1762380000,
+     "name": "test-youtube"
+    }
+   },
+   "cells": [
+    80,
+    1
+   ]
+  },
+  {
+   "name": "config-connect",
+   "what": "CONFIG seq 14, connect-spotify issued at 1762380123 + CLIENT_ID 0123456789abcdef0123456789abcdef",
+   "event": {
+    "type": 6,
+    "seq": 14,
+    "action": {
+     "name": "connect-spotify",
+     "at": 1762380123
+    },
+    "clientId": "0123456789abcdef0123456789abcdef"
+   },
+   "bytes": 35,
+   "hex": "4e 26 0e 00 1a 0c 06 01 fe 69 0b c9 5b 0d 10 01 23 45 67 89 ab cd ef 01 23 45 67 89 ab cd ef 52 ea a8 c4",
+   "chat": "NDROP2 TiYOABoMBgH-aQvJWw0QASNFZ4mrze8BI0VniavN71LqqMQ",
+   "decoded": {
+    "type": 6,
+    "seq": 14,
+    "flags": 0,
+    "clientId": "0123456789abcdef0123456789abcdef",
+    "action": {
+     "code": 1,
+     "at": 1762380123,
+     "name": "connect-spotify"
+    }
+   },
+   "cells": [
+    112,
+    1
+   ]
+  },
+  {
+   "name": "config-bound",
+   "what": "Bound, never emitted (two rows): CONFIG seq 15, flags 0x03, PREFS {none, bottomright, off, off} + disconnect-spotify issued at 4294967295 + CLIENT_ID ff x 16",
+   "event": {
+    "type": 6,
+    "seq": 15,
+    "flags": 3,
+    "prefs": {
+     "order": "none",
+     "corner": "bottomright",
+     "fade": false,
+     "resume": false
+    },
+    "action": {
+     "name": "disconnect-spotify",
+     "at": 4294967295
+    },
+    "clientId": "ffffffffffffffffffffffffffffffff"
+   },
+   "bytes": 41,
+   "hex": "4e 26 0f 03 20 0b 04 05 03 02 02 0c 06 02 fd ff ff ff ff 0d 10 ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff ff 5f 0d de 31",
+   "chat": "NDROP2 TiYPAyALBAUDAgIMBgL9_____w0Q_____________________18N3jE",
+   "decoded": {
+    "type": 6,
+    "seq": 15,
+    "flags": 3,
+    "clientId": "ffffffffffffffffffffffffffffffff",
+    "prefs": {
+     "order": "none",
+     "corner": "bottomright",
+     "fade": false,
+     "resume": false
+    },
+    "action": {
+     "code": 2,
+     "at": 4294967295,
+     "name": "disconnect-spotify"
+    }
+   },
+   "cells": [
+    64,
+    2
+   ]
+  },
+  {
+   "name": "fire-fitted-39",
+   "what": "The F3 case: a search-only FIRE fitted to one strip row (39 B): artist and title both survive",
+   "event": {
+    "type": 3,
+    "seq": 5,
+    "dropId": "area:87",
+    "artist": "Godspeed You! Black Emperor",
+    "title": "Moya",
+    "lengthMs": 650000
+   },
+   "bytes": 39,
+   "hex": "4e 23 05 00 1e 01 02 2f 44 05 14 47 6f 64 73 70 65 65 64 20 59 6f 75 21 20 42 1f 4d 6f 79 61 07 02 19 64 3b c8 9a 22",
+   "chat": "NDROP2 TiMFAB4BAi9EBRRHb2RzcGVlZCBZb3UhIEIfTW95YQcCGWQ7yJoi",
+   "decoded": {
+    "type": 3,
+    "seq": 5,
+    "flags": 0,
+    "placeKey": 12100,
+    "query": "Godspeed You! B\u001fMoya",
+    "lengthDs": 6500
+   },
+   "cells": [
+    112,
+    1
+   ],
+   "maxBytes": 39
+  }
+ ]
+}

@@ -168,7 +168,8 @@ def test_run_is_the_console_variant(home, tmp_path, opened, monkeypatch, capsys)
     write_config(home, tmp_path, deck={"port": 0, "autoOpen": "always"})
     assert cli.main(["run", "--panel", "--seconds", "0.3"]) == 0
     assert len(opened) == 1 and FakeTrayIcon.instances == []  # no tray icon in the console variant
-    assert len(launched) == 1 and any(a.endswith("/player") for a in launched[0])  # autoOpen "always"
+    # autoOpen "always"; the address carries the launch key (v1.2.1 review ON-1)
+    assert len(launched) == 1 and any("/player#k=" in a for a in launched[0])
     out = capsys.readouterr().out
     assert "opens at start and for YouTube songs" in out and "Ctrl+C" in out
     assert (home / "logs" / "needledropper.log").is_file()
@@ -264,3 +265,46 @@ def test_test_drop_frames(home, tmp_path):
     assert frame is not None and frame.drop_id == "zone:1429" and frame.label
     frame, what = cli.make_test_frame(ctx, "Narnia")
     assert frame is None and "No drop matches" in what
+
+
+@pytest.mark.parametrize("argv", [[], ["run"]])
+def test_the_tray_and_console_apps_attach_the_player_window_manager(home, tmp_path, monkeypatch, argv):
+    """Release check (2026-11-06): _serve built its Deck without the never-activating window manager, so
+    the frozen app's player window stayed a normal visible Chrome window (it took the focus at creation,
+    never hid, never went to its corner) and Quit left that browser running. The manager is attached
+    before the Companion configures the deck, so the corner reaches it."""
+    write_config(home, tmp_path, deck={"port": 0, "playerCorner": "bottomleft", "autoOpen": "never"})
+    calls = []
+
+    class FakeWindow:
+        corner = None
+        position = None
+        hwnd = None
+
+        def foreground(self):
+            return None
+
+        def adopt(self, pid, timeout=0.0, *, prev_foreground=None):
+            return False
+
+        def show(self):
+            return False
+
+        def hide(self):
+            return False
+
+        def hide_later(self, delay_s):
+            pass
+
+        def close(self):
+            calls.append(("closed", self.corner))
+
+    def attach(deck):
+        assert deck.window is None and deck.api is None  # before the Companion attached its API
+        deck.window = FakeWindow()
+        calls.append(("attached", None))
+
+    monkeypatch.setattr(cli, "attach_player_window", attach)
+    assert cli.main([*argv, "--seconds", "0.3"]) == 0
+    assert calls[0] == ("attached", None)
+    assert ("closed", "bottomleft") in calls  # configured with the corner; Quit closes the window it manages

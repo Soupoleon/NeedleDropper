@@ -4,6 +4,198 @@ All notable changes to NeedleDropper (the addon and the companion app). The form
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-11-06
+
+Spotify now plays **inside the NeedleDropper app**: no Spotify window, and no Spotify app has to be
+open. Your music services are set up in game, in a new **Music services** section of the addon's
+settings. **Update the addon and the app together**: a 1.2.0 app can't read the signals of a 1.2.1
+addon, and a 1.2.1 app can't read a 1.2.0 addon's. After the update, **sign in to Spotify once
+more**: in-app playback needs two more Spotify permissions.
+
+### Added
+
+- **Spotify in the app.** The app plays Spotify songs itself, through Spotify's official Web
+  Playback SDK, in the same hidden player window as the YouTube box. While the app runs, Spotify lists
+  it as a device called **NeedleDropper**. It needs **Spotify Premium** and **Google Chrome** (the SDK
+  needs Chrome's Widevine component; the app copies it into its player's own profile). Nothing shows
+  on screen while a Spotify song plays, and the game keeps the focus. Fades happen in the app's
+  player, and with *Resume my Spotify music afterwards* the music you were playing on another device
+  comes back afterwards.
+- **Music services in the game's settings** (*Options → AddOns → NeedleDropper*, between *Needle
+  drops* and *Playback*): the app's status, **Spotify account**, **YouTube account**, *Play music
+  with*, *YouTube box position*, *Fade songs in and out*, *Resume my Spotify music afterwards*,
+  **Test Spotify**, **Test YouTube** and **Refresh status**. The settings are searchable.
+- **The Music services dialog** (`/needle music`, the drum button in the window's title bar, or the
+  *Spotify account* row): set up Spotify from the game in three steps (the dashboard address and the
+  redirect URI to copy, then your Client ID), **Connect Spotify**, **Disconnect…**, the two tests and
+  **Sign in to YouTube…**. The game can't open web pages: the app opens Spotify's sign-in page in your
+  browser, and a Windows notification tells you the result. **Refresh status (reloads UI)** then shows
+  it in game.
+- **Play music with:** *Spotify, then YouTube* (the default), *YouTube, then Spotify*, *Spotify only*,
+  *YouTube only*, or *Neither* (title cards and in-game files only). The app follows a change within a
+  second while the game runs.
+- **YouTube box position:** top right (the default), top left, bottom right or bottom left.
+- **Test Spotify** and **Test YouTube** play 15 seconds of Toto's *Africa*, in game or on the Connect
+  page; a Windows notification says why when a test can't play.
+- **Sign in to YouTube** (optional): opens YouTube's sign-in page in the player box's own browser
+  profile, not your everyday browser. Signed in with YouTube Premium, YouTube songs are expected to
+  play without ads (not verified yet).
+- **`/needle report`:** a plain-text report of your setup for bug reports (versions, the app's
+  report, the beacon, the settings that matter, your last 5 drops, the last error), selected in a
+  window so that Ctrl+C copies it. It holds no account names, Client IDs or tokens.
+- **Connect page:** **Play on** lists *NeedleDropper (this app)* first; the Spotify card has **Test
+  Spotify**; the YouTube card has **Test YouTube**, **Sign in to YouTube** and the player box's corner;
+  both cards show what you chose in game.
+- Windows notifications for the requests you send from the game (connected, a test result, signed
+  out, …), and one *Sign in to Spotify again* notification after the update.
+- The in-game status lines (window footer, add-on compartment, `/needle status`) say more about
+  Spotify: connected as which account, *sign in again*, *needs Google Chrome*, or *didn't start*.
+
+### Changed
+
+- **Spotify's own apps are no longer remote-controlled by default.** On the test PC, Spotify's
+  Windows app accepted every song and never started one, while Spotify's Web Player played them; the
+  app now is that player. To control another Spotify device as 1.2.0 did (your phone, a speaker, the
+  Spotify app), pick it under **Play on** on the Connect page (`spotify.device` `connect`).
+- **Sign in to Spotify again** after the update. The sign-in now also asks for `streaming` (playing
+  in the app's own player) and `user-read-email` (Spotify's player requires it; NeedleDropper doesn't
+  read or keep the address). Until you do, Spotify songs play on YouTube, and the Connect page, one
+  notification and the in-game status ask you to sign in again. Your Client ID stays.
+- **When you create a Spotify developer app, tick both Web API and Web Playback SDK** (for an app
+  you already have, the second box is under its **Settings** → **Edit**).
+- **The YouTube box loads its player from `http://localhost:8322/player`** instead of
+  `127.0.0.1`. From `127.0.0.1`, YouTube refused 79 of the 100 videos in the built-in soundtracks
+  with error 150; from `localhost`, none. The Connect page and the Spotify redirect URI stay on
+  `127.0.0.1`.
+- **The player window runs in Google Chrome** whenever Spotify plays in the app. Microsoft Edge is
+  still used for YouTube when Spotify doesn't play in the app and Chrome is missing.
+- **The beacon carries a stronger check** (a 4-byte check instead of 2 bytes), so a strip that an
+  overlay or a frame partly covers is rejected instead of read as a different song. This is why a
+  1.2.0 app and a 1.2.1 addon can't read each other.
+- The idle beacon strip is 144 × 3 pixels (it was 96 × 3) once you choose a music setting in game,
+  and while a drop plays: it then also carries your four music choices, or the playing drop's place.
+- The addon treats an app older than 1.2.1 like a missing app: it doesn't fade the zone music for
+  Spotify and YouTube songs, and the window's footer says *Update the NeedleDropper app to 1.2.1 to
+  play Spotify and YouTube songs*.
+- `NeedleDropper_Companion` (the app's data addon) also tells the game the Spotify account name,
+  plan and Client ID, the player browser, your music choices and the results of your last 8 requests.
+- **The built-in soundtracks** name the exact Spotify recording of every drop, so the app no longer
+  searches Spotify for them, and every drop has a YouTube video that plays in the box: 5 videos were
+  replaced by uploads that match the recording, and Azeroth Unbound's Azshara got one.
+
+### Fixed
+
+Found in a review of the beacon protocol:
+
+- A damaged beacon strip could, rarely, read as a valid frame with different contents, for example
+  a vertical line over one column of squares. The new check rejects every change confined to one
+  column; sweeps over 90 million covered strips found no wrong frame.
+- A song whose start signal was hidden for a few seconds (a big toast or an overlay over the beacon
+  at that moment) never played. The app now starts it from the signal that follows, as long as the
+  game says the drop is playing and nothing cancelled it.
+- When a song's artist and title had to be shortened to fit the beacon, the app could receive one
+  without the other and search Spotify for half a name. Both parts are now shortened together, or
+  the search is left out (and the drop plays from its links).
+- A drop with only a YouTube link could lose its artist and title from the beacon to make room, so
+  Spotify couldn't search for it even with Spotify first. They now stay unless the drop has a link
+  for the service that comes first.
+- When the chat-log link is on, its copy of a signal adds what the beacon had no room for (such as
+  the search for a Spotify song) to the drop the app already knows.
+- Both the addon and the app reject signals whose text isn't valid UTF-8.
+
+Found in the release checks and a second review (1.2.1 beta builds before these fixes):
+
+- **The app's player window took the focus and stayed visible.** The tray app never attached the
+  window manager that hides the player window, keeps it out of the taskbar and never lets it take the
+  focus; the window stayed a normal Chrome window where Chrome put it (1.2.0 had the same bug). It is
+  now made once, kept off every screen (Spotify's player doesn't play in a hidden window), and shown
+  only at its corner while a YouTube song plays. A player window that
+  is already open when the app makes its own (such as the one 1.2.0 leaves behind) is never taken
+  over, hidden or closed by it.
+- **Quit left the player's browser running**, and its page then confused the next start of the app
+  (Spotify said *install Google Chrome*, a YouTube song could play twice). The app now closes its
+  player browser when it quits, and a player page left over from an earlier start closes itself.
+- **The YouTube box stayed on top of the game** after a YouTube song that couldn't play (a video that
+  can't be embedded, or no internet), for the whole song that played instead. It now hides at once.
+- **The YouTube box in the top-left corner covered the beacon**, so the app read nothing (such as
+  `/needle stop`) until the song ended. It now sits below the beacon, and changing the corner moves
+  an open box at once.
+- **Back-to-back Spotify drops** no longer lose your own music: it comes back once, after the last
+  drop, instead of restarting for a moment between them and then staying off.
+- A short hiccup of Spotify's player connection no longer reads as *install Google Chrome*, and no
+  longer cuts the song that plays; a Spotify player that can't connect at all stays reported as such
+  instead of flipping between *connected* and *needs Chrome* every minute.
+- With *YouTube, then Spotify*, a song no longer waits up to 3 seconds for a Spotify search it
+  doesn't need.
+- With only the chat-log link, the first drop after a *Play music with* change used the old choice.
+- A drop whose start signal was hidden is now started late whenever its arrival signal came first,
+  also minutes before (the 10-minute cooldown, combat, a taxi), and also when the next place is armed
+  right away (a landmark, then the zone at the same spot). The chat log's late copy of a drop's
+  arrival signal no longer arms the playing place again, so a song can't start twice.
+- While an in-game file plays, cancelling another place no longer lets the app start the playing
+  drop's song on top of the in-game file.
+- A rare two-square change of the beacon (two thin strokes) could read as a valid frame with a
+  different Client ID, place or YouTube id: the check now has two final rounds that close this gap.
+- The Music services dialog no longer stores the app's Client ID as one typed in game (it made a
+  later *Sign in again* in game switch back to an old Client ID).
+- A first arrival whose song no music service could play yet (Spotify not signed in again after the
+  update, YouTube switched off, no player browser) shows its title card and now plays its song once
+  the service works, instead of counting as heard. The zone music is no longer faded for a song only
+  YouTube could play when the app has no player browser.
+- *Neither* also keeps the song out of the arrival signal of a drop with an in-game file (when the
+  in-game file then couldn't play, the app could still play the song).
+- A Spotify account that isn't on your developer app's User Management list now shows *Account not
+  allowed* at once (it showed *Connected* until the first song), and the game says to add it under
+  User Management instead of *sign in again*.
+- An addon older than 1.2.1 with this app: the Connect page now says *Addon too old* (it said
+  *Ready*), and the tray tooltip says to update the addon.
+- The player window's focus hand-back goes to the game when you clicked into it while the window was
+  being made (it went to the window that was in front before).
+- The Spotify setup texts in game, on the Connect page and in the app say to tick both **Web API** and
+  **Web Playback SDK**; signing in again after the update shows how to add the second box to your
+  1.2.0 developer app.
+
+### Security
+
+- The player page gets Spotify's access token from the app through one address
+  (`/api/player/spotify-token`) that answers only the player page itself (the same origin, the
+  app's per-run secret, a launch key that only the player window the app opened knows, the address
+  check) and never caches the answer. It returns the access token
+  only, never the refresh token.
+- A request from the game is one of five fixed actions (connect, disconnect, the two tests, the
+  YouTube sign-in). No signal carries a web address or free text; the app builds every address
+  itself. **Disconnect** only works when the signal names the app's own Client ID. Requests are
+  accepted only while fresh (up to 45 seconds), once each, and rate-limited.
+- Only the player window the app opened is its player: a page another website opens at the player's
+  address gets nothing, and a copy without the launch key is told to close. The app also listens on
+  the IPv6 loopback (`[::1]`), where `localhost` goes first, so no other program can stand in for the
+  player there (and the player's requests no longer wait about 2 seconds each).
+
+### Known issues
+
+- A song that already plays is never switched to another service. Where the beacon has room for
+  only one row of squares (a very tight layout), a drop with a YouTube link can start on YouTube
+  without its Spotify search; the chat log's fuller copy of the signal then only updates the title
+  card.
+- Microsoft Edge can't run Spotify's player (it never became ready in testing); in-app Spotify needs
+  Google Chrome.
+- *Resume my Spotify music afterwards* may not restart the Spotify **desktop app** when your music was
+  playing there: on the test PC it accepted songs from other apps without starting them.
+
+### Not yet verified on a live client
+
+- The Music services rows and dialog on the game client (their texts change with the app's status),
+  and the dialog with a gamepad: `docs/FIRST-TEST.md`, section *Music services (1.2.1)*.
+- The fade-in of in-app Spotify by ear (the live checks played at volume 0), the YouTube sign-in page
+  and whether a signed-in YouTube Premium account removes the ads in the box.
+- Measured on the test PC with the released app (`NeedleDropper.exe` 1.2.1): the player window
+  waited off screen from 0.2 seconds after it was made; in-app Spotify was ready about 3.3 seconds
+  after the app started, and a song started 0.9 seconds after its signal; a YouTube song from
+  `localhost` showed in the top-right box 0.2 seconds after its signal and the box went off screen
+  again when it ended; quitting closed the player's browser. No song took the focus from the window
+  in front; only the player window's creation did, for about 0.08 seconds, before it handed the
+  focus back.
+
 ## [1.2.0] - 2026-11-05
 
 Everything you do now happens in game. One NeedleDropper window replaces the browser control panel:

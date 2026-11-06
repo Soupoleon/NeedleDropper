@@ -1148,10 +1148,21 @@ function Layout:AddInitializer(initializer)
   tinsert(SHIM.settings.elements, initializer)
   return initializer
 end
+-- Setting controls' initializers take search tags too (strings only).
+local ControlInit = {}
+local ControlInitMT = { __index = ControlInit }
+function ControlInit:AddSearchTags(...)
+  for i = 1, select("#", ...) do
+    local tag = select(i, ...)
+    if type(tag) == "string" then tinsert(self.searchTags, tag) end
+  end
+end
 local function addElement(kind, setting, extra)
-  local e = { kind = kind, setting = setting, variable = setting and setting.variable }
+  local e = setmetatable({ kind = kind, setting = setting, variable = setting and setting.variable, searchTags = {} },
+                         ControlInitMT)
   if extra then for k, v in pairs(extra) do e[k] = v end end
   tinsert(SHIM.settings.elements, e)
+  return e
 end
 local Setting = {}
 local SettingMT = { __index = Setting }
@@ -1176,10 +1187,54 @@ function CreateSettingsListSectionHeaderInitializer(name, tooltip)
   if type(name) ~= "string" then shimError("section header needs a name") end
   return { kind = "header", name = name, tooltip = tooltip }
 end
+-- Button rows (forever, Blizzard_SettingControls.lua L1040): buttonText and tooltip may be
+-- functions (SettingsButtonControlMixin:EvaluateName, Settings.InitTooltip call them when the row
+-- is shown: SHIM.settings.Render); AddSearchTags indexes strings only (Blizzard_Settings.lua
+-- L53-L64); AddModifyPredicate disables the button while a predicate returns false (EvaluateState).
+local ButtonInit = {}
+local ButtonInitMT = { __index = ButtonInit }
+function ButtonInit:AddSearchTags(...)
+  for i = 1, select("#", ...) do
+    local tag = select(i, ...)
+    if type(tag) == "string" then tinsert(self.searchTags, tag) end
+  end
+end
+function ButtonInit:AddModifyPredicate(fn)
+  if type(fn) ~= "function" then shimError("AddModifyPredicate needs a function") end
+  tinsert(self.modifyPredicates, fn)
+end
+function ButtonInit:EvaluateModifyPredicates()
+  for i = 1, #self.modifyPredicates do
+    local v = self.modifyPredicates[i]()
+    if type(v) ~= "boolean" then shimError("a modify predicate must return a boolean, not " .. type(v)) end
+    if not v then return false end
+  end
+  return true
+end
 function CreateSettingsButtonInitializer(name, buttonText, buttonClick, tooltip, addSearchTags)
   if type(buttonClick) ~= "function" then shimError("button initializer needs a click function") end
-  return { kind = "button", name = name, buttonText = buttonText, click = buttonClick, tooltip = tooltip,
-           searchTags = addSearchTags }
+  if type(buttonText) ~= "string" and type(buttonText) ~= "function" then shimError("button text must be a string or a function") end
+  local init = setmetatable({ kind = "button", name = name, buttonText = buttonText, click = buttonClick, tooltip = tooltip,
+                              addSearchTags = addSearchTags, searchTags = {}, modifyPredicates = {} }, ButtonInitMT)
+  if addSearchTags then init:AddSearchTags(name, buttonText) end
+  return init
+end
+
+-- What the panel shows now for each element, as the client would initialise the rows: { kind, name,
+-- variable, text (a button's evaluated text), tooltip (evaluated), enabled, searchTags }.
+function SHIM.settings.Render()
+  local out = {}
+  for i, e in ipairs(SHIM.settings.elements) do
+    local text = e.buttonText
+    if type(text) == "function" then text = text() end
+    local tip = e.tooltip
+    if type(tip) == "function" then tip = tip() end
+    local enabled = true
+    if e.EvaluateModifyPredicates then enabled = e:EvaluateModifyPredicates() end
+    out[i] = { kind = e.kind, name = e.name, variable = e.variable, text = text, tooltip = tip, enabled = enabled,
+               searchTags = e.searchTags }
+  end
+  return out
 end
 function Settings.RegisterAddOnSetting(category, variable, variableKey, variableTbl, varType, name, default)
   if type(variableTbl) ~= "table" then shimError("RegisterAddOnSetting needs a table") end
@@ -1195,8 +1250,7 @@ function Settings.SetOnValueChangedCallback(variable, cb)
 end
 function Settings.CreateCheckbox(category, setting, tooltip)
   tinsert(SHIM.settings.controls, { "checkbox", setting, tooltip })
-  addElement("checkbox", setting, { tooltip = tooltip })
-  return {}
+  return addElement("checkbox", setting, { tooltip = tooltip })
 end
 function Settings.CreateSliderOptions(minV, maxV, step)
   local o = { min = minV, max = maxV, step = step }
@@ -1205,8 +1259,7 @@ function Settings.CreateSliderOptions(minV, maxV, step)
 end
 function Settings.CreateSlider(category, setting, options, tooltip)
   tinsert(SHIM.settings.controls, { "slider", setting, options, tooltip })
-  addElement("slider", setting, { options = options, tooltip = tooltip })
-  return {}
+  return addElement("slider", setting, { options = options, tooltip = tooltip })
 end
 function Settings.CreateControlTextContainer()
   local c = { data = {} }
@@ -1216,8 +1269,7 @@ function Settings.CreateControlTextContainer()
 end
 function Settings.CreateDropdown(category, setting, getOptions, tooltip)
   tinsert(SHIM.settings.controls, { "dropdown", setting, getOptions, tooltip })
-  addElement("dropdown", setting, { getOptions = getOptions, tooltip = tooltip })
-  return {}
+  return addElement("dropdown", setting, { getOptions = getOptions, tooltip = tooltip })
 end
 function Settings.RegisterAddOnCategory(category) SHIM.settings.registered = category end
 function Settings.OpenToCategory(id) tinsert(SHIM.log.openedCategory, id); return true end

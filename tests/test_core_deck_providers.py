@@ -57,7 +57,10 @@ class SSEClient:
 
     def __init__(self, deck: Deck, client: Optional[str] = None) -> None:
         self.conn = http.client.HTTPConnection("127.0.0.1", deck.port, timeout=5)
-        self.conn.request("GET", "/events" + (f"?client={client}" if client else ""))
+        query = [f"client={client}"] if client else []
+        if client in (None, "player"):
+            query.append(f"k={deck.player_key}")  # a player page sends the launch key (v1.2.1 review ON-1)
+        self.conn.request("GET", "/events?" + "&".join(query))
         self.resp = self.conn.getresponse()
         assert self.resp.status == 200
         assert self.resp.getheader("Content-Type").startswith("text/event-stream")
@@ -95,7 +98,8 @@ def wait_for(pred, timeout: float = 3.0) -> bool:
 
 def test_serves_panel_and_player_pages(deck):
     assert deck.port != 0 and deck.url == f"http://127.0.0.1:{deck.port}/"
-    assert deck.player_url == f"http://127.0.0.1:{deck.port}/player"
+    # D12: the player window opens on localhost (YouTube refused most embeds from 127.0.0.1 with error 150)
+    assert deck.player_url == f"http://localhost:{deck.port}/player"
     resp, body = get(deck, "/")
     assert resp.status == 200 and resp.getheader("Content-Type").startswith("text/html")
     html = body.decode("utf-8")
@@ -198,9 +202,9 @@ def test_media_range_requests(deck, tmp_path):
     data = bytes(range(256)) * 40  # 10240 bytes
     f.write_bytes(data)
     url = deck.register_media(f)
-    assert url.startswith(deck.base_url + "/media/")
+    assert url.startswith("/media/")  # D12: same-origin path, so the localhost player page can load it
     assert deck.register_media(f) == url  # stable token
-    path = url[len(deck.base_url):]
+    path = url
     r, b = get(deck, path)
     assert r.status == 200 and b == data and r.getheader("Accept-Ranges") == "bytes"
     assert r.getheader("Content-Type") == "audio/mpeg"
@@ -215,7 +219,7 @@ def test_media_range_requests(deck, tmp_path):
     with pytest.raises(FileNotFoundError):
         deck.register_media(tmp_path / "missing.mp3")
     # urllib (a different client) also works
-    with urllib.request.urlopen(url, timeout=5) as resp:
+    with urllib.request.urlopen(deck.base_url + url, timeout=5) as resp:  # the path, on the deck's origin
         assert resp.read() == data
 
 
@@ -386,7 +390,7 @@ def test_local_provider_end_to_end_with_real_deck(tmp_path):
 
         def fake_page():
             cmd = page.next_data()
-            r, body = get(d, cmd["url"][len(d.base_url):], {"Range": "bytes=0-1"})
+            r, body = get(d, cmd["url"], {"Range": "bytes=0-1"})  # D12: the media url is a same-origin path
             result["range"] = (r.status, body)
             post_status(d, {"state": "playing", "playId": cmd["playId"], "detail": "local"})
 

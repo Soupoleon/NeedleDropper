@@ -1,7 +1,8 @@
 local ADDON, ns = ...
 -- SelfTest (/needle selftest [beacon|chatlog|discovery|music|share]): checks, on the user's real
 -- client, the assumptions the design relies on but that could not be verified offline
--- (DESIGN-v1.2 6.4). Also the Settings panel's "Send a test signal" (S.Signal).
+-- (DESIGN-v1.2 6.4). Also the Settings panel's "Send a test signal" (S.Signal) and /needle report
+-- (S.Report, decision D16: a plain-text report for bug reports).
 
 local S = {}
 ns.SelfTest = S
@@ -228,6 +229,156 @@ function S.Share()
   ns.Print(allOk and "share self-test passed: share codes work on this client." or
     "share self-test FAILED: please report the lines above.")
   return allOk
+end
+
+-- ------------------------------------------------------------------ report --
+-- /needle report (decision D16): what a bug report needs, as plain text the player copies with
+-- Ctrl+C from a read-only box: the addon and client versions, the app's report (version, age,
+-- Spotify and YouTube), the beacon (cell size, rows, clearance) and the chat log, the settings that
+-- matter, the last 5 journal entries and the last error. Never an account name, a Client ID or a
+-- token (the app's request texts can name the Spotify account, so only their result codes appear).
+
+S.REPORT_SETTINGS = { "enabled", "historyMode", "scope", "cooldownMin", "dwellSec", "minDwellSec",
+  "landmarkDwellSec", "instanceDrops", "suppressOnTaxi", "combatFadeSec", "maxDropSec", "duckMethod",
+  "kickZoneMusic", "duckWithoutApp", "localPlayback", "toast", "chatlogPadBytes", "debug" }
+S.REPORT_JOURNAL = 5
+
+local function onOffWord(v) return v and "on" or "off" end
+
+local function setting(key)
+  local s = ns.settings or {}
+  return ns.FormatSettingValue and ns.FormatSettingValue(key, s[key]) or tostring(s[key])
+end
+
+local function appLines(out)
+  local C = ns.Companion
+  local MS = ns.MusicServices
+  local st = (C and C.Status) and C.Status() or {}
+  if not st.present then
+    out[#out + 1] = "App: not found (no NeedleDropper_Companion data)"
+    return
+  end
+  local app = MS and MS.App and MS.App() or {}
+  local version = tostring(st.appVersion or "?")
+  if C.IsOutdated and C.IsOutdated(st.appVersion) then
+    out[#out + 1] = "App: " .. version .. " (older than 1.2.1: it can't read this addon's frames)"
+    return
+  end
+  local age = C.ReportAge and C.ReportAge()
+  local when = "no report written yet"
+  if age then
+    when = string.format("report written %s (%s before login)", date("%Y-%m-%d %H:%M", st.written),
+      ns.FormatSeconds and ns.FormatSeconds(age) or tostring(age))
+  end
+  out[#out + 1] = string.format("App: %s, %s", version, when)
+  local sp = tostring(app.state or st.spotify or "unknown")
+  if app.mode then sp = sp .. ", mode " .. app.mode end
+  if app.product then sp = sp .. ", plan " .. app.product end
+  if app.clientId or (MS and MS.StoredClientId and MS.StoredClientId()) then sp = sp .. ", Client ID set" end
+  local yt = st.youtube and "on" or "off"
+  if app.ytEnabled == false then yt = "switched off" end
+  if app.ytPlayer then yt = yt .. ", player " .. app.ytPlayer end
+  out[#out + 1] = string.format("  Spotify: %s; YouTube: %s; transports: pixel %s, chat log %s", sp, yt,
+    onOffWord(st.transports and st.transports.pixel), onOffWord(st.transports and st.transports.chatlog))
+  local r = MS and MS.LastRequest and MS.LastRequest()
+  if r then
+    local result = "no result reported"
+    for _, e in ipairs(app.actions or {}) do
+      if e.id == r.at and e.action == r.action then result = e.result end
+    end
+    out[#out + 1] = string.format("  Last request: %s at %s: %s", r.action, date("%H:%M", r.at), result)
+  end
+end
+
+local function beaconLines(out)
+  local B = ns.Beacon
+  if not (B and B.Status) then
+    out[#out + 1] = "Beacon: not loaded"
+    return
+  end
+  local st = B.Status()
+  local gap = st.gap and string.format("%.1f px", st.gap) or "not measured"
+  local from = (st.measuredFrom and #st.measuredFrom > 0) and (" from " .. table.concat(st.measuredFrom, ", ")) or ""
+  out[#out + 1] = string.format("Beacon: %s, %d px cells (setting %d), %d row%s, %s px, up to %d rows, clearance %s%s, corner %s",
+    onOffWord(st.enabled), st.cellPx or 0, st.settingCellPx or 0, st.rows or 0, (st.rows or 0) == 1 and "" or "s",
+    tostring(st.size), st.maxRows or 0, gap, from, string.lower(tostring(st.corner or "TOPLEFT")))
+  local last = st.current
+  if last then
+    out[#out + 1] = string.format("  Drawn: %s seq %s (%d bytes, %s); queued %d, requests queued %d, dropped %d",
+      P.EV_NAME[last.type] or "?", tostring(last.seq), st.lastFrameBytes or 0, tostring(st.variant), st.queued or 0,
+      st.configQueued or 0, (st.dropped or 0) + (st.configDropped or 0))
+  end
+  for _, w in ipairs(st.warnings or {}) do out[#out + 1] = "  Warning: " .. w end
+  local C = ns.ChatLink
+  local c = (C and C.Status) and C.Status() or {}
+  if c.enabled then
+    out[#out + 1] = string.format("Chat log: on, logging %s, %d lines sent, %d queued, %d stale%s",
+      c.logging == nil and "unknown" or onOffWord(c.logging), c.sent or 0, c.queued or 0, c.stale or 0,
+      c.lockdown and ", chat locked down" or "")
+  else
+    out[#out + 1] = "Chat log: off"
+  end
+end
+
+-- The report as plain text (lines joined with "\n"; no "|" anywhere, so the box shows it as is).
+function S.ReportText()
+  local out = {}
+  out[#out + 1] = "NeedleDropper report, " .. date("%Y-%m-%d %H:%M")
+  local version, build, _, toc = "?", "?", nil, "?"
+  if type(GetBuildInfo) == "function" then
+    local ok, v, b, d, t = pcall(GetBuildInfo)
+    if ok then version, build, toc = v or "?", b or "?", t or "?" end
+  end
+  out[#out + 1] = string.format("Addon: %s; client %s (build %s, interface %s), locale %s", tostring(ns.VERSION),
+    tostring(version), tostring(build), tostring(toc), tostring(ns.LOCALE or (GetLocale and GetLocale()) or "?"))
+  appLines(out)
+  beaconLines(out)
+  local s = ns.settings or {}
+  local MS = ns.MusicServices
+  out[#out + 1] = string.format("Music: play with %s, YouTube box %s, fade %s, resume %s, chosen in game %s",
+    tostring(s.musicOrder), tostring(s.youtubeCorner), onOffWord(s.musicFade ~= false),
+    onOffWord(s.resumeMyMusic ~= false), (MS and MS.PrefsSet and MS.PrefsSet()) and "yes" or "no")
+  local parts = {}
+  for _, key in ipairs(S.REPORT_SETTINGS) do parts[#parts + 1] = key .. " " .. setting(key) end
+  out[#out + 1] = "Settings: " .. table.concat(parts, ", ")
+  local names = ns.ActiveSoundtrackNames and ns.ActiveSoundtrackNames() or {}
+  local drops = (ns.Map and ns.Map.drops) and #ns.Map.drops or 0
+  out[#out + 1] = string.format("Soundtracks: %s (%d drops)", #names > 0 and table.concat(names, ", ") or "none on", drops)
+  if ns.PlaybackSummary then out[#out + 1] = "Now: " .. tostring(ns.PlaybackSummary()) end
+  local j = ns.cdb and ns.cdb.journal or {}
+  if #j == 0 then
+    out[#out + 1] = "Journal: empty"
+  else
+    out[#out + 1] = string.format("Journal (last %d of %d):", math.min(S.REPORT_JOURNAL, #j), #j)
+    for i = math.max(1, #j - S.REPORT_JOURNAL + 1), #j do
+      local e = j[i]
+      local when = (type(e.t) == "number" and e.t > 0) and date("%Y-%m-%d %H:%M", e.t) or "?"
+      local via = e.spotify and "Spotify" or (e.youtube and "YouTube" or (e.file and "file" or "search"))
+      out[#out + 1] = string.format("  %s  %s  %s - %s (%s)", when, tostring(e.id), tostring(e.artist or "?"),
+        tostring(e.title or "?"), via)
+    end
+  end
+  local err = ns.lastError
+  if type(err) == "table" then
+    out[#out + 1] = string.format("Last error (%s): %s", date("%H:%M", err.at), tostring(err.text))
+  else
+    out[#out + 1] = "Last error: none this session"
+  end
+  local text = table.concat(out, "\n")
+  return (string.gsub(text, "|", "/"))
+end
+
+-- /needle report: the report in its dialog (selected for Ctrl+C) and one chat line; without the
+-- window, the report goes to chat.
+function S.Report()
+  local text = S.ReportText()
+  local U = ns.UI
+  if type(U) == "table" and type(U.OpenReport) == "function" and U.OpenReport(text) then
+    ns.Print(L["report ready: press Ctrl+C to copy it from the box, then paste it into your bug report. It holds no account names, Client IDs or tokens."])
+    return text
+  end
+  for row in string.gmatch(text, "[^\n]+") do ns.Print("%s", ns.EscapeText and ns.EscapeText(row) or row) end
+  return text
 end
 
 local TESTS = { beacon = S.Beacon, chatlog = S.Chatlog, discovery = S.Discovery, music = S.Music, share = S.Share }

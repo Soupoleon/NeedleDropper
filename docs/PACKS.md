@@ -22,10 +22,11 @@ Built-in soundtracks come with the addon. They are read-only and get their fixes
 To hear Azeroth Unbound too, open the **Soundtracks** tab and tick **On** next to it. Keep Azeroth
 Mixtape above it: the Mixtape then plays at its 38 places and Unbound scores everywhere else.
 
-The built-in drops come with their song lengths and an official YouTube upload (all but one: Azeroth
-Unbound's Azshara), so they play as soon as the
+The built-in drops come with their song lengths, an official YouTube upload and the exact Spotify
+recording, so they play as soon as the
 [NeedleDropper app](INSTALL.md#3-optional-the-needledropper-app) runs. With Spotify connected, the
-app plays them on Spotify instead (it looks each song up by artist and title).
+app plays them on Spotify (or on YouTube first, if you choose that under
+[Play music with](PROVIDERS.md#which-service-plays-a-drop)).
 
 ## The window
 

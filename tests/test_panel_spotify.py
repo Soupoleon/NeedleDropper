@@ -54,8 +54,9 @@ def approve(authorize_url: str, *, code: str = "THE-CODE", error: str = "") -> t
 
 
 def token_routes(fake: FakeHTTP, who: str = "Thrall", me_status: int = 200) -> FakeHTTP:
+    # Spotify grants the scopes 1.2.1 asks for (a narrower grant is a sign-in to repeat, D9)
     fake.add("POST", "/api/token", (200, {"access_token": "AT-NEW", "refresh_token": "RT-NEW", "expires_in": 3600,
-                                          "scope": "user-modify-playback-state user-read-playback-state"}))
+                                          "scope": " ".join(sa.SCOPES)}))
     fake.add("GET", "/v1/me", (me_status, {"display_name": who, "id": who.lower()} if me_status == 200 else
                                {"error": {"status": me_status, "message": "User not registered"}}))
     return fake
@@ -66,7 +67,8 @@ def token_routes(fake: FakeHTTP, who: str = "Thrall", me_status: int = 200) -> F
 def test_start_login_connects_without_blocking_and_the_running_provider_picks_it_up(tmp_path):
     paths = SimpleNamespace(app_dir=tmp_path)
     fake = token_routes(FakeHTTP())
-    provider = SpotifyProvider({"clientId": CID}, paths, http=fake)  # already running, not logged in yet
+    # already running, not logged in yet; connect mode: app mode would also need the in-app player
+    provider = SpotifyProvider({"clientId": CID, "device": "connect"}, paths, http=fake)
     assert not provider.available() and provider.status_dict()["badge"] == "not-set-up"
     changes: list[str] = []
     t0 = time.monotonic()
@@ -161,11 +163,14 @@ def test_provider_status_dict_and_reset(tmp_path):
     paths = SimpleNamespace(app_dir=tmp_path)
     assert SpotifyProvider({"clientId": ""}, paths, http=FakeHTTP()).status_dict()["badge"] == "not-set-up"
     save_tokens(tmp_path, client_id=CID)
-    sp = SpotifyProvider({"clientId": CID, "deviceName": "PC"}, paths, http=FakeHTTP())
+    # connect mode: in app mode available() also needs the in-app player (test_spotify_inapp.py)
+    sp = SpotifyProvider({"clientId": CID, "deviceName": "PC", "device": "connect"}, paths, http=FakeHTTP())
     st = sp.status_dict()
     assert st == {"badge": "connected", "message": None, "configured": True, "loggedIn": True, "deviceName": "PC",
                   "missingScopes": [], "scopeMessage": None, "saveError": None,
-                  "stuck": False}                    # the session health verdict (SPOT-NO-SESSION-HEALTH)
+                  "stuck": False,                    # the session health verdict (SPOT-NO-SESSION-HEALTH)
+                  # 1.2.1 (D17): the mode, the detailed state, the in-app player (none in connect mode)
+                  "mode": "connect", "state": "connected", "warning": None, "relogin": False, "player": None}
     assert "AT1" not in json.dumps(st) and "RT1" not in json.dumps(st)
     sp._mark_unavailable(PREMIUM_MESSAGE)
     assert sp.status_dict()["badge"] == "premium" and not sp.available()
@@ -256,7 +261,8 @@ def test_an_account_spotify_refuses_gets_a_warning(tmp_path, _needledropper_home
     try:
         st, data = ns.call("POST", "/api/spotify/connect", {"clientId": CID})
         approve(data["authorizeUrl"])
-        assert wait_for(lambda: ns.call("GET", "/api/state")[1]["spotify"]["state"] == "connected", timeout=8)
+        # v1.2.1 review ON-3: the card says "Account not allowed" at once, not "Connected" until the first song
+        assert wait_for(lambda: ns.call("GET", "/api/state")[1]["spotify"]["state"] == "allowlist", timeout=8)
         s = ns.call("GET", "/api/state")[1]["spotify"]
         assert s["premium"] == "unknown" and "User Management" in s["warning"]
     finally:
@@ -329,3 +335,65 @@ def test_the_account_check_shares_the_providers_token_manager(rig):
     assert calls == [1]
     s = spotify(rig)
     assert s["account"] == "Thrall" and s["premium"] == "ok"
+
+
+# ------------------------------------------------- in-app Spotify (1.2.1) --
+
+def test_a_sign_in_from_before_1_2_1_asks_once_for_a_new_one(tmp_path, _needledropper_home):
+    """D9: a stored sign-in without streaming / user-read-email: one notification, the Connect page asks
+    to sign in again (the Client ID stays), and the game's v1.2 status reads "error" (D17)."""
+    from needledropper.providers.spotify import RELOGIN_MESSAGE
+
+    home = Path(_needledropper_home)
+    save_tokens(home, client_id=CID, scope="user-modify-playback-state user-read-playback-state user-read-private")
+    ns = make_shell(tmp_path, home, cfg_extra={"spotify": {"clientId": CID}})
+    try:
+        app = ns.app
+        for _ in range(2):
+            app._next_spotify_watch = 0.0
+            app._watch_spotify(app._clock())
+        notes = [n for n in app.notifier.history if n.kind == tray.NOTE_SPOTIFY_RELOGIN]
+        assert len(notes) == 1 and notes[0].title == "Sign in to Spotify again" and RELOGIN_MESSAGE in notes[0].text
+        assert not [n for n in app.notifier.history if n.kind == tray.NOTE_SPOTIFY_EXPIRED]
+        assert app._game_status()["spotify"] == "error"
+        s = spotify(ns)
+        assert s["state"] == "error" and s["message"] == RELOGIN_MESSAGE and s["clientId"] == CID
+    finally:
+        ns.close()
+
+
+def test_the_connect_page_shows_the_in_app_players_warning(rig, monkeypatch):
+    monkeypatch.setattr(rig.app, "_spotify_status", lambda: {"badge": "connected", "message": None, "loggedIn": True,
+                                                             "configured": True, "missingScopes": [],
+                                                             "warning": "install Google Chrome", "state": "no-player"})
+    s = spotify(rig)
+    assert s["warning"] == "install Google Chrome" and s["state"] == "connected"
+    assert rig.app._game_status()["spotify"] == "error"      # D17: no-player is "error" for v1.2 readers
+
+
+def test_the_housekeeping_reconnects_an_in_app_player_that_never_got_ready(tmp_path, _needledropper_home,
+                                                                            monkeypatch):
+    """A no-player Spotify is never prepared by the engine (unavailable), so the app's 30 s Spotify check
+    calls sync_sdk, which connects such a player again at most once a minute."""
+    from test_spotify_inapp import PageDeck
+
+    from needledropper.providers import spotify as spmod
+
+    home = Path(_needledropper_home)
+    save_tokens(home, client_id=CID)
+    page = PageDeck(ready=False)
+    built: list = []
+
+    def factory(cfg, paths, deck):
+        built.append(SpotifyProvider(cfg["spotify"], paths, deck=page, http=FakeHTTP()))
+        return list(built[-1:])
+
+    monkeypatch.setattr(spmod, "SDK_READY_GRACE_S", -1.0)
+    ns = make_shell(tmp_path, home, cfg_extra={"spotify": {"clientId": CID}}, provider_factory=factory)
+    try:
+        assert not built[-1].available() and page.ops()[0] == "connect"
+        ns.app._next_spotify_watch = 0.0
+        ns.app._watch_spotify(ns.app._clock())
+        assert page.ops().count("reconnect") == 1
+    finally:
+        ns.close()

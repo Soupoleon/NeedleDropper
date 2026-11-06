@@ -93,7 +93,8 @@ def test_the_full_song_is_fitted_to_the_cell_size_cap(px):
     ev = h.emit(ET.FIRE, LIONS_PRIDE)
     f = h.beacon_decoded()
     size = len(p2.encode_frame(f))
-    assert size == {2: 141, 3: 113, 4: 59}[px] <= p2.capacity(p2.rows_cap(px))
+    # 2 bytes longer than with the old 2-byte trailer (141 / 113 / 59): the 4-byte frame check (F1)
+    assert size == {2: 143, 3: 115, 4: 61}[px] <= p2.capacity(p2.rows_cap(px))
     assert f == expected(ev, px)
     assert (f.place_key, f.start_ds, f.length_ds) == (p2.place_key_for(LIONS_PRIDE["id"]), 120, 950)
     assert f.spotify_id == SPOTIFY_ID and f.youtube_id == YT_ID
@@ -103,10 +104,12 @@ def test_the_full_song_is_fitted_to_the_cell_size_cap(px):
 
 def test_strip_size_adapts_to_the_frame():
     """DESIGN 2.3 measured sizes, drawn: idle 96 x 3, CANCEL 240 x 3, Mixtape FIRE (with label and
-    set id) 240 x 9, the fitted user drop 336 x 9; unused pool textures are hidden."""
+    set id) 288 x 9, the fitted user drop 336 x 9; unused pool textures are hidden. With the 4-byte
+    frame check (finding F1) every frame is 2 bytes longer (7 / 22 / 86 / 113 before), and the
+    88-byte Mixtape FIRE needs 96 columns where 86 bytes fitted 80 (240 x 9)."""
     h = make()
-    cases = [(ET.HELLO, None, "96x3", 7), (ET.CANCEL, {"id": "zone:1429", "kind": "zone", "mapID": 1429}, "240x3", 22),
-             (ET.FIRE, DUROTAR, "240x9", 86), (ET.FIRE, LIONS_PRIDE, "336x9", 113)]
+    cases = [(ET.HELLO, None, "96x3", 9), (ET.CANCEL, {"id": "zone:1429", "kind": "zone", "mapID": 1429}, "240x3", 24),
+             (ET.FIRE, DUROTAR, "288x9", 88), (ET.FIRE, LIONS_PRIDE, "336x9", 115)]
     for etype, drop, size, nbytes in cases:
         h.emit(etype, drop)
         st = h.status()
@@ -114,7 +117,8 @@ def test_strip_size_adapts_to_the_frame():
         assert len(h.shown_textures()) == st["rows"] * st["cols"]
         h.advance(3.5)
     assert len(h.beacon_textures()) <= 448
-    assert h.status()["size"] == "96x3"  # after the last FIRE: HELLO + DROP_ACTIVE
+    # after the last FIRE: HELLO + DROP_ACTIVE, which carries the playing drop's placeKey (D3): 13 bytes
+    assert h.status()["size"] == "144x3"
 
 
 # ------------------------------------------------------------- the frame --
@@ -215,6 +219,7 @@ def test_status_reports_the_drawn_strip():
     for key in ("cellPx", "rows", "cols", "size", "lastFrameBytes", "warnings", "maxRows", "corner", "shown",
                 "enabled", "queued"):
         assert key in st, key
-    assert (st["cellPx"], st["rows"], st["cols"], st["size"], st["lastFrameBytes"]) == (3, 3, 112, "336x9", 113)
+    # 115 B: 113 before the 4-byte frame check (F1)
+    assert (st["cellPx"], st["rows"], st["cols"], st["size"], st["lastFrameBytes"]) == (3, 3, 112, "336x9", 115)
     assert st["lastFrameType"] == int(ET.FIRE) and st["warnings"] == {} and st["overflow"] is False
     assert st["current"]["dropId"] == LIONS_PRIDE["id"]

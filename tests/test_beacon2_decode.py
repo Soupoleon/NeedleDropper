@@ -5,7 +5,7 @@ that contains its centre), on busy game-like backgrounds that include stray pure
 green runs, then decoded with :func:`needledropper.transport.beacon2.locate_and_decode`.
 Covers all four corners, 1-8 px cells, offsets, colour noise, tone shifts, fractional pitch,
 whole-frame nearest-neighbour resampling, blended edges, 32/48/64 cells per row, frames of
-7..262 bytes, partial occlusion and tearing (must yield None, never a wrong frame), garbage,
+9..264 bytes, partial occlusion and tearing (must yield None, never a wrong frame), garbage,
 truncation, the corner constraint, Lua-rendered strips, and timing.
 """
 from __future__ import annotations
@@ -32,8 +32,11 @@ from needledropper.transport.beacon2 import CORNERS, locate_and_decode, scan  # 
 
 
 def frame_of_size(n: int, seed: int = 0) -> bytes:
-    """A valid v2 frame of exactly ``n`` bytes (7 or 9..262): a FIRE with real fields, padded
-    with TLVs of tags this version does not know (decoders skip them)."""
+    """A valid v2 frame of exactly ``n`` bytes (9 or 11..264; was 7 or 9..262 before the 4-byte
+    frame check, finding F1): a FIRE with real fields, padded with TLVs of tags this version does
+    not know (decoders skip them). A body is empty or at least one 2-byte TLV head, so no frame
+    is 10 bytes long."""
+    assert n == p2.FRAME_OVERHEAD or p2.FRAME_OVERHEAD + 2 <= n <= p2.MAX_FRAME, n
     rng = random.Random(seed)
     base = p2.build_frame(EventType.FIRE, seq=rng.randrange(256), flags=rng.randrange(128),
                           drop_id=f"zone:{rng.randrange(1, 9999)}", artist="Low Roar", title="I'll Keep Coming")
@@ -205,7 +208,7 @@ def assert_decoded(cv: Canvas, frame: bytes, corner: str = "TOPLEFT", **kw):
     return res
 
 
-SIZES = (10, 33, 60, 120, 189, 262)
+SIZES = (11, 33, 60, 120, 189, 264)  # was (10, ..., 262): frames are 9 or 11..264 bytes with the 4-byte check
 
 
 # ------------------------------------------------------ decode: geometry --
@@ -301,7 +304,9 @@ def test_threshold_parameter():
     assert_decoded(cv, frame, threshold=60)
 
 
-@pytest.mark.parametrize("size", (7, 9, 10, 11, 12, 13, 20, 47, 48, 100, 150, 189, 190, 220, 255, 261, 262))
+# the smallest frames (9: empty body, then 11, 12, 13), row boundaries and the largest; with the
+# 4-byte check (finding F1) every frame is 2 bytes longer, so 7 and 10 no longer exist
+@pytest.mark.parametrize("size", (9, 11, 12, 13, 15, 20, 47, 48, 100, 150, 189, 190, 220, 255, 262, 263, 264))
 @pytest.mark.parametrize("cols", (32, 48, 64))
 def test_payload_sizes(cols, size):
     corner = CORNERS[(size + cols) % 4]
@@ -366,7 +371,7 @@ def test_partial_occlusion_never_decodes_garbage():
 
 @pytest.mark.parametrize("corner", CORNERS)
 def test_bottom_rows_cut_off_or_covered(corner):
-    frame = frame_of_size(262, seed=5)
+    frame = frame_of_size(264, seed=5)  # the largest frame (262 before the 4-byte check)
     cv, grid, (x, y) = make(frame, cols=64, pitch=3, corner=corner, off=(2, 2), seed=6)
     top = int(round(y))
     for keep in range(1, grid.rows):  # cover everything below row `keep`
@@ -456,7 +461,7 @@ def test_strip_at_the_other_corner_is_not_taken():
 
 
 def test_truncated_strip_reports_needed_size():
-    frame = frame_of_size(262, seed=2)
+    frame = frame_of_size(264, seed=2)  # the largest frame (262 before the 4-byte check)
     big, grid, _ = make(frame, cols=64, pitch=8, off=(10, 2), width=540, height=110, seed=2)
     assert grid.rows == 12
     buf, w, h, stride = big.frame()
@@ -512,7 +517,7 @@ def _sweep(n: int, seed: int, pitch_fn):
         corner = rng.choice(CORNERS)
         cols = rng.choice((32, 48, 64))
         pitch = pitch_fn(rng)
-        size = rng.choice([rng.randrange(9, 263), 7, 262])
+        size = rng.choice([rng.randrange(11, 265), 9, 264])  # was [9..262, 7, 262]: frames grew 2 bytes (F1)
         off = (rng.uniform(0, 30), rng.uniform(0, 10))
         frame = frame_of_size(size, seed=t)
         cv, _grid, _ = make(frame, cols=cols, pitch=pitch, corner=corner, off=off, noise=rng.choice((0, 10, 25)),
@@ -555,7 +560,7 @@ def _best_of(fn, n: int = 10) -> float:
 def test_decode_speed_default_region():
     """The default geometry (64 cells per row, 3 px) with a maximum-size frame (12 rows) in the
     default 320 x 48 capture region, with noise: well under 30 ms in pure Python."""
-    frame = frame_of_size(262, seed=77)
+    frame = frame_of_size(264, seed=77)  # the largest frame (262 before the 4-byte check)
     cv, grid, _ = make(frame, cols=64, pitch=3, off=(2, 1), width=320, height=48, noise=20, seed=77)
     buf, w, h, s = cv.frame()
     assert (w, h, grid.rows) == (320, 48, 12)
@@ -615,7 +620,10 @@ def test_adaptive_strips_decode_in_the_capture_region(px, scale):
     area's (0, 0) -- in the 512 x 48 region (magnified with the capture), every frame size that
     fits the cap, on a busy background."""
     w, h = beacon2.capture_size(scale)
-    sizes = [n for n in (7, 9, 11, 22, 32, 39, 43, 59, 60, 81, 86, 95, 113, 123, 141, 165)
+    # the frames the addon draws, each 2 bytes longer with the 4-byte check (F1): HELLO 9, HELLO +
+    # placeKey 13, + PREFS 15 / 19, CONFIG 23 / 35, CANCEL 24, one-row YouTube 34, Capacity(1) 39,
+    # the irreducible 45, ..., and the 2 / 3 / 4 px capacities 165 / 123 / 81 (unchanged)
+    sizes = [n for n in (9, 11, 13, 15, 19, 23, 24, 34, 35, 39, 45, 61, 62, 81, 88, 97, 115, 123, 143, 165)
              if n <= p2.capacity(p2.rows_cap(px))]
     for size in sizes:
         frame = frame_of_size(size, seed=size * 7 + px)
@@ -629,12 +637,12 @@ def test_adaptive_strips_decode_in_the_capture_region(px, scale):
 
 
 def test_overflowing_strip_of_two_2px_rows_decodes():
-    """The clearance guard's last resort: 43 bytes (placeKey, start, length, Spotify id) in
-    two rows of 2 px cells."""
+    """The clearance guard's last resort: 45 bytes (placeKey, start, length, Spotify id; 43 with
+    the old 2-byte trailer) in two rows of 2 px cells."""
     frame = p2.encode_frame(p2.build_frame(EventType.FIRE, seq=3, drop_id="zone:1429",
                                            spotify="4uLU6hMCjMI75M1A2tKUQC", start_ms=1000, length_ms=60000,
                                            max_bytes=39, prefer="spotify"))
-    assert len(frame) == 43
+    assert len(frame) == 45  # was 43: the 4-byte check (F1)
     grid = p2.encode_cells(frame, p2.Geometry.beacon(2, 1))
     assert grid.overflow and grid.rows == 2
     cv = Canvas(512, 48, seed=43)

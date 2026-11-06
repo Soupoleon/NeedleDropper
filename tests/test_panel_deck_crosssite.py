@@ -63,7 +63,8 @@ def test_cross_site_no_cors_events_request_is_refused(deck):
 
 
 def test_same_origin_pages_and_tools_still_connect(deck):
-    status, conn = request(deck, "GET", "/events?client=player", {"Sec-Fetch-Site": "same-origin"})
+    # v1.2.1 review ON-1: the player page sends the launch key from its address
+    status, conn = request(deck, "GET", f"/events?client=player&k={deck.player_key}", {"Sec-Fetch-Site": "same-origin"})
     try:
         assert status == 200 and wait_for(lambda: deck.page_open)
     finally:

@@ -72,7 +72,8 @@ def test_chat_line_and_beacon_share_the_dedupe_key_when_the_beacon_is_fitted():
     ev = h.emit(ET.FIRE, DROP)
     chat = p2.parse_chat_line(records(h)[-1])
     shown = h.beacon_decoded()
-    assert len(p2.encode_frame(shown)) == 59 < len(p2.encode_frame(chat)) == 141
+    # 61 / 143 B: 59 / 141 before the 4-byte frame check (F1)
+    assert len(p2.encode_frame(shown)) == 61 < len(p2.encode_frame(chat)) == 143
     assert chat.key == shown.key == (ev["seq"], int(ET.FIRE), p2.place_key_for(DROP["id"]), ev["flags"])
 
 

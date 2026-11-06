@@ -2058,6 +2058,15 @@ end
 function S.DoneCounts(drop, record)
   if record == nil or record == false then return false end
   if type(record) == "table" and record.how == "history" then return S.HistoryApplies(drop) end
+  if type(record) == "table" and record.how == "card" and record.why == "service" then
+    -- Only the title card showed: the app was there, but no music service could play the song
+    -- (Director.Fire, review INGAME-2). Heard while that lasts; once one can, the place plays it.
+    local D = ns.Director
+    if type(D) == "table" and type(D.ServiceBlocked) == "function" then
+      return D.ServiceBlocked(drop) and true or false  -- it guards MusicServices.Plan itself
+    end
+    return true
+  end
   if type(record) == "table" and record.how == "card" then
     -- Only the title card showed: no NeedleDropper app had been seen (Director.Fire). Heard for
     -- now, so the card does not repeat; once the app is there the place plays its song.

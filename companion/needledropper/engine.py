@@ -27,7 +27,29 @@ v2 frames carry the song itself, so the engine needs no map and keeps no soundtr
   (``(seq - fireSeq) mod 256`` in 1..127): the chat log delivers HELLO/ARM lines late, in one
   batch with the FIRE (ENG-STALE-HELLO). ``DROP_ACTIVE`` cancels the timer even on a duplicate
   frame, unless that frame is older than the HELLO that started it.
+  **Late start** (protocol finding F2, lead decision D3): the steady HELLO the beacon shows after a
+  FIRE carries ``DROP_ACTIVE`` and the playing drop's ``placeKey`` (and the FIRE's seq). When such a
+  HELLO arrives while nothing plays, for a place whose ARM is cached (sent before the HELLO, with no
+  CANCEL or FIRE of the place since -- judged by sequence, not by the ARM's age: review RP-2), the FIRE was lost --
+  e.g. a toast covered the strip for its whole 3 s hold -- and the ARM's song starts now, exactly as
+  that FIRE would have started it. The real FIRE, if it still arrives (the chat log), is a duplicate.
+* ``CONFIG`` -- the music choices and requests from the game (DESIGN-v1.2.1): counted like a PING,
+  never played; the shell's ``music_config.MusicConfig`` acts on them.
 * ``PING``   -- logged prominently, never played.
+
+**Play music with** (DESIGN-v1.2.1 3.3, :meth:`Engine.set_music_order`): the game's choice orders and
+limits the routes of a v2 FIRE -- ``spotify-youtube`` (the chain above), ``youtube-spotify`` (YouTube
+id first), ``spotify`` or ``youtube`` only, or ``none`` (nothing plays: no card, no window; in-game
+files still show their card). The ARM pre-warm follows it (no Spotify search or device wake when
+Spotify is not in the order, no YouTube preload when YouTube is not). ``play_now`` (the shell's
+tests) ignores it: a test names its provider.
+
+**Duplicates that add fields** (lead decision D4): the beacon fits its frame to its rows (it may leave
+out the query, the label, the set), the chat line carries everything; both share a dedupe key. A
+duplicate ARM fills the fields the cached ARM lacks (so the FIRE gets them through its merge with the
+ARM); a duplicate FIRE fills the title card of the drop it started, and when nothing could play that
+drop yet (card only, within the fallback window), the chain is tried again with the fuller song. A
+duplicate never starts a pre-warm search and never switches a song that already plays.
 
 A provider that fails after it had taken over playback may attach ``cleanup`` (a handle) and
 ``notice`` (a change kind) to its ``ProviderError`` (providers/base.py): the next provider plays
@@ -89,6 +111,17 @@ MAX_ARMED = 64
 NOT_FOUND_TTL_SEC = 30 * 60.0  # a failed Spotify search is retried after this
 MAX_RESOLUTIONS = 512
 ADDON_GONE_SEC = 120.0  # no frame for this long: the next one is reported as "addon seen" again
+#: D3: a FIRE of the same seq this soon after a late start is its duplicate. (The late start itself judges
+#: the cached ARM by sequence, not by its age: the Director fires a place minutes after arming it when the
+#: player enters it during the cooldown, in combat or on a taxi -- review RP-2.)
+LATE_START_SEC = 30.0
+
+#: "Play music with" (DESIGN-v1.2.1 1.2, the PREFS order codes 1..5 in protocol2.PREFS_ORDERS).
+MUSIC_ORDERS = ("spotify-youtube", "youtube-spotify", "spotify", "youtube", "none")
+DEFAULT_MUSIC_ORDER = "spotify-youtube"
+_ORDER_SPOTIFY = frozenset(("spotify-youtube", "youtube-spotify", "spotify"))
+_ORDER_YOUTUBE = frozenset(("spotify-youtube", "youtube-spotify", "youtube"))
+_ORDER_OTHERS = frozenset(("spotify-youtube", "youtube-spotify"))  # other providers (local files) after both
 
 #: YouTube player error codes that mean "this video cannot be played embedded" (or is gone).
 YT_UNEMBEDDABLE = frozenset((100, 101, 150, 153))
@@ -164,6 +197,9 @@ class _Active:
     #: handles of providers that failed after taking over playback (``ProviderError.cleanup``): stopped
     #: when the drop ends, so e.g. Spotify resumes the player's own music after the YouTube fallback
     cleanups: list[tuple[Provider, PlayHandle]] = field(default_factory=list)
+    #: why the providers tried so far could not play it (``noSource.reasons``: a failed test says why)
+    reasons: list[str] = field(default_factory=list)
+    late: bool = False  # started by a HELLO whose FIRE was not seen (D3)
 
 
 @dataclass
@@ -362,6 +398,23 @@ def _merge_frames(fire: Frame, armed: Optional[Frame]) -> Frame:
     return dataclasses.replace(fire, **changes) if changes else fire
 
 
+#: The song fields one copy of a frame may lack and the other transport's copy carry (D4).
+_SONG_FIELDS = ("drop_id", "spotify_id", "youtube_id", "query", "start_ds", "length_ds", "volume", "label", "set_id")
+
+
+def _fill_missing(base: Frame, other: Frame) -> Frame:
+    """``base`` with the song fields it lacks taken from ``other``, another copy of the same event
+    (same dedupe key: the beacon's fitted frame and the chat line's full one, D4). Nothing is taken
+    when the two disagree about the drop or a provider id (then they are not the same song)."""
+    for name in ("drop_id", "spotify_id", "youtube_id"):
+        a, b = getattr(base, name), getattr(other, name)
+        if a and b and a != b:
+            return base
+    changes = {name: getattr(other, name) for name in _SONG_FIELDS
+               if getattr(base, name) is None and getattr(other, name) is not None}
+    return dataclasses.replace(base, **changes) if changes else base
+
+
 class Engine:
     """Single-threaded drop player fed by any number of transports.
 
@@ -380,7 +433,7 @@ class Engine:
                  dedupe_sec: float = DEDUPE_SEC, hello_stale_sec: float = HELLO_STALE_SEC,
                  poll_interval: float = POLL_INTERVAL_SEC, switch_fade_ms: int = SWITCH_FADE_MS,
                  fallback_window_sec: float = FALLBACK_WINDOW_SEC, card_only_sec: float = CARD_ONLY_SEC,
-                 fire_wait_sec: float = FIRE_WAIT_SEC) -> None:
+                 fire_wait_sec: float = FIRE_WAIT_SEC, music_order: str = DEFAULT_MUSIC_ORDER) -> None:
         if len(legacy) > 1:
             raise TypeError("Engine(providers, deck) takes at most one more positional argument "
                             "(the v1.1 form Engine(providers, registry, deck))")
@@ -407,6 +460,7 @@ class Engine:
         self.track_recorder = track_recorder
         self.prewarm_async = bool(prewarm_async)
         self.log = _Log(log)
+        self._music_order = music_order if music_order in MUSIC_ORDERS else DEFAULT_MUSIC_ORDER
 
         self._queue: "queue.Queue[tuple]" = queue.Queue()
         self._lock = threading.RLock()
@@ -433,6 +487,12 @@ class Engine:
         self._warned_hashes: set[int] = set()
         self._warned_v1 = False
         self._last_event: Optional[str] = None
+        #: D3: place key -> (seq, time) of the newest CANCEL seen, and of the late starts (their FIRE's seq)
+        self._cancels: dict[int, tuple[int, float]] = {}
+        self._late_fired: dict[int, tuple[int, float]] = {}
+        #: place key -> (seq, time) of the newest FIRE seen (an ARM copy older than it never re-arms the
+        #: place: the chat log delivers the ARM line after the FIRE; review RP-4)
+        self._fired: dict[int, tuple[int, float]] = {}
         self._notes: list[tuple[str, tuple]] = []  # callbacks to run after the lock is released
         self.counts: dict[str, int] = {t.name: 0 for t in EventType}
         self.transport_counts: dict[str, int] = {}
@@ -481,6 +541,24 @@ class Engine:
         """Where search results and failures are recorded for the game (None: nowhere). Thread-safe."""
         with self._lock:
             self.addons_dir = addons_dir
+
+    @property
+    def music_order(self) -> str:
+        """The game's "Play music with" choice the routes follow (:data:`MUSIC_ORDERS`)."""
+        return self._music_order
+
+    def set_music_order(self, order: Any) -> str:
+        """Follow "Play music with" (DESIGN-v1.2.1 3.3): one of :data:`MUSIC_ORDERS`; anything else
+        means the default, ``spotify-youtube``. Thread-safe; the drop playing now keeps playing.
+        Returns the order in effect."""
+        value = order if isinstance(order, str) and order in MUSIC_ORDERS else DEFAULT_MUSIC_ORDER
+        # One atomic attribute store, without the engine lock: the companion calls this while it holds
+        # its own lock, and the engine thread may hold the engine lock for seconds (a FIRE waiting for
+        # its pre-warm). Routes read the order once per FIRE / ARM.
+        old, self._music_order = self._music_order, value
+        if old != value:
+            self.log.info("Play music with: %s (was %s)", value, old)
+        return value
 
     def current_provider(self) -> Optional[Provider]:
         """The provider instance playing the current drop, if any."""
@@ -612,6 +690,15 @@ class Engine:
         if self._armed2:
             for pk in [pk for pk, a in self._armed2.items() if now - a.at > ARM_TTL_SEC]:
                 self._disarm(pk)
+        if self._cancels:
+            for pk in [pk for pk, c in self._cancels.items() if now - c[1] > ARM_TTL_SEC]:
+                del self._cancels[pk]
+        if self._late_fired:
+            for pk in [pk for pk, c in self._late_fired.items() if now - c[1] > LATE_START_SEC]:
+                del self._late_fired[pk]
+        if self._fired:
+            for pk in [pk for pk, c in self._fired.items() if now - c[1] > ARM_TTL_SEC]:
+                del self._fired[pk]
         if self._resolutions:
             for k in [k for k, r in self._resolutions.items()
                       if r.done.is_set() and (r.error or (r.not_found and now - (r.finished or now) > NOT_FOUND_TTL_SEC))]:
@@ -669,6 +756,8 @@ class Engine:
         if first is not None and now - first < self.dedupe_sec:
             self.duplicates += 1
             self.log.debug("duplicate %s", describe_event(ev, transport))
+            if isinstance(ev, Frame):
+                self._merge_duplicate(ev, now)
             return None
         self._seen[key] = now
         self.counts[ev.type.name] = self.counts.get(ev.type.name, 0) + 1
@@ -700,6 +789,7 @@ class Engine:
         if cur is not None and cur.fire_seq is not None:
             self.log.debug("addon back after a silence: the seq of %s's FIRE no longer counts", cur.drop.id)
             cur.fire_seq = None
+        self._fired.clear()  # a new session's seq values start again (ENG-HELLO-SEQ-ROLLBACK)
         sp = self._provider("spotify")
         clear = getattr(sp, "clear_stuck", None) if sp is not None else None
         if callable(clear) and self._stuck(sp):
@@ -712,6 +802,8 @@ class Engine:
     def _on_frame(self, fr: Frame, transport: str) -> None:
         if fr.type == EventType.NONE:
             return
+        if fr.type == EventType.FIRE and self._late_duplicate(fr):
+            return
         now = self._accept(fr, ("v2", fr.seq, int(fr.type), fr.place_key or 0, int(fr.flags)), transport, 2)
         if now is None:
             return
@@ -721,6 +813,7 @@ class Engine:
             self._notes.append(("link", (fr, transport)))
         if fr.type == EventType.HELLO:
             self._on_hello(fr.flags, now, fr)
+            self._late_start(fr, transport, now)
         elif fr.type == EventType.ARM:
             self._on_arm2(fr, transport, now)
         elif fr.type == EventType.FIRE:
@@ -730,6 +823,111 @@ class Engine:
         elif fr.type == EventType.PING:
             self.log.warning("=== PING seq=%d via %s (flags=%s) -- the link to World of Warcraft works ===",
                              fr.seq, transport, _flag_names(fr.flags))
+
+    # -- D3: the late start, and D4: duplicates that add fields
+    def _late_start(self, fr: Frame, transport: str, now: float) -> bool:
+        """A HELLO with DROP_ACTIVE and the playing drop's place key, while nothing plays, for a place
+        whose ARM is cached: its FIRE was lost (F2), so the ARM's song starts now, as the FIRE would
+        have started it (see the module doc). True when it started."""
+        pk = fr.place_key
+        if pk is None or not fr.has(Flags.DROP_ACTIVE) or self._current is not None:
+            return False
+        armed = self._armed2.get(pk)
+        if armed is None or now - armed.at > ARM_TTL_SEC:
+            return False
+        # By sequence, not by the ARM's age (review RP-2): the HELLO was sent after this ARM, and no CANCEL
+        # or FIRE of the place came since -- so the addon plays this ARM's drop and its FIRE was lost.
+        arm_seq = int(armed.frame.seq)
+        if not 1 <= (int(fr.seq) - arm_seq) % 256 <= 127:
+            return False  # a HELLO the addon sent before this ARM says nothing about its FIRE
+        cancel = self._cancels.get(pk)
+        if cancel is not None and now - cancel[1] <= ARM_TTL_SEC and (cancel[0] - arm_seq) % 256 < 128:
+            return False  # cancelled after (or with) this ARM: never start it (the ARM is a late copy)
+        fired = self._fired.get(pk)
+        if fired is not None and (fired[0] - arm_seq) % 256 < 128:
+            return False  # its FIRE was seen (the drop ended here already): never a second start
+        keep = Flags.LOCAL_PLAYBACK | Flags.TEST
+        flags = Flags(int(fr.flags) | (int(armed.frame.flags) & int(keep)))
+        fire = dataclasses.replace(armed.frame, type=EventType.FIRE, seq=fr.seq, flags=flags)
+        self.log.info("the FIRE of %s (seq %d) never arrived, but the addon says it plays: starting it late "
+                      "from its ARM", self._label(armed.frame) or f"place={pk}", fr.seq)
+        self._late_fired[pk] = (int(fr.seq), now)
+        self._on_fire2(fire, transport, now, late=True)
+        return True
+
+    def _late_duplicate(self, fr: Frame) -> bool:
+        """The real FIRE of a drop that was started late (D3): a duplicate. It may still add fields."""
+        pk = fr.place_key
+        hit = self._late_fired.get(pk) if pk is not None else None
+        if hit is None:
+            return False
+        now = self.clock()
+        if now - hit[1] > LATE_START_SEC:
+            self._late_fired.pop(pk, None)
+            return False
+        if int(fr.seq) != hit[0]:
+            return False
+        self.duplicates += 1
+        self.log.debug("FIRE seq=%d of place=%d: the drop already started late", fr.seq, pk)
+        self._merge_duplicate(fr, now)
+        return True
+
+    def _merge_duplicate(self, fr: Frame, now: float) -> None:
+        """D4: the other transport's copy of an event may carry fields the first copy lacked."""
+        pk = fr.place_key
+        if pk is None:
+            return
+        if fr.type == EventType.ARM:
+            entry = self._armed2.get(pk)
+            if entry is None or int(entry.frame.seq) != int(fr.seq):
+                return
+            merged = _fill_missing(entry.frame, fr)
+            if merged is not entry.frame:
+                added = [n for n in _SONG_FIELDS if getattr(entry.frame, n) is None and getattr(merged, n) is not None]
+                entry.frame = merged
+                self.log.debug("ARM place=%d: the copy via another link added %s", pk, ", ".join(added))
+            return
+        if fr.type != EventType.FIRE:
+            return
+        cur = self._current
+        if cur is None or cur.version != 2 or cur.place_key != pk or cur.fire_seq != int(fr.seq) or cur.local:
+            return
+        if fr.drop_id and cur.frame_drop_id and fr.drop_id != cur.frame_drop_id:
+            return
+        fuller = self._drop_from_frame(fr)
+        if (fuller.spotify and cur.drop.spotify and fuller.spotify != cur.drop.spotify) or \
+                (fuller.youtube and cur.drop.youtube and fuller.youtube != cur.drop.youtube):
+            return
+        changes: dict[str, Any] = {}
+        for name in ("title", "artist", "spotify", "youtube"):
+            if not getattr(cur.drop, name) and getattr(fuller, name):
+                changes[name] = getattr(fuller, name)
+        if fr.label and cur.drop.label != fr.label and not cur.drop.label:
+            changes["label"] = fr.label
+        for name in ("durationMs", "startMs"):
+            if not getattr(cur.drop, name) and getattr(fuller, name):
+                changes[name] = getattr(fuller, name)
+        if not changes:
+            return
+        cur.drop = dataclasses.replace(cur.drop, **changes)
+        if cur.frame_drop_id is None and fr.drop_id:
+            cur.frame_drop_id = fr.drop_id
+        if cur.drop.title and cur.drop.artist and cur.query_key is None:
+            cur.query_key = query_key(cur.drop.artist, cur.drop.title)
+        self.log.info("%s: the copy via another link added %s", cur.drop.id, ", ".join(sorted(changes)))
+        if cur.handle is None and now - cur.started_at <= self.fallback_window_sec and \
+                any(k in changes for k in ("title", "artist", "spotify", "youtube")):
+            # Nothing could play the fitted frame (card only): try the chain again with the fuller song.
+            routes, qkey = self._routes_v2(cur.drop, pk, None)
+            cur.routes, cur.next_route, cur.query_key = routes, 0, qkey or cur.query_key
+            self._send_card(cur, None)
+            if self._play_chain(cur, now):
+                return
+            self._card_only(cur, now)
+            return
+        provider = cur.provider.name if cur.provider is not None else None
+        np = cur.handle.now_playing if cur.handle is not None else None
+        self._send_card(cur, np, provider=provider)
 
     def _label(self, fr: Frame) -> str:
         return fr.label or _zone_name(fr.drop_id or "") or ""
@@ -775,6 +973,12 @@ class Engine:
         if pk is None:
             self.log.debug("ARM without a place key ignored")
             return
+        fired = self._fired.get(pk)
+        if fired is not None and (fired[0] - int(fr.seq)) % 256 < 128:
+            # An ARM copy from before (or with) the FIRE seen for this place -- the chat log delivers its
+            # ARM line in one batch with the FIRE -- never arms the playing place again (review RP-4).
+            self.log.debug("ARM seq=%d of place=%d: older than its FIRE (seq %d); ignored", fr.seq, pk, fired[0])
+            return
         entry = self._armed2.get(pk)
         if not _has_song(fr):  # the placeKey-only ARM shown after the first 3 s
             if entry is not None:
@@ -804,8 +1008,13 @@ class Engine:
     def _prewarm(self, armed: _Armed, drop: Drop, test: bool) -> None:
         """Start the ARM pre-warm for a v2 song: a Spotify search (no id) or a lookup of the pasted
         Spotify track, then the playing provider's ``prepare`` (Spotify device wake, or the
-        YouTube player preload when Spotify will not play it)."""
-        sp = self._provider("spotify")
+        YouTube player preload when Spotify will not play it). "Play music with" decides what is
+        warmed: no Spotify search or wake without Spotify in the order, no YouTube preload without
+        YouTube, nothing for ``none``; with ``youtube-spotify`` the YouTube preload comes first."""
+        order = self._music_order
+        if order == "none":
+            return
+        sp = self._provider("spotify") if order in _ORDER_SPOTIFY else None
         sp_ok = self._usable(sp, drop)
         res: Optional[_Resolution] = None
         search = False
@@ -819,8 +1028,8 @@ class Engine:
         sp_route = sp_ok and bool(drop.spotify or (drop.title and drop.artist))
         lookup_link = bool(sp_route and drop.spotify and hasattr(sp, "resolve_drop") and not test
                            and f"sp:{drop.spotify.rsplit(':', 1)[-1]}" not in self._recorded)
-        yt = self._provider("youtube")
-        others = [p for p in self.providers if p.name not in ("spotify", "youtube")]
+        yt = self._provider("youtube") if order in _ORDER_YOUTUBE else None
+        others = [p for p in self.providers if p.name not in ("spotify", "youtube")] if order in _ORDER_OTHERS else []
         if self.prewarm_async:  # results are handled on the engine thread
             def deliver(r: _Resolution) -> None:
                 self._queue.put(("resolved", r, test))
@@ -835,6 +1044,10 @@ class Engine:
                 self._note(kind, **info)
 
         def work() -> None:
+            # "YouTube, then Spotify": the YouTube preload first, so the search never delays it.
+            yt_first = order == "youtube-spotify" and self._usable(yt, drop)
+            if yt_first:
+                self._safe_prepare(yt, drop)
             # Session health (real-client #8 / #10): one cheap read of Spotify's player re-checks a
             # stuck Spotify, and spots the stuck signature before a song is sent to it at all.
             was_stuck = self._stuck(sp)
@@ -859,6 +1072,8 @@ class Engine:
                     resolved = dataclasses.replace(drop, spotify=res.uri)
             elif lookup_link:
                 resolved = self._lookup_link(sp, drop, deliver)
+            if yt_first:
+                return
             yt_ok = self._usable(yt, drop)
             if sp_route and not (stuck and yt_ok) and (resolved.spotify or res is None or not res.not_found):
                 self._safe_prepare(sp, resolved)
@@ -886,7 +1101,7 @@ class Engine:
         queued = 0
         with self._lock:
             sp = self._provider("spotify")
-            if sp is None or not hasattr(sp, "resolve_drop"):
+            if sp is None or not hasattr(sp, "resolve_drop") or self._music_order not in _ORDER_SPOTIFY:
                 return 0
             for artist, title in songs:
                 if queued >= limit:
@@ -1014,12 +1229,25 @@ class Engine:
                 self._record(res.key, {"durationMs": res.duration_ms or None, "title": res.title or None,
                                        "artist": res.artist or None, "notFound": False})
 
-    def _on_fire2(self, fr: Frame, transport: str, now: float) -> None:
+    def _on_fire2(self, fr: Frame, transport: str, now: float, *, late: bool = False) -> None:
         test = fr.has(Flags.TEST)
         pk = fr.place_key
-        armed = self._armed2.pop(pk, None) if pk is not None else None
-        song = _merge_frames(fr, armed.frame if armed is not None else None)
         local = fr.has(Flags.LOCAL_PLAYBACK)
+        if not local and self._music_order == "none":
+            # "Play music with: Neither" (DESIGN-v1.2.1 3.3): checked before the "carries no song" warning,
+            # because the addon strips every song field in this mode. No card, no window, no notice.
+            if pk is not None:
+                self._disarm(pk)
+            self.log.info("FIRE %s via %s: Play music with is Neither in the game -- nothing plays",
+                          fr.drop_id or (f"place={pk}" if pk is not None else "?"), transport)
+            cur = self._current
+            if cur is not None and not cur.local and cur.origin != "cli":
+                self._stop_current(self.fade_out_ms, "replaced (Play music with is Neither)")
+            return
+        armed = self._armed2.pop(pk, None) if pk is not None else None
+        if pk is not None:
+            self._fired[pk] = (int(fr.seq), now)
+        song = _merge_frames(fr, armed.frame if armed is not None else None)
         if not local and not _has_song(song):
             if song.drop_id == "test" or test:
                 self.log.info("test signal from World of Warcraft via %s (seq %d) -- nothing to play", transport,
@@ -1031,24 +1259,30 @@ class Engine:
         drop = self._drop_from_frame(song)
         if local:
             self._start_drop(drop, origin=transport, local=True, test=test, map_hash=None, version=2, place_key=pk,
-                             frame_drop_id=song.drop_id, fire_seq=fr.seq)
+                             frame_drop_id=song.drop_id, fire_seq=fr.seq, late=late)
             return
         job = armed.job if armed is not None else None
         routes, qkey = self._routes_v2(drop, pk, job)
         self._start_drop(drop, origin=transport, local=False, test=test, map_hash=None, version=2, place_key=pk,
-                         routes=routes, qkey=qkey, frame_drop_id=song.drop_id, fire_seq=fr.seq)
+                         routes=routes, qkey=qkey, frame_drop_id=song.drop_id, fire_seq=fr.seq, late=late)
 
     def _routes_v2(self, drop: Drop, place_key: Optional[int],
                    job: Optional[_Job]) -> tuple[list[_Route], Optional[str]]:
-        """Spotify id -> Spotify search on the query -> YouTube id -> any other provider.
+        """The routes "Play music with" allows, in its order (DESIGN-v1.2.1 3.3). ``spotify-youtube``:
+        Spotify id -> Spotify search on the query -> YouTube id -> a search still running ->
+        any other provider; ``youtube-spotify``: the YouTube id first; ``spotify`` / ``youtube``: that
+        service only; ``none``: nothing.
 
         If the pre-warm of this place (or any pre-warm, when Spotify may play) is still running,
         wait for it first -- at most ``fire_wait_sec`` -- so the search result is used and
         ``play()`` never overlaps a ``prepare()``; queued pre-warms of other places are dropped.
         """
-        sp = self._provider("spotify")
-        yt = self._provider("youtube")
+        order = self._music_order
+        sp = self._provider("spotify") if order in _ORDER_SPOTIFY else None
+        yt = self._provider("youtube") if order in _ORDER_YOUTUBE else None
         qkey = query_key(drop.artist, drop.title) if (drop.title and drop.artist) else None
+        if order == "none":
+            return [], qkey
         routes: list[_Route] = []
         late: list[_Route] = []
         sp_ok = self._usable(sp, drop)
@@ -1062,8 +1296,11 @@ class Engine:
         if sp_stuck and yt_ok:
             sp_ok = False
         own_pending = job is not None and not job.done.is_set() and not job.cancelled
+        # "YouTube, then Spotify" with a YouTube id: YouTube plays first, so nothing waits for the pre-warm's
+        # Spotify search; a search still running becomes the late Spotify route (review RCOMP-7).
+        yt_first = order == "youtube-spotify" and yt_ok
         started = time.monotonic()
-        deadline = started + self.fire_wait_sec  # one budget for every wait below
+        deadline = started + (0.0 if yt_first else self.fire_wait_sec)  # one budget for every wait below
 
         def left() -> float:
             return max(0.0, deadline - time.monotonic())
@@ -1073,7 +1310,7 @@ class Engine:
                 dropped = self._worker.cancel_except(place_key)
                 if dropped:
                     self.log.debug("dropped %d queued pre-warm(s) of other places", dropped)
-            if (own_pending or sp_ok) and not self._worker.wait_idle(left()):
+            if not yt_first and (own_pending or sp_ok) and not self._worker.wait_idle(left()):
                 self.log.info("pre-warm still running after %.1f s; playing without waiting longer",
                               time.monotonic() - started)
         if sp is not None and sp_ok:
@@ -1097,17 +1334,24 @@ class Engine:
         sp_routes: list[_Route] = []
         if sp_stuck and routes:
             sp_routes, routes = routes, []  # the stuck Spotify goes after everything else
-        if yt is not None and drop.youtube:
-            routes.append(_Route(yt, drop))
-        routes += late
-        for p in self.providers:
-            if p.name not in ("spotify", "youtube"):
-                routes.append(_Route(p, drop))
-        routes += sp_routes
+        yt_routes = [_Route(yt, drop)] if yt is not None and drop.youtube else []
+        others = [_Route(p, drop) for p in self.providers if p.name not in ("spotify", "youtube")] \
+            if order in _ORDER_OTHERS else []
+        if order == "youtube-spotify":
+            routes = yt_routes + routes + late + others + sp_routes
+        elif order == "youtube":
+            routes = yt_routes
+        elif order == "spotify":
+            routes = routes + late + sp_routes
+        else:
+            routes = routes + yt_routes + late + others + sp_routes
         return routes, qkey
 
     def _on_cancel2(self, fr: Frame) -> None:
         pk = fr.place_key
+        if pk is not None:
+            self._cancels[pk] = (int(fr.seq), self.clock())  # D3: never a late start after this
+            self._late_fired.pop(pk, None)
         removed = self._disarm(pk) if pk is not None else None
         cur = self._current
         if cur is not None and cur.version == 2 and pk is not None and cur.place_key == pk and not (
@@ -1244,7 +1488,7 @@ class Engine:
     def _start_drop(self, drop: Drop, *, origin: str, local: bool, test: bool, map_hash: Optional[int],
                     only: Optional[str] = None, version: int = 1, place_key: Optional[int] = None,
                     routes: Optional[list[_Route]] = None, qkey: Optional[str] = None,
-                    frame_drop_id: Optional[str] = None, fire_seq: Optional[int] = None) -> None:
+                    frame_drop_id: Optional[str] = None, fire_seq: Optional[int] = None, late: bool = False) -> None:
         now = self.clock()
         if self._current is not None:
             self.log.info("new drop %s replaces %s", drop.id, self._current.drop.id)
@@ -1254,7 +1498,7 @@ class Engine:
         self._idle_evt.clear()
         cur = _Active(drop=drop, started_at=now, origin=origin, map_hash=map_hash, local=local, test=test,
                       version=version, place_key=place_key, query_key=qkey, frame_drop_id=frame_drop_id,
-                      fire_seq=fire_seq)
+                      fire_seq=fire_seq, late=late)
         if routes is None:
             routes = [_Route(p, drop) for p in self.providers]
         if only:
@@ -1343,6 +1587,7 @@ class Engine:
             self._send_card(cur, handle.now_playing, provider=p.name)
             self._note_success(cur, p, handle)
             return True
+        cur.reasons.extend(reasons)
         detail = "; ".join(reasons) if reasons else "no providers configured"
         self.log.warning("no provider could play %s (%s)", cur.drop.id, detail)
         return False
@@ -1403,7 +1648,7 @@ class Engine:
         cur.stop_at = cur.end_at = now + self.card_only_sec
         self._send_card(cur, None, hint="No playable source for this drop")
         self._note("noSource", dropId=cur.drop.id, label=cur.drop.display_label, title=cur.drop.title,
-                   artist=cur.drop.artist, test=cur.test)
+                   artist=cur.drop.artist, test=cur.test, reasons=list(cur.reasons))
 
     def _on_provider_error(self, cur: _Active, now: float) -> None:
         p = cur.provider
@@ -1587,4 +1832,5 @@ class Engine:
             },
             "lastEvent": self._last_event,
             "providers": [p.name for p in self.providers],
+            "musicOrder": self._music_order,
         }

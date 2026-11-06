@@ -204,8 +204,10 @@ def make_rig(app_dir: Path, *, cfg: Optional[dict] = None, http: Optional[FakeHT
         if startfile:
             startfile(target)
 
-    conf = {"clientId": "cid", "redirectPort": 8321, "deviceName": "", "fade": True, "restorePrevious": True,
-            "volume": None}
+    # connect mode: these rigs drive another Connect device (the desktop app); in-app Spotify, the
+    # default since 1.2.1, has its own rig (test_spotify_inapp.py)
+    conf = {"clientId": "cid", "redirectPort": 8321, "device": "connect", "deviceName": "", "fade": True,
+            "restorePrevious": True, "volume": None}
     conf.update(cfg or {})
     provider = SpotifyProvider(conf, SimpleNamespace(app_dir=app_dir), http=fake, startfile=_startfile,
                                sleep=clock.sleep, clock=clock)

@@ -60,7 +60,14 @@ CALLBACK_PATH = "/callback"
 #: Spotify answers 403 "Insufficient client scope", seen on a real PC on 2026-11-05) and makes ``/me``
 #: return ``product`` and ``country`` (the Connect page's Premium check).
 SCOPE_PRIVATE = "user-read-private"
-SCOPES: tuple[str, ...] = ("user-modify-playback-state", "user-read-playback-state", SCOPE_PRIVATE)
+#: In-app Spotify (D9): the Web Playback SDK needs ``streaming``, ``user-read-email`` and
+#: ``user-read-private``.
+SCOPE_STREAMING = "streaming"
+SCOPE_EMAIL = "user-read-email"
+SCOPES: tuple[str, ...] = (SCOPE_STREAMING, "user-modify-playback-state", "user-read-playback-state", SCOPE_EMAIL,
+                           SCOPE_PRIVATE)
+#: A stored sign-in without these must sign in again before Spotify plays in the app (D9).
+RELOGIN_SCOPES: tuple[str, ...] = (SCOPE_STREAMING, SCOPE_EMAIL)
 TOKEN_FILE = "spotify_token.bin"
 #: A sign-in that could not be saved is retried at most this often (see :class:`TokenStore`).
 SAVE_RETRY_S = 30.0
@@ -657,7 +664,7 @@ def dashboard_instructions(port: int = DEFAULT_PORT) -> str:
         f"  1. Open {DASHBOARD_URL} and log in with the Spotify account you listen with.",
         "     (Controlling playback requires Spotify Premium.)",
         "  2. Click 'Create app'. Any name and description will do, e.g. 'NeedleDropper'.",
-        "  3. Under 'Which API/SDKs are you planning to use?' select 'Web API'.",
+        "  3. Under 'Which API/SDKs are you planning to use?' select 'Web API' and 'Web Playback SDK'.",
         "  4. Under 'Redirect URIs' add EXACTLY this address and click 'Add':",
         f"         {uri}",
         "     It must be 127.0.0.1 (Spotify rejects 'localhost') and the port must match",

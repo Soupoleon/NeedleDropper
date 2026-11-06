@@ -6,14 +6,24 @@
   YouTube, Check the link; ``/connect``, ``/setup`` and the v1.1 ``/panel`` are
   aliases). It connects to ``/events`` as a ``panel`` client;
 * ``GET /player`` -- the small **player** page (title card, YouTube IFrame
-  Player, ``<audio>`` for companion-side local files);
+  Player, ``<audio>`` for companion-side local files, and the Spotify Web Playback
+  SDK: in-app Spotify, the Connect device "NeedleDropper"). The browser opens it
+  as ``http://localhost:<port>/player`` (:attr:`Deck.player_url`): YouTube refuses
+  most embeds on a ``127.0.0.1`` origin (error 150);
 * ``GET /events?client=panel|player`` -- Server-Sent Events. Playback commands
-  (``play`` / ``stop`` / ``fade``) go to player clients only; ``show`` / ``hide``
-  (the title card) go to both; ``state`` nudges ask the Connect page to refresh;
+  (``play`` / ``stop`` / ``fade`` / ``cue`` / ``spotify``) go to player clients only;
+  ``show`` / ``hide`` (the title card) go to both; ``state`` nudges ask the Connect
+  page to refresh;
 * ``POST /status`` -- the player reports ``{"state": "ready"|"playing"|"ended"|
   "error"|"autoplay-blocked", "detail": ..., "playId": ..., "code": ...}``;
   :attr:`Deck.on_player_status` hears every report (e.g. YouTube's "embedding
-  not allowed" codes);
+  not allowed" codes). ``{"state": "spotify", "event": ...}`` reports from the
+  Web Playback SDK go to :class:`SpotifySdk` (``deck.spotify``) instead, and
+  ``{"state": "csp", ...}`` (a Content-Security-Policy violation) to the log;
+* ``GET /api/player/spotify-token`` -- the SDK's ``getOAuthToken``: the Spotify
+  access token only (never the refresh token), for the player page only (same
+  origin, ``X-ND-Token``, ``Cache-Control: no-store``); answered by the deck
+  itself, so it works without the Connect page's API;
 * ``/api/*`` -- the Connect page's JSON API, answered by :attr:`Deck.api`
   (see :mod:`needledropper.panel_api`);
 * ``GET /media/<token>`` -- a whitelisted local file, with HTTP Range support;
@@ -32,6 +42,8 @@ passed to :meth:`Deck.register_media` are ever served from disk.
 """
 from __future__ import annotations
 
+import collections
+import errno
 import hmac
 import html
 import json
@@ -41,6 +53,7 @@ import os
 import queue
 import secrets
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -71,6 +84,7 @@ PLAYER_CONNECT_TIMEOUT = 8.0  # wait this long for an opened player window to co
 PLAYER_RECONNECT_GRACE = 3.0  # a player that vanished this recently is probably reloading
 PLAYER_STARTUP_TIMEOUT = 20.0  # the hidden player window made at the app's start may take this long
 HIDE_AFTER_HIDE_S = 2.6  # the page fades its card out in 2.1 s; the window hides after that
+PLAYER_QUIT_WAIT_S = 3.0  # at quit: how long the player browser gets to exit after its window closed
 BROWSER_LOG_MAX = 1_000_000  # logs\browser.log (the browser's stderr): one older copy above this
 #: Chromium flags for a page that must keep working while its window is hidden (warm YouTube player,
 #: cue at ARM): without them a hidden page's timers and media are throttled (research 3.5; the
@@ -81,12 +95,19 @@ NO_THROTTLE_FLAGS = ("--disable-background-timer-throttling", "--disable-backgro
 CLIENT_PANEL = "panel"
 CLIENT_PLAYER = "player"
 CLIENT_KINDS = (CLIENT_PANEL, CLIENT_PLAYER)
-PLAYER_ONLY_CMDS = frozenset({"play", "stop", "fade", "cue"})
+PLAYER_ONLY_CMDS = frozenset({"play", "stop", "fade", "cue", "spotify"})
 PANEL_ONLY_CMDS = frozenset({"state"})
+
+#: The SDK's getOAuthToken reads this (the player page only; see ``_Handler._spotify_token``).
+SPOTIFY_TOKEN_PATH = "/api/player/spotify-token"
+#: The Connect device the player page registers as (in-app Spotify, D6).
+SPOTIFY_DEVICE_NAME = "NeedleDropper"
+#: How many SDK reports :class:`SpotifySdk` keeps for waits.
+_SDK_EVENT_MEMORY = 128
 
 AUTO_OPEN_MODES = ("youtube", "always", "never")
 #: Frequent requests that are not written to the debug log.
-_QUIET_PATHS = frozenset({"/api/state", "/healthz", "/events", "/status", "/favicon.ico"})
+_QUIET_PATHS = frozenset({"/api/state", "/healthz", "/events", "/status", "/favicon.ico", SPOTIFY_TOKEN_PATH})
 
 #: The Connect page's template (the v1.1 control panel, panel.html, is gone).
 CONNECT_PAGE = "connect.html"
@@ -103,16 +124,23 @@ PAGES: dict[str, tuple[str, str]] = {
     "/player.html": (PLAYER_PAGE, "player"),
 }
 
-_CSP_COMMON = ("default-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' https: data:; "
-               "object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+#: Spotify's Web Playback SDK (in-app Spotify, D13): its script and the hidden iframe it embeds come
+#: from sdk.scdn.co; the player talks to Spotify's https and wss hosts and plays through MSE (blob:).
+_SPOTIFY_SDK_ORIGIN = "https://sdk.scdn.co"
+_SPOTIFY_CONNECT = "https://*.spotify.com wss://*.spotify.com https://*.scdn.co https://*.spotifycdn.com"
+_SPOTIFY_MEDIA = "https://*.scdn.co https://*.spotifycdn.com"
 _CSP = {
     # The Connect page loads nothing from anywhere else (its links only navigate).
     "connect": ("default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; "
                 "font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
-    # The YouTube IFrame API loads its widget script from www.youtube.com and embeds an iframe.
-    "player": _CSP_COMMON + "; script-src 'self' https://www.youtube.com https://s.ytimg.com; "
-                            "frame-src https://www.youtube.com https://www.youtube-nocookie.com; "
-                            "media-src 'self' blob:",
+    # The YouTube IFrame API loads its widget script from www.youtube.com and embeds an iframe; the
+    # Spotify SDK loads from sdk.scdn.co and embeds its own iframe there.
+    "player": ("default-src 'self'; style-src 'self'; img-src 'self' https: data:; object-src 'none'; "
+               "base-uri 'none'; form-action 'none'; frame-ancestors 'none'; "
+               f"connect-src 'self' {_SPOTIFY_CONNECT}; "
+               f"script-src 'self' https://www.youtube.com https://s.ytimg.com {_SPOTIFY_SDK_ORIGIN}; "
+               f"frame-src https://www.youtube.com https://www.youtube-nocookie.com {_SPOTIFY_SDK_ORIGIN}; "
+               f"media-src 'self' blob: {_SPOTIFY_MEDIA}"),
 }
 # YouTube rejects embeds without the page origin as referrer (error 153); the Connect page needs none.
 _REFERRER = {"connect": "no-referrer", "player": "strict-origin-when-cross-origin"}
@@ -189,6 +217,34 @@ class _Server(ThreadingHTTPServer):
     block_on_close = False
     allow_reuse_address = False  # Windows: SO_REUSEADDR would allow port hijacking
     deck: "Deck"
+
+    def server_bind(self) -> None:
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:  # Windows: no other socket may bind this address and port at all
+            try:
+                self.socket.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+            except OSError:
+                pass
+        super().server_bind()
+
+
+class _Server6(_Server):
+    """The same server on the IPv6 loopback ``[::1]``: ``localhost`` (the player's origin, D12) resolves to
+    ``::1`` first on Windows, and a browser tries it before 127.0.0.1 -- with nothing listening there every
+    request of the player page waited about 2 s for the refused connect, and another program listening there
+    would have been "the player page" (review RCOMP-4)."""
+    address_family = socket.AF_INET6
+
+    def server_bind(self) -> None:
+        try:
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        except (AttributeError, OSError):
+            pass
+        super().server_bind()
+
+
+#: The [::1] bind failed this way: another program has the port there (anything else: no IPv6 on this PC).
+_ADDR_IN_USE = {errno.EADDRINUSE, 10048}  # 10048: WSAEADDRINUSE
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -353,6 +409,11 @@ class _Handler(BaseHTTPRequestHandler):
             if not isinstance(data, dict) or not isinstance(data.get("state"), str):
                 self._error(HTTPStatus.BAD_REQUEST, 'expected {"state": ...}')
                 return
+            if data.get("state") == "spotify" and not self.deck.player_key_valid(self.headers.get("X-ND-Key")):
+                # The SDK's reports set the device the app plays to: only from the window the app opened (its
+                # launch key), never from a process that read the X-ND-Token from /player (review RCOMP-3).
+                self._error(HTTPStatus.UNAUTHORIZED, "missing or wrong X-ND-Key")
+                return
             self.deck._on_status(data)
             self._send_simple(HTTPStatus.NO_CONTENT)
             return
@@ -367,16 +428,29 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/healthz":
             self._send_json(HTTPStatus.OK, {"app": APP_ID, "version": __version__})
         elif path in PAGES:
-            self._page(*PAGES[path])
+            name, kind = PAGES[path]
+            site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+            if kind == "player" and site in ("cross-site", "same-site"):
+                # The player opens from the app's own launch (Sec-Fetch-Site: none) or reloads itself
+                # (same-origin); another site's window.open or link never gets it (a second player page).
+                self._send_simple(HTTPStatus.FORBIDDEN, b"NeedleDropper's player page opens only from the app\n")
+                return
+            self._page(name, kind)
         elif path == "/events" and not head:
             if not self._origin_ok():
                 self._error(HTTPStatus.FORBIDDEN, "forbidden origin")
                 return
-            kind = (parse_qs(parts.query).get("client") or [CLIENT_PLAYER])[0]
+            query = parse_qs(parts.query)
+            kind = (query.get("client") or [CLIENT_PLAYER])[0]
             if kind not in CLIENT_KINDS:
                 self._error(HTTPStatus.BAD_REQUEST, "client must be 'panel' or 'player'")
                 return
+            if kind == CLIENT_PLAYER and not self.deck.player_key_valid((query.get("k") or [""])[0]):
+                self._retire()
+                return
             self._events(kind)
+        elif path == SPOTIFY_TOKEN_PATH:
+            self._spotify_token(head)
         elif path.startswith("/api/"):
             if not self._origin_ok():
                 self._error(HTTPStatus.FORBIDDEN, "forbidden origin")
@@ -395,6 +469,40 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_simple(HTTPStatus.NOT_FOUND, b"not found\n")
 
     # ---- handlers
+    def _spotify_token(self, head: bool) -> None:
+        """The Web Playback SDK's ``getOAuthToken`` (D13): ``{"accessToken": ...}`` -- the access token
+        only, never the refresh token -- and only for a ``fetch`` from the player page itself: the
+        browser must mark it ``Sec-Fetch-Site: same-origin`` (a page on any other site, a typed
+        address or a tool without it is refused), an ``Origin`` must be the deck's own, and
+        ``X-ND-Token`` must match. ``Cache-Control: no-store`` (``_send_simple``)."""
+        site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        origin = self.headers.get("Origin")
+        if site != "same-origin" or (origin is not None and not self.deck.origin_allowed(origin)):
+            self._error(HTTPStatus.FORBIDDEN, "the Spotify token is only for NeedleDropper's player page")
+            return
+        if not self._token_ok():
+            self._error(HTTPStatus.UNAUTHORIZED, "missing or wrong X-ND-Token")
+            return
+        if not self.deck.player_key_valid(self.headers.get("X-ND-Key")):
+            # The launch key is in the player window's address fragment only (never served): a page
+            # anyone fetched from /player has the X-ND-Token, not this (review RCOMP-3).
+            self._error(HTTPStatus.UNAUTHORIZED, "missing or wrong X-ND-Key")
+            return
+        if head:
+            self._error(HTTPStatus.METHOD_NOT_ALLOWED, "use GET")
+            return
+        try:
+            token = self.deck.spotify.token()
+        except LookupError as exc:
+            self._error(HTTPStatus.NOT_FOUND, str(exc))
+            return
+        except Exception as exc:  # noqa: BLE001 - a sign-in problem: the page reports it, the app logs it
+            log.info("the player asked for a Spotify token, but there is none: %s", exc)
+            self._error(HTTPStatus.SERVICE_UNAVAILABLE, "Spotify sign-in unavailable")
+            return
+        self._send_simple(HTTPStatus.OK, json.dumps({"accessToken": token}).encode("utf-8"),
+                          "application/json; charset=utf-8", {"Pragma": "no-cache"})
+
     def _api(self, method: str, path: str, query: str, body: Any) -> None:
         api = self.deck.api
         if api is None:
@@ -441,6 +549,23 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_simple(HTTPStatus.INTERNAL_SERVER_ERROR, b"read error\n")
             return
         self._send_simple(HTTPStatus.OK, body, ctype, {"Cache-Control": "no-cache"})
+
+    def _retire(self) -> None:
+        """A player page without this app start's launch key: one left running by an earlier start (the
+        old app crashed, or quit without closing it), or a page opened by hand. It is told to retire --
+        stop, disconnect and close itself -- and never counts as the player (review ON-1)."""
+        self.deck._note_stale_player()
+        try:
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(b"retry: 60000\n\n" + self.deck._encode({"cmd": "retire"}).encode("utf-8"))
+            self.wfile.flush()
+        except OSError:
+            pass
+        self.close_connection = True
 
     def _events(self, kind: str) -> None:
         deck = self.deck
@@ -591,6 +716,376 @@ def _default_launcher(args: list[str], log_file: Optional[Path] = None) -> Any:
 _REAL_LAUNCHER = _default_launcher
 
 
+def end_process_tree(proc: Any) -> bool:
+    """End a process this app started, and its children (Windows: ``taskkill /PID <pid> /T /F``; else
+    ``kill``). Only for a ``Popen`` this process holds: its handle keeps the pid from being reused."""
+    if not isinstance(proc, subprocess.Popen) or proc.poll() is not None:
+        return False
+    try:
+        if sys.platform == "win32":
+            exe = os.path.join(os.environ.get("SystemRoot") or r"C:\Windows", "System32", "taskkill.exe")
+            subprocess.run([exe, "/PID", str(proc.pid), "/T", "/F"], stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        else:
+            proc.kill()
+        proc.wait(timeout=5)
+        return True
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.info("could not end the player browser (pid %s): %s", getattr(proc, "pid", "?"), exc)
+        return False
+
+
+def chrome_widevine_dir() -> Optional[Path]:
+    """Chrome's own Widevine component, ``%LOCALAPPDATA%\\Google\\Chrome\\User Data\\WidevineCdm``, or None."""
+    base = os.environ.get("LOCALAPPDATA")
+    if not base:
+        return None
+    p = Path(base, "Google", "Chrome", "User Data", "WidevineCdm")
+    return p if p.is_dir() else None
+
+
+def ensure_widevine(profile_dir: Path, source: Optional[Path] = None) -> bool:
+    """Copy Chrome's Widevine component into the player's own profile when it is missing there (D11).
+
+    The Spotify Web Playback SDK plays DRM-protected audio (EME, ``com.widevine.alpha``); a fresh
+    profile has no Widevine until Chrome's component updater fetches it (about a minute), so the SDK
+    would fail at first. Returns True when the profile has it afterwards. Never raises."""
+    dest = Path(profile_dir) / "WidevineCdm"
+    try:
+        if dest.is_dir() and any(dest.iterdir()):
+            return True
+    except OSError:
+        return False
+    src = source if source is not None else chrome_widevine_dir()
+    if src is None:
+        log.info("no Widevine component in Chrome's own profile to copy; the player's Chrome fetches it itself "
+                 "(in-app Spotify waits for that)")
+        return False
+    tmp = dest.with_name(dest.name + ".nd-copy")
+    try:
+        if tmp.exists():
+            shutil.rmtree(tmp, ignore_errors=True)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, tmp)
+        if dest.exists():
+            shutil.rmtree(dest, ignore_errors=True)
+        os.replace(tmp, dest)
+    except OSError as exc:
+        log.info("could not copy Chrome's Widevine component into the player profile (%s); Chrome fetches it "
+                 "itself in a minute or so", exc)
+        shutil.rmtree(tmp, ignore_errors=True)
+        return False
+    log.info("copied Chrome's Widevine component into the player profile (%s)", dest)
+    return True
+
+
+#: Report fields :class:`SpotifySdk` keeps (everything else the page sends is dropped).
+_SDK_FIELDS = ("event", "deviceId", "kind", "message", "ok", "detail", "playId", "active", "paused", "position",
+               "duration", "loading", "uri", "id", "linked", "started", "volume")
+
+
+class SpotifySdk:
+    """The Spotify Web Playback SDK in the player page: in-app Spotify, the Connect device
+    "NeedleDropper" (D6-D10). ``deck.spotify`` holds what the page reported and sends it commands.
+
+    * :meth:`enable` (a Spotify sign-in that allows streaming, app mode on) makes the page create a
+      ``Spotify.Player`` and connect; its ``getOAuthToken`` reads :data:`SPOTIFY_TOKEN_PATH`, served
+      from ``token_source``. :meth:`standby` (app mode, but no such sign-in yet) and :meth:`disable`
+      (not app mode) disconnect it. While a provider in app mode owns it (:attr:`app_mode`) the deck
+      opens the player in Chrome first (D11). A (re)connecting page is told again
+      (:meth:`replay`); a page that connects or goes away makes the SDK "not ready" until the page
+      reports ``ready`` (:meth:`page_connected` / :meth:`page_gone`).
+    * The page reports ``{"state": "spotify", "event": ...}``: ``ready`` / ``not_ready`` (with the
+      device id, which can change), ``error`` (``kind`` = the SDK's ``initialization_error`` /
+      ``authentication_error`` / ``account_error`` / ``playback_error``, or ``load`` / ``autoplay`` /
+      ``browser``: not Chrome, so the page never loads the SDK),
+      ``eme`` (Widevine usable, ``ok``), ``connect``, ``token`` (the token read failed), ``state`` /
+      ``tick`` (``player_state_changed`` / ``getCurrentState``: ``active``, ``paused``, ``position``,
+      ``duration``, ``loading``, ``uri`` / ``id`` / ``linked``, ``playId``, ``started``) and
+      ``stopped`` (a ``stop`` command finished: faded out and paused).
+    * Commands (``{"cmd": "spotify", "op": ...}``, players only): ``connect``, ``disconnect``,
+      ``reconnect``; ``start`` (``playId``, ``uri``, ``volume`` 0-100, ``fadeInMs``: volume 0 now, then
+      the fade-in once that track plays -- the app sends the Web API play itself); ``fade``
+      (``volume``, ``ms``); ``stop`` (``playId``, ``fadeOutMs``, ``delayMs``: fade to 0, then pause);
+      ``pause`` (volume 0 and pause at once).
+
+    The provider (``SpotifyProvider`` in app mode) waits on these reports (:meth:`wait_ready`,
+    :meth:`wait_for`) instead of polling the Web API. Thread-safe; ``listener(event, report)`` runs on
+    the reporting request's thread, outside the lock.
+    """
+
+    def __init__(self, deck: "Deck") -> None:
+        self._deck = deck
+        self._cond = threading.Condition()
+        self._owner: Any = None
+        self._token_source: Optional[Callable[[], str]] = None
+        self._listener: Optional[Callable[[str, dict[str, Any]], Any]] = None
+        self.wanted = False
+        self.wanted_at: Optional[float] = None
+        #: a Spotify provider in app mode owns the in-app player (with or without a usable sign-in)
+        self.app_mode = False
+        #: when the current player page connected (the wait for "ready" starts again then)
+        self.page_since: Optional[float] = None
+        self.device_id: Optional[str] = None
+        self.ready = False
+        self.ready_at: Optional[float] = None
+        self.ready_seq = 0
+        #: when the ready SDK went offline (not_ready), until it is ready again (a blip is not "no player")
+        self.offline_at: Optional[float] = None
+        self.error: Optional[dict[str, Any]] = None
+        self.eme: Optional[bool] = None
+        self.eme_detail = ""
+        self.connect_ok: Optional[bool] = None
+        self.tick: Optional[dict[str, Any]] = None
+        self.reconnects = 0
+        self._seq = 0
+        self._events: "collections.deque[dict[str, Any]]" = collections.deque(maxlen=_SDK_EVENT_MEMORY)
+
+    # -- the app side
+    def enable(self, token_source: Callable[[], str], *, owner: Any = None,
+               listener: Optional[Callable[[str, dict[str, Any]], Any]] = None) -> bool:
+        """Want the SDK connected; idempotent (the newest owner's token source and listener win).
+        True when this call switched it on (the page is then told to connect)."""
+        with self._cond:
+            self._token_source, self._owner, self._listener = token_source, owner, listener
+            self.app_mode = True
+            first = not self.wanted
+            if first:
+                self.wanted = True
+                self.wanted_at = time.monotonic()
+                self.ready, self.device_id, self.error, self.tick = False, None, None, None
+                self._cond.notify_all()
+        if first:
+            log.info("in-app Spotify: connecting NeedleDropper's player to Spotify (device %r)", SPOTIFY_DEVICE_NAME)
+            self.command("connect", name=SPOTIFY_DEVICE_NAME)
+        return first
+
+    def standby(self, owner: Any = None) -> bool:
+        """App mode without a sign-in that allows it (not signed in, or signed in before 1.2.1): the
+        SDK is disconnected, but the player still opens in Chrome first, so a sign-in later needs no
+        other browser. True when this call disconnected a connected SDK."""
+        with self._cond:
+            was = self.wanted
+            self.wanted = False
+            self.app_mode = True
+            self._owner = owner
+            self._token_source = self._listener = None
+            self.ready, self.device_id, self.tick = False, None, None
+            self._cond.notify_all()
+        if was:
+            log.info("in-app Spotify: disconnecting NeedleDropper's player (no Spotify sign-in that allows it)")
+            self.command("disconnect")
+        return was
+
+    def disable(self, owner: Any = None) -> bool:
+        """Not app mode any more (only for ``owner``, when given): the page disconnects the SDK.
+        True when it was connected."""
+        with self._cond:
+            if owner is not None and self._owner is not owner:
+                return False
+            was = self.wanted
+            self.wanted = False
+            self.app_mode = False
+            self._token_source = self._owner = self._listener = None
+            self.ready, self.device_id, self.tick = False, None, None
+            self._cond.notify_all()
+        if was:
+            log.info("in-app Spotify: disconnecting NeedleDropper's player from Spotify")
+            self.command("disconnect")
+        return was
+
+    def page_connected(self) -> None:
+        """A player page connected (called under the deck's lock): until it reports ``ready``, the
+        SDK there is not ready -- a page that was reloaded or reopened has a new device id -- and the
+        wait for it starts again. A page whose event stream merely reconnected reports its live SDK
+        again when it hears the replayed ``connect``."""
+        with self._cond:
+            self.page_since = time.monotonic()
+            self.offline_at = None
+            if self.wanted:
+                self.ready, self.device_id, self.tick = False, None, None
+                self.error, self.connect_ok = None, None
+                self.wanted_at = self.page_since
+            self._cond.notify_all()
+
+    def page_gone(self) -> None:
+        """No player page is connected any more (called under the deck's lock): nothing can play."""
+        with self._cond:
+            self.page_since = None
+            self.ready, self.tick = False, None
+            self._cond.notify_all()
+
+    def reconnect(self, *, restart_grace: bool = True) -> bool:
+        """Disconnect and connect again (after a token refresh, or to re-check a player that failed).
+        ``restart_grace=False`` (the periodic re-check of a player that never got ready): the wait for
+        "ready" is not restarted, so such a player stays "no player" instead of counting as connecting
+        again every minute (review RCOMP-6)."""
+        with self._cond:
+            if not self.wanted:
+                return False
+            self.reconnects += 1
+            self.ready, self.error = False, None
+            if restart_grace:
+                self.wanted_at = time.monotonic()
+            self._cond.notify_all()
+        log.info("in-app Spotify: reconnecting NeedleDropper's player")
+        self.command("reconnect", name=SPOTIFY_DEVICE_NAME)
+        return True
+
+    def owned_by(self, owner: Any) -> bool:
+        with self._cond:
+            return self.wanted and self._owner is owner
+
+    def token(self) -> str:
+        """The access token for the page (``LookupError`` while in-app Spotify is off)."""
+        with self._cond:
+            source = self._token_source if self.wanted else None
+        if source is None:
+            raise LookupError("in-app Spotify is off (no Spotify sign-in that allows it)")
+        return source()
+
+    def command(self, op: str, **fields: Any) -> int:
+        """Send ``{"cmd": "spotify", "op": op, ...}`` to the player page(s); returns how many got it."""
+        return self._deck.send({"cmd": "spotify", "op": op, **fields})
+
+    def replay(self) -> list[dict[str, Any]]:
+        """What a (re)connecting player page needs to hear (called under the deck's lock)."""
+        with self._cond:
+            wanted = self.wanted
+        return [{"cmd": "spotify", "op": "connect", "name": SPOTIFY_DEVICE_NAME, "replay": True}] if wanted else []
+
+    # -- the page side
+    def report(self, data: dict[str, Any]) -> None:
+        """A ``{"state": "spotify", ...}`` report from the player page (POST /status)."""
+        event = str(data.get("event") or "")
+        now = time.monotonic()
+        rec: dict[str, Any] = {k: data[k] for k in _SDK_FIELDS if k in data}
+        for k in ("message", "detail", "uri", "id", "linked", "deviceId", "playId", "kind"):
+            if k in rec:
+                rec[k] = str(rec[k])[:300]
+        rec["event"] = event
+        msg: Optional[str] = None
+        with self._cond:
+            self._seq += 1
+            rec["seq"], rec["t"] = self._seq, now
+            if event == "ready":
+                dev = str(data.get("deviceId") or "")
+                changed = bool(self.device_id) and dev != self.device_id
+                if dev:
+                    self.device_id, self.ready, self.ready_at, self.ready_seq = dev, True, now, self._seq
+                    self.offline_at = None
+                msg = f"in-app Spotify ready{' (a new device id)' if changed else ''}"
+            elif event == "not_ready":
+                dev = str(data.get("deviceId") or "")
+                if not dev or dev == self.device_id:
+                    if self.ready:
+                        self.offline_at = now
+                    self.ready = False
+                msg = "in-app Spotify went offline (not_ready); the SDK reconnects by itself"
+            elif event == "error":
+                self.error = {"kind": rec.get("kind") or "error", "message": rec.get("message") or "", "at": now,
+                              "seq": self._seq}
+                msg = f"in-app Spotify error {self.error['kind']}: {self.error['message']}"
+            elif event == "eme":
+                self.eme = bool(data.get("ok"))
+                self.eme_detail = str(data.get("detail") or "")[:300]
+                msg = "Widevine is usable in the player" if self.eme else \
+                    f"Widevine (DRM) is not usable in the player yet: {self.eme_detail}"
+            elif event == "connect":
+                self.connect_ok = bool(data.get("ok"))
+                if not self.connect_ok:
+                    msg = "in-app Spotify: the SDK's connect() failed"
+            elif event == "token":
+                msg = f"in-app Spotify: the player could not read a token ({rec.get('detail', '')})"
+            elif event in ("tick", "state"):
+                self.tick = rec
+            self._events.append(rec)
+            self._cond.notify_all()
+            listener = self._listener if self.wanted else None
+        if msg:
+            if event in ("error", "connect") or (event == "eme" and not rec.get("ok")):
+                log.warning("%s", msg)
+            else:
+                log.info("%s", msg)
+        if listener is not None:
+            try:
+                listener(event, dict(rec))
+            except Exception:  # noqa: BLE001 - a listener bug must not break the page's report
+                log.exception("in-app Spotify: the listener failed")
+
+    # -- waits and state
+    @property
+    def seq(self) -> int:
+        with self._cond:
+            return self._seq
+
+    def _give_up(self) -> bool:
+        return self._deck._interrupt.is_set() or self._deck._stopping.is_set()
+
+    def wait_ready(self, timeout: float) -> Optional[str]:
+        """The device id once the SDK is ready (now, or within ``timeout``); None otherwise."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._cond:
+            while True:
+                if self.ready and self.device_id:
+                    return self.device_id
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not self.wanted or self._give_up():
+                    return None
+                self._cond.wait(min(remaining, 0.25))
+
+    def wait_for(self, predicate: Callable[[dict[str, Any]], bool], *, after_seq: int = 0,
+                 timeout: float = 0.0, cursor: Optional[dict[str, int]] = None) -> Optional[dict[str, Any]]:
+        """The first report newer than ``after_seq`` for which ``predicate`` holds (within ``timeout``).
+        ``cursor["seq"]`` is set to the newest report looked at, so a later call goes on from there."""
+        deadline = time.monotonic() + max(0.0, timeout)
+        checked = after_seq
+        try:
+            with self._cond:
+                while True:
+                    for rec in self._events:
+                        if rec["seq"] > checked:
+                            checked = rec["seq"]
+                            try:
+                                if predicate(rec):
+                                    return dict(rec)
+                            except Exception:  # noqa: BLE001 - a bad predicate means "no"
+                                pass
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or self._give_up():
+                        return None
+                    self._cond.wait(min(remaining, 0.25))
+        finally:
+            if cursor is not None:
+                cursor["seq"] = checked
+
+    def wait_event(self, event: str, *, play_id: Optional[str] = None, after_seq: int = 0,
+                   timeout: float = 0.0) -> Optional[dict[str, Any]]:
+        return self.wait_for(lambda r: r.get("event") == event and (play_id is None or r.get("playId") == play_id),
+                             after_seq=after_seq, timeout=timeout)
+
+    def events_since(self, after_seq: int) -> list[dict[str, Any]]:
+        with self._cond:
+            return [dict(r) for r in self._events if r["seq"] > after_seq]
+
+    def snapshot(self) -> dict[str, Any]:
+        """Everything the app knows about the SDK (no token): for the provider, status and diagnostics."""
+        with self._cond:
+            snap: dict[str, Any] = {
+                "wanted": self.wanted, "appMode": self.app_mode, "ready": self.ready, "deviceId": self.device_id,
+                "readyAt": self.ready_at, "readySeq": self.ready_seq, "wantedAt": self.wanted_at,
+                "offlineAt": self.offline_at,
+                "pageSince": self.page_since,
+                "error": dict(self.error) if self.error else None, "eme": self.eme, "emeDetail": self.eme_detail,
+                "connected": self.connect_ok, "tick": dict(self.tick) if self.tick else None, "seq": self._seq,
+                "reconnects": self.reconnects}
+        deck = self._deck
+        snap.update(pageOpen=deck.page_open, opening=deck.player_opening, browser=deck.page_browser,
+                    autoOpen=deck.auto_open, now=time.monotonic())
+        return snap
+
+
 class Deck:
     """The Connect page + player server and the command channel to the player page.
 
@@ -616,6 +1111,10 @@ class Deck:
         self.heartbeat_sec = heartbeat_sec
         self.connected_window_sec = connected_window_sec
         self._token = token or secrets.token_urlsafe(32)
+        #: The player window's launch key: only in the address the app opens it with (a fragment, never sent
+        #: to any server), so only the window this app start launched is its player (ON-1, RCOMP-3).
+        self._player_key = secrets.token_urlsafe(18)
+        self._stale_noted_at: Optional[float] = None
         self.api: Optional[ApiHandler] = api
         self.launcher: Launcher = launcher or self._launch
         self.url_opener: Callable[[str], Any] = url_opener or webbrowser.open
@@ -625,7 +1124,7 @@ class Deck:
         self.player_position: Optional[tuple[int, int]] = None
         self.player_corner = "topright"
         self.profile_dir: Optional[Path] = None
-        self.browser_log: Optional[Path] = None   # the browser's stderr (logsrowser.log)
+        self.browser_log: Optional[Path] = None   # the browser's stderr (logs\browser.log)
         #: the never-activating window manager (deck/window.py; None: none, the plain window)
         self.window: Any = None
         #: True while the game is the foreground window: no player window is created then, because
@@ -636,6 +1135,8 @@ class Deck:
         self._bad_browsers: set[str] = set()
         self._server: Optional[_Server] = None
         self._thread: Optional[threading.Thread] = None
+        self._server6: Optional[_Server] = None
+        self._thread6: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         self._cond = threading.Condition(self._lock)
         self._clients: list[_Client] = []
@@ -656,6 +1157,14 @@ class Deck:
         self.on_player_status: Optional[Callable[[dict[str, Any], Optional[dict[str, Any]],
                                                   Optional[dict[str, Any]]], Any]] = None
         self.sent = 0
+        #: in-app Spotify: the Web Playback SDK in the player page (D6)
+        self.spotify = SpotifySdk(self)
+        #: the browser the connected player page says it runs in ("chrome" / "edge" / "other")
+        self._page_browser: Optional[str] = None
+        #: copies Chrome's Widevine component into the player profile (None: :func:`ensure_widevine`)
+        self.widevine_copier: Optional[Callable[[Path], Any]] = None
+        self._csp_seen: set[tuple[str, str]] = set()
+        self._chrome_cache: Optional[tuple[float, bool]] = None
 
     def _launch(self, args: list[str]) -> Any:
         """The default launcher: :func:`_default_launcher`, with the browser's stderr in the log folder."""
@@ -670,12 +1179,34 @@ class Deck:
         if self._server is not None:
             return self
         self._stopping.clear()
-        srv = _Server((self.host, self.requested_port), _Handler)
+        tries = 5 if self.requested_port == 0 else 1
+        for attempt in range(tries):
+            srv = _Server((self.host, self.requested_port), _Handler)
+            srv6 = None
+            if self.host == "127.0.0.1":
+                try:
+                    srv6 = _Server6(("::1", srv.server_address[1]), _Handler)
+                except OSError as exc:
+                    if getattr(exc, "errno", None) in _ADDR_IN_USE or getattr(exc, "winerror", None) == 10048:
+                        srv.server_close()
+                        if attempt + 1 < tries:
+                            continue  # a free port taken on [::1] only: pick another
+                        raise OSError(exc.errno, f"port {srv.server_address[1]} is in use on [::1] by another "
+                                                 f"program ({exc})") from exc
+                    log.debug("no IPv6 loopback listener (%s); the player page reaches 127.0.0.1 only", exc)
+            break
         srv.deck = self
         self._server = srv
         self._thread = threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.25},
                                         name="needledropper-deck", daemon=True)
         self._thread.start()
+        self._server6 = srv6
+        self._thread6 = None
+        if srv6 is not None:
+            srv6.deck = self
+            self._thread6 = threading.Thread(target=srv6.serve_forever, kwargs={"poll_interval": 0.25},
+                                             name="needledropper-deck-ipv6", daemon=True)
+            self._thread6.start()
         log.info("deck listening on %s", self.url)
         return self
 
@@ -683,17 +1214,41 @@ class Deck:
         srv = self._server
         if srv is None:
             return
-        self.close_player()
+        closed = self.close_player()
         self._stopping.set()
         with self._lock:
             for c in self._clients:
                 c.q.put(None)
-        srv.shutdown()
-        srv.server_close()
-        if self._thread:
-            self._thread.join(timeout=5)
+        srv6 = getattr(self, "_server6", None)
+        for server_ in (srv, srv6):
+            if server_ is not None:
+                server_.shutdown()
+                server_.server_close()
+        for thread in (self._thread, getattr(self, "_thread6", None)):
+            if thread:
+                thread.join(timeout=5)
         self._server = None
         self._thread = None
+        self._server6 = None
+        self._thread6 = None
+        self._end_player_process(PLAYER_QUIT_WAIT_S if closed else 0.0)
+
+    def _end_player_process(self, wait_s: float) -> None:
+        """The browser this app start launched for the player: once its window got WM_CLOSE it exits by
+        itself; when it still runs after ``wait_s`` (no window manager, the window never found, or it hangs)
+        its process tree is ended. A browser left running holds the player profile, and its page would
+        connect to the next start (review ON-1). Only a process this deck launched (a real ``Popen``)."""
+        with self._lock:
+            proc = self._player_proc
+        if not isinstance(proc, subprocess.Popen):
+            return
+        deadline = time.monotonic() + max(0.0, wait_s)
+        while proc.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.1)
+        if proc.poll() is not None:
+            return
+        log.info("the player browser (pid %s) did not close with its window; ending it", proc.pid)
+        end_process_tree(proc)
 
     def __enter__(self) -> "Deck":
         return self.start()
@@ -723,8 +1278,43 @@ class Deck:
         return self.url
 
     @property
+    def player_origin(self) -> str:
+        """The player page's origin. ``localhost``, not ``127.0.0.1``: from a ``127.0.0.1`` origin YouTube
+        refused 79 of the 100 bundled videos with error 150, from ``localhost`` none (D12). Only the
+        player moves there; :attr:`base_url`, the Connect page and Spotify's redirect stay on 127.0.0.1."""
+        return f"http://localhost:{self.port}"
+
+    @property
     def player_url(self) -> str:
-        return self.base_url + "/player"
+        """The player page's address (see :attr:`player_origin`)."""
+        return self.player_origin + "/player"
+
+    @property
+    def player_key(self) -> str:
+        """This app start's launch key (see :attr:`player_launch_url`)."""
+        return self._player_key
+
+    @property
+    def player_launch_url(self) -> str:
+        """The address the player window opens: :attr:`player_url` with the launch key in its fragment. The
+        page sends the key with its event stream and the Spotify token request; a page without it (left by
+        an earlier start, opened by hand or by another site) is told to retire (``{"cmd": "retire"}``)."""
+        return f"{self.player_url}#k={self._player_key}"
+
+    def player_key_valid(self, given: Optional[str]) -> bool:
+        if not given:
+            return False
+        return hmac.compare_digest(given.strip().encode("utf-8", "replace"), self._player_key.encode("ascii"))
+
+    def _note_stale_player(self) -> None:
+        now = time.monotonic()
+        with self._lock:
+            quiet = self._stale_noted_at is not None and now - self._stale_noted_at < 300
+            if not quiet:
+                self._stale_noted_at = now
+        if not quiet:
+            log.info("a player page from an earlier start of NeedleDropper (or opened by hand) connected; it was "
+                     "told to close itself")
 
     # ---------------------------------------------------------- security ----
     @property
@@ -762,6 +1352,7 @@ class Deck:
             if kind == CLIENT_PLAYER:
                 self._player_opened_at = None  # a launched window (if any) has arrived
                 self._player_gone_at = None
+                self.spotify.page_connected()
             replay = self._replay_messages_locked(kind)
             n = sum(1 for x in self._clients if x.kind == kind)
             panels = [x for x in self._clients if x.kind == CLIENT_PANEL and x is not c]
@@ -778,6 +1369,8 @@ class Deck:
                 self._last_seen[c.kind] = time.monotonic()  # grace window starts at disconnect
                 if c.kind == CLIENT_PLAYER and not any(x.kind == CLIENT_PLAYER for x in self._clients):
                     self._player_gone_at = time.monotonic()
+                    self._page_browser = None
+                    self.spotify.page_gone()
             n = sum(1 for x in self._clients if x.kind == c.kind)
             panels = [x for x in self._clients if x.kind == CLIENT_PANEL]
             self._cond.notify_all()
@@ -917,6 +1510,8 @@ class Deck:
         out: list[str] = []
         show = self._last_show
         play = self._active_play if kind == CLIENT_PLAYER else None
+        if kind == CLIENT_PLAYER:
+            out.extend(self._encode(cmd) for cmd in self.spotify.replay())  # in-app Spotify: connect again
         if show:
             out.append(self._encode({**show, "replay": True}))
         if play:
@@ -934,6 +1529,20 @@ class Deck:
 
     # ------------------------------------------------------------ status ----
     def _on_status(self, data: dict[str, Any]) -> None:
+        state = data.get("state")
+        if state in ("spotify", "csp"):
+            # The SDK's reports (ticks among them) never touch the YouTube / local status a provider
+            # waits on, and never reach on_player_status.
+            self._touch(CLIENT_PLAYER)
+            if state == "spotify":
+                self.spotify.report(data)
+            else:
+                self._note_csp(data)
+            return
+        browser = data.get("browser")
+        if state == "ready" and browser in ("chrome", "edge", "other"):
+            with self._lock:
+                self._page_browser = browser
         with self._cond:
             self._status_seq += 1
             st = {k: data[k] for k in ("state", "detail", "playId", "code") if k in data}
@@ -949,14 +1558,82 @@ class Deck:
             self._last_seen[CLIENT_PLAYER] = time.monotonic()
             play = dict(self._plays[pid]) if isinstance(pid, str) and pid in self._plays else None
             card = dict(self._last_show) if self._last_show else None
+            ap = self._active_play
+            failed_box = (state == "error" and play is not None and play.get("source") == "youtube"
+                          and ap is not None and ap[0].get("playId") == pid)
             self._cond.notify_all()
         log.debug("deck status: %s", st)
+        if failed_box and self.window is not None:
+            # The YouTube song on screen failed: the box goes at once, whatever the provider does next
+            # (review RCOMP-1; a later "play" shows it again and cancels this).
+            try:
+                self.window.hide_later(0.0)
+            except Exception as exc:  # noqa: BLE001 - a window problem must not stop the report
+                log.debug("player window: %s", exc)
         hook = self.on_player_status
         if hook is not None:
             try:
                 hook(dict(st), play, card)
             except Exception:  # noqa: BLE001 - a listener bug must not break the player's report
                 log.exception("deck: the player status listener failed")
+
+    def _note_csp(self, data: dict[str, Any]) -> None:
+        """The player page hit its Content-Security-Policy: logged once per directive and address."""
+        directive = str(data.get("directive") or "?")[:80]
+        blocked = str(data.get("blocked") or "?")[:200]
+        key = (directive, blocked.split("?", 1)[0])
+        with self._lock:
+            if key in self._csp_seen or len(self._csp_seen) >= 50:
+                return
+            self._csp_seen.add(key)
+        log.warning("the player page's Content-Security-Policy blocked %s (%s)", blocked, directive)
+
+    @property
+    def csp_violations(self) -> list[tuple[str, str]]:
+        """(directive, address) of every CSP violation the player page reported (diagnostics, tests)."""
+        with self._lock:
+            return sorted(self._csp_seen)
+
+    @property
+    def page_browser(self) -> Optional[str]:
+        """The browser of the connected player page ("chrome" / "edge" / "other"), or the one the deck
+        launched it in; None when no player page is connected."""
+        if not self.page_open:
+            return None
+        with self._lock:
+            return self._page_browser or self._player_kind
+
+    def player_info(self) -> dict[str, Any]:
+        """The player window for status pages and reports: its browser, how often it was opened, whether
+        its creation took the foreground (and got it back) -- no token, no device id."""
+        win = self.window
+        return {"browser": self.page_browser, "pageOpen": self.page_open, "opened": self.player_opened,
+                "tookForeground": getattr(win, "took_foreground", None) if win is not None else None,
+                "handedBack": getattr(win, "handed_back", None) if win is not None else None,
+                "shown": bool(getattr(win, "shown", False)) if win is not None else None}
+
+    def chrome_available(self) -> bool:
+        """Google Chrome is installed (in-app Spotify needs it, D11); looked up at most once a minute."""
+        now = time.monotonic()
+        cached = self._chrome_cache
+        if cached is not None and now - cached[0] < 60.0:
+            return cached[1]
+        ok = find_browser("chrome") is not None
+        self._chrome_cache = (now, ok)
+        return ok
+
+    def player_browser(self) -> str:
+        """What plays YouTube songs (and in-app Spotify): "chrome", "edge" or "none" -- the connected
+        player page's browser, else the one :meth:`open_player` would start (D17 ``music.youtube.player``)."""
+        kind = self.page_browser
+        if kind in ("chrome", "edge"):
+            return kind
+        if (self.browser or "").strip().lower() in ("none", "off", "false", "no"):
+            return "none"
+        for k in self._browser_order():
+            if find_browser(k):
+                return k
+        return "none"
 
     @property
     def last_status(self) -> Optional[dict[str, Any]]:
@@ -991,7 +1668,9 @@ class Deck:
 
     # ------------------------------------------------------------- media ----
     def register_media(self, path: str | os.PathLike[str]) -> str:
-        """Whitelist a local file and return the URL the page can load it from."""
+        """Whitelist a local file and return the URL the page can load it from: a same-origin path
+        (``/media/<token>``), so the player page loads it from whichever origin it runs on (D12: it
+        runs on ``localhost``, and its CSP allows media from its own origin only)."""
         p = Path(path).resolve()
         if not p.is_file():
             raise FileNotFoundError(str(p))
@@ -1002,7 +1681,7 @@ class Deck:
                 token = secrets.token_urlsafe(16)
                 self._media_by_path[key] = token
                 self._media[token] = p
-        return f"{self.base_url}/media/{token}"
+        return f"/media/{token}"
 
     def _media_path(self, token: str) -> Optional[Path]:
         with self._lock:
@@ -1031,8 +1710,15 @@ class Deck:
             self.browser_log = Path(browser_log)
         win = self.window
         if win is not None:
+            moved = (win.corner, win.position) != (self.player_corner, self.player_position)
             win.corner = self.player_corner
             win.position = self.player_position
+            reposition = getattr(win, "reposition", None)
+            if moved and callable(reposition):
+                try:
+                    reposition()  # an open box moves to its new corner at once (DESIGN-v1.2.1 3.9)
+                except Exception as exc:  # noqa: BLE001 - placement only
+                    log.debug("player window: %s", exc)
 
     @property
     def player_opening(self) -> bool:
@@ -1043,10 +1729,24 @@ class Deck:
                 and not self.page_open)
 
     def _browser_order(self) -> list[str]:
+        """Chrome first when ``deck.browser`` says so, and always while Spotify plays in the app (a
+        provider in app mode, signed in or not yet): the Web Playback SDK needs Chrome's Widevine (it
+        never became ready in Edge; D11), and the one player window serves both. Edge stays the
+        fallback, for YouTube songs."""
         b = (self.browser or "edge").strip().lower()
-        first = "chrome" if b == "chrome" else "edge"
+        first = "chrome" if (b == "chrome" or self.spotify.app_mode or self.spotify.wanted) else "edge"
         order = [first, "chrome" if first == "edge" else "edge"]
         return [k for k in order if k not in self._bad_browsers]
+
+    def _copy_widevine(self) -> None:
+        """Chrome's Widevine component into the player profile, when it is missing there (D11)."""
+        if self.profile_dir is None:
+            return
+        copier = self.widevine_copier or ensure_widevine
+        try:
+            copier(self.profile_dir)
+        except Exception as exc:  # noqa: BLE001 - in-app Spotify then waits for Chrome's own download
+            log.info("Widevine copy failed: %s", exc)
 
     def open_player(self, *, size: tuple[int, int] = PLAYER_WINDOW_SIZE) -> str:
         """Open the player page in a small Edge/Chrome app window.
@@ -1054,7 +1754,8 @@ class Deck:
         ``--app=<player url> --window-size=420,380``, a dedicated profile under :attr:`profile_dir`
         (where autoplay with sound is allowed) and the no-throttling flags (a hidden player keeps
         working). With the window manager (:attr:`window`, Windows) the window is found, kept out
-        of the taskbar, made never-activating and hidden until a YouTube song plays; it starts at
+        of the taskbar, made never-activating and parked off every monitor until a YouTube song plays
+        (shown, not hidden: the Web Playback SDK plays nothing in a hidden window, D14); it shows at
         its corner (or :attr:`player_position`).
 
         Never while the game is the foreground window: Chromium activates a window when it creates
@@ -1080,7 +1781,7 @@ class Deck:
             exe = find_browser(kind)
             if not exe:
                 continue
-            args = [exe, f"--app={self.player_url}", f"--window-size={size[0]},{size[1]}",
+            args = [exe, f"--app={self.player_launch_url}", f"--window-size={size[0]},{size[1]}",
                     "--autoplay-policy=no-user-gesture-required", *NO_THROTTLE_FLAGS, "--hide-crash-restore-bubble"]
             pos = self._launch_position(size)
             if pos is not None:
@@ -1091,6 +1792,10 @@ class Deck:
                     args += [f"--user-data-dir={self.profile_dir}", "--no-first-run", "--no-default-browser-check"]
                 except OSError as exc:
                     log.debug("player profile dir unavailable: %s", exc)
+                if kind == "chrome":
+                    self._copy_widevine()
+            before = self._foreground()  # Chromium activates the window it creates: hand it back after
+            existing = self._windows_now()  # none of these is the new player window (never adopt one)
             try:
                 proc = self.launcher(args)
             except OSError as exc:
@@ -1103,7 +1808,7 @@ class Deck:
                 self._player_proc = proc
                 self._player_kind = kind
             log.info("opened the player window (%s: %s)", kind, exe)
-            self._adopt_later(proc)
+            self._adopt_later(proc, before, existing)
             return kind
         log.warning("no Edge or Chrome to play YouTube songs in (deck.browser %r); YouTube drops show their card "
                     "only", self.browser)
@@ -1116,12 +1821,39 @@ class Deck:
         never found)."""
         return self.player_position
 
-    def _adopt_later(self, proc: Any) -> None:
+    def _foreground(self) -> Optional[int]:
+        """The foreground window before a launch (for the window manager's hand-back), or None."""
+        win = self.window
+        fn = getattr(win, "foreground", None) if win is not None else None
+        if not callable(fn):
+            return None
+        try:
+            return fn()
+        except Exception:  # noqa: BLE001 - best effort
+            return None
+
+    def _windows_now(self) -> Optional[set[int]]:
+        win = self.window
+        fn = getattr(win, "windows_now", None) if win is not None else None
+        if not callable(fn):
+            return None
+        try:
+            return set(fn())
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _adopt_later(self, proc: Any, before: Optional[int] = None, existing: Optional[set[int]] = None) -> None:
         win = self.window
         if win is None:
             return
         pid = getattr(proc, "pid", None)
-        threading.Thread(target=lambda: win.adopt(pid), name="needledropper-player-window", daemon=True).start()
+        kw: dict[str, Any] = {}
+        if before is not None:  # else nothing to hand back (or a window manager without the hand-back)
+            kw["prev_foreground"] = before
+        if existing:
+            kw["ignore"] = existing
+        target: Callable[[], Any] = lambda: win.adopt(pid, **kw)  # noqa: E731
+        threading.Thread(target=target, name="needledropper-player-window", daemon=True).start()
 
     def _player_exit_code(self) -> Optional[int]:
         proc = self._player_proc
@@ -1203,11 +1935,17 @@ class Deck:
         with self._cond:
             self._cond.notify_all()
 
-    def close_player(self) -> None:
-        """Close the player window (the app is quitting)."""
+    def close_player(self) -> bool:
+        """Close the player window (the app is quitting). True when the window manager had one to close."""
         win = self.window
-        if win is not None:
+        if win is None:
+            return False
+        had = bool(getattr(win, "hwnd", None))
+        try:
             win.close()
+        except Exception as exc:  # noqa: BLE001 - the process is ended below anyway
+            log.debug("closing the player window failed: %s", exc)
+        return had
 
     def open_panel(self) -> bool:
         """Open the Connect page in the default browser."""

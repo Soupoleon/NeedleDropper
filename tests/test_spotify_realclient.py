@@ -80,9 +80,11 @@ def test_older_sign_in_without_the_scope_is_detected_up_front(tmp_path):
     rig.http.add("GET", "/v1/search", (200, SEARCH_HIT))
     rig.provider.resolve_drop(make_drop(spotify=None))
     assert "market" not in rig.http.find("GET", "/v1/search")[0].query  # no 403 needed to find out
-    assert rig.provider.status_dict()["missingScopes"] == ["user-read-private"]
+    # 1.2.1 also asks for streaming and user-read-email (in-app Spotify, D9)
+    missing = ["streaming", "user-read-email", "user-read-private"]
+    assert rig.provider.status_dict()["missingScopes"] == missing
     rig.provider.reset_session()
-    assert rig.provider.status_dict()["missingScopes"] == ["user-read-private"]  # still the old sign-in
+    assert rig.provider.status_dict()["missingScopes"] == missing  # still the old sign-in
 
 
 def test_premium_and_allowlist_403s_are_told_apart(tmp_path):

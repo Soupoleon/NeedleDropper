@@ -2,7 +2,7 @@
 ## Title: NeedleDropper
 ## Notes: Kojima-style needle drops: curated songs the first time you arrive somewhere.
 ## Author: NeedleDropper
-## Version: 1.2.0
+## Version: 1.2.1
 ## X-License: MIT
 ## X-Curse-Project-ID: 1786392
 ## Category: Audio & Video
@@ -23,6 +23,7 @@ Sets\AzerothUnbound.lua
 Soundtracks.lua
 Share.lua
 Companion.lua
+MusicServices.lua
 Emit.lua
 Location.lua
 Discovery.lua
@@ -37,4 +38,5 @@ UI\Drops.lua
 UI\Soundtracks.lua
 UI\Journal.lua
 UI\ShareDialogs.lua
+UI\MusicDialog.lua
 SelfTest.lua

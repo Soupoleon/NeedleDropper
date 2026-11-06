@@ -14,6 +14,14 @@
   const POLL_MS = 2000, FAST_POLL_MS = 1000, HIDDEN_POLL_MS = 10000;
   const GLYPHS = { ok: "✓", wait: "…", warn: "!", bad: "×", off: "–" };
   const TRANSPORT_NAMES = { pixel: "pixel link", chatlog: "chat-log link" };
+  // The music choices are set in game (Options > AddOns > NeedleDropper > Music services): shown here read-only.
+  const ORDER_TEXT = { "spotify-youtube": "Spotify, then YouTube", "youtube-spotify": "YouTube, then Spotify",
+                       spotify: "Spotify only", youtube: "YouTube only", none: "Neither: title cards and in-game files only" };
+  const CORNER_TEXT = { topright: "Top right", topleft: "Top left (below the beacon)", bottomright: "Bottom right",
+                        bottomleft: "Bottom left" };
+  const APP_DEVICE = "NeedleDropper"; // in-app Spotify's own Connect device: chosen as "this app", never listed
+  const PENDING_MS = 25000;
+  const pending = {}; // action -> { id, since } of a request this page sent and still waits for
 
   let state = null;
   let pollTimer = null;
@@ -174,11 +182,55 @@
   function render(st) {
     renderApp(st);
     renderWow(st.wow || {}, st.addon || {});
-    renderSpotify(st.spotify || {});
-    renderYouTube(st.youtube || {});
+    renderSpotify(st.spotify || {}, st.music || {});
+    renderYouTube(st.youtube || {}, st.music || {});
     renderLink(st.link || {}, st.wow || {});
     renderFooter(st.app || {}, st.autostart || {});
     renderBanner(st);
+  }
+
+  // ------------------------------------------------------------ requests --
+  // Test Spotify / Test YouTube / Sign in to YouTube run the same handlers as the requests sent
+  // from the game; their results arrive in state.music.actions (newest last).
+  function clock(at) {
+    if (!at) return "";
+    const d = new Date(at * 1000);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  }
+
+  function lastResult(music, action) {
+    // "opened" is final for the YouTube sign-in, interim for Connect Spotify
+    const list = (music.actions || []).filter((a) => a.action === action &&
+                                                     (a.result !== "opened" || action === "youtube-sign-in"));
+    return list.length ? list[list.length - 1] : null;
+  }
+
+  // One result line for one or more requests ([[action, text while waiting], ...]): a request this page
+  // sent and still waits for, else the newest result of any of them.
+  function renderResult(el, music, requests) {
+    let waiting = "", newest = null;
+    requests.forEach(([action, waitText]) => {
+      const p = pending[action];
+      const last = lastResult(music, action);
+      if (p && last && last.id >= p.id) {
+        delete pending[action];
+        announce(last.text || last.result);
+      } else if (p && Date.now() - p.since > PENDING_MS) {
+        delete pending[action];
+      }
+      if (pending[action]) waiting = waitText;
+      if (last && (!newest || last.at >= newest.at)) newest = last;
+    });
+    setText(el, waiting || (newest ? `${clock(newest.at)}: ${newest.text || newest.result}` : ""));
+  }
+
+  async function sendRequest(btn, path, body, action, label) {
+    await busy(btn, label, async () => {
+      const r = await api(path, { method: "POST", body });
+      pending[action] = { id: r.id || Math.floor(Date.now() / 1000), since: Date.now() };
+      if (state) render(state);
+      schedule(500);
+    });
   }
 
   function renderApp(st) {
@@ -268,6 +320,14 @@
       note = (note ? note + " " : "") + "The game is running an older NeedleDropper addon (1.1 or earlier): " +
              "update it, then restart World of Warcraft.";
       status = ["warn", "Addon too old"];
+    } else if (addon.installed && addon.tooOld) {
+      // 1.2.1 changed how the addon and the app talk: an older addon and this app can't read each other.
+      const how = addon.owner === "companion" ? "with Update addon below" :
+                  addon.owner === "manager" ? `in ${addon.managedBy || "your addon manager"}` :
+                  "the same way you installed it";
+      note = `This app needs NeedleDropper ${addon.minVersion || "1.2.1"} or newer in the game: the addon and the ` +
+             `app must be updated together. Update the addon ${how}, then restart World of Warcraft.`;
+      status = ["warn", "Addon too old"];
     }
     if (wow.found && wow.running && install) {
       note = (note ? note + " " : "") + "World of Warcraft is running: restart it after installing.";
@@ -285,24 +345,38 @@
     const get = $("addon-get");
     if (addon.pageUrl && get.getAttribute("href") !== addon.pageUrl) get.setAttribute("href", addon.pageUrl);
     show(get, !addon.installed);
-    get.className = install && addon.installed ? "btn" : "btn primary";
+    // The copy that comes with this app is the first choice when it can be installed: the addon site may not
+    // list NeedleDropper yet (a private beta, review ON-5).
+    get.className = install ? "btn" : "btn primary";
     const btn = $("addon-install");
+    btn.className = install ? "btn primary" : "btn";
     show(btn, install);
     if (btn.getAttribute("aria-busy") !== "true") btn.textContent = installLabel;
     show($("addon-install-hint"), install && !addon.installed);
     setStatus("wow-status", status[0], status[1]);
   }
 
-  function renderSpotify(sp) {
+  function renderSpotify(sp, music) {
     const st = sp.state || "not-set-up";
     const connected = st === "connected" || st === "premium" || st === "allowlist";
     show($("sp-steps"), !connected);
+    // Signing in again after the update (D9): the 1.2.0 developer app only needs Web Playback SDK ticked.
+    show($("sp-step1-new"), !sp.relogin);
+    show($("sp-step1-relogin"), !!sp.relogin);
     show($("sp-connected"), connected);
     show($("sp-waiting"), st === "waiting");
     if (st === "waiting" && sp.login && sp.login.authorizeUrl) $("sp-auth-link").href = sp.login.authorizeUrl;
-    if (sp.dashboardUrl) $("sp-dashboard").href = sp.dashboardUrl;
+    if (sp.dashboardUrl) { $("sp-dashboard").href = sp.dashboardUrl; $("sp-dashboard-relogin").href = sp.dashboardUrl; }
     setText($("sp-redirect"), sp.redirectUri || "http://127.0.0.1:8321/callback");
     setVal($("sp-client"), sp.clientId || "");
+    setText($("music-order"), ORDER_TEXT[music.order] || ORDER_TEXT["spotify-youtube"]);
+    setText($("music-order-hint"), music.fromGame ? "(set in game: Options > AddOns > NeedleDropper)"
+                                                  : "(the default: choose it in game, Options > AddOns > NeedleDropper)");
+    // A sign-in from before 1.2.1 lacks two permissions in-app Spotify needs (D9): the same form, "Sign in again".
+    const signin = $("sp-signin");
+    if (signin.getAttribute("aria-busy") !== "true") setText(signin, sp.relogin ? "Sign in again" : "Sign in");
+    renderResult($("sp-test-result"), music,
+                 [["test-spotify", "Testing: you should hear 15 seconds of Toto – Africa in a few seconds…"]]);
 
     let note = "", noteCls = "warn";
     if (sp.warning) note = sp.warning;
@@ -333,7 +407,7 @@
       show($("sp-country-row"), !!sp.country);
       show($("sp-reconnect-row"), !!sp.reconnect);
       if (!devicesLoaded) loadDevices(false);
-      syncDeviceSelect(sp.deviceName || "");
+      syncDeviceSelect(sp.device || "app", sp.deviceName || "");
     } else {
       devicesLoaded = false;
     }
@@ -349,49 +423,64 @@
     setStatus("sp-status", s[0], s[1]);
   }
 
-  function syncDeviceSelect(selected) {
+  // "Play on": NeedleDropper itself (spotify.device "app", the default: the Spotify Web Playback SDK in
+  // its own player), or another Spotify Connect device ("connect", optionally named by deviceName).
+  function deviceValue(device, name) { return device === "connect" ? `connect:${name || ""}` : "app"; }
+
+  function addOption(sel, value, text) {
+    const o = document.createElement("option");
+    o.value = value;
+    o.textContent = text;
+    sel.appendChild(o);
+    return o;
+  }
+
+  function syncDeviceSelect(device, name) {
     const sel = $("sp-device");
+    const value = deviceValue(device, name);
+    // the hint follows the saved choice, also while the list still has the focus after a change
+    setText($("sp-device-hint"), value === "app"
+      ? "NeedleDropper plays Spotify itself: no Spotify app has to be open (it needs Google Chrome)."
+      : "Open Spotify on the device you want to hear it on, then Refresh.");
     if (document.activeElement === sel) return;
-    if (selected && ![...sel.options].some((o) => o.value === selected)) {
-      const o = document.createElement("option");
-      o.value = selected;
-      o.textContent = `${selected} (not open right now)`;
-      sel.appendChild(o);
+    if (![...sel.options].some((o) => o.value === value)) {
+      addOption(sel, value, value === "connect:" ? "The Spotify app on this PC (automatic)" : `${name} (not open right now)`);
     }
-    sel.value = selected;
+    sel.value = value;
   }
 
   async function loadDevices(announceIt) {
     devicesLoaded = true;
+    const sel = $("sp-device");
+    const sp = (state && state.spotify) || {};
     try {
       const r = await api("/api/spotify/devices");
-      const sel = $("sp-device");
-      const keep = r.selected || "";
+      const devices = (r.devices || []).filter((d) => d.name !== APP_DEVICE);
       sel.textContent = "";
-      const auto = document.createElement("option");
-      auto.value = "";
-      auto.textContent = "This PC (automatic)";
-      sel.appendChild(auto);
-      (r.devices || []).forEach((d) => {
-        const o = document.createElement("option");
-        o.value = d.name;
-        o.textContent = d.name + (d.type ? ` (${d.type.toLowerCase()})` : "") + (d.isActive ? ", playing now" : "");
-        sel.appendChild(o);
+      addOption(sel, "app", "NeedleDropper (this app)");
+      addOption(sel, "connect:", "The Spotify app on this PC (automatic)");
+      devices.forEach((d) => {
+        addOption(sel, `connect:${d.name}`,
+                  d.name + (d.type ? ` (${d.type.toLowerCase()})` : "") + (d.isActive ? ", playing now" : ""));
       });
-      syncDeviceSelect(keep);
-      setText($("sp-device-hint"), (r.devices || []).length
-        ? "Open Spotify on the device you want to hear it on, then Refresh."
-        : "No Spotify app is open right now. Open Spotify on this PC or another device, then Refresh.");
-      if (announceIt) announce(`${(r.devices || []).length} Spotify devices found.`);
+      syncDeviceSelect(r.device || sp.device || "app", r.selected || "");
+      if (announceIt) announce(`${devices.length} other Spotify devices found.`);
     } catch (e) {
-      setText($("sp-device-hint"), e.message);
+      syncDeviceSelect(sp.device || "app", sp.deviceName || "");
+      if (announceIt) setText($("sp-device-hint"), e.message);
     }
   }
 
-  function renderYouTube(yt) {
+  function renderYouTube(yt, music) {
     const box = $("yt-enabled");
     if (box.getAttribute("aria-busy") !== "true") box.checked = !!yt.enabled;
     setStatus("yt-status", yt.enabled ? "ok" : "off", yt.enabled ? "Ready" : "Off");
+    setText($("yt-corner"), CORNER_TEXT[music.corner] || CORNER_TEXT.topright);
+    $("yt-test").disabled = !yt.enabled || $("yt-test").getAttribute("aria-busy") === "true";
+    $("yt-signin").disabled = yt.player === "none" || $("yt-signin").getAttribute("aria-busy") === "true";
+    renderResult($("yt-test-result"), music, [
+      ["test-youtube", "Testing: the YouTube box should show in its corner and play Toto – Africa for 15 seconds…"],
+      ["youtube-sign-in", "Opening YouTube's sign-in page in the player box's browser…"]]);
   }
 
   function renderLink(link, wow) {
@@ -590,11 +679,21 @@
   $("sp-reconnect").addEventListener("click", () => { $("sp-form").requestSubmit(); });
   $("sp-refresh").addEventListener("click", () => busy($("sp-refresh"), "Looking…", () => loadDevices(true)));
   $("sp-device").addEventListener("change", async () => {
-    const name = $("sp-device").value;
+    const value = $("sp-device").value;
+    const name = value.startsWith("connect:") ? value.slice("connect:".length) : "";
+    const patch = value === "app" ? { spotify: { device: "app" } } : { spotify: { device: "connect", deviceName: name } };
+    const msg = value === "app" ? "Spotify songs will play in NeedleDropper itself."
+      : (name ? `Spotify songs will play on ${name}.` : "Spotify songs will play in the Spotify app on this PC.");
     try {
-      await saveConfig({ spotify: { deviceName: name } }, name ? `Songs will play on ${name}.` : "Songs will play on this PC.");
+      await saveConfig(patch, msg);
     } catch (e) { toast(e.message, "error"); }
   });
+  $("sp-test").addEventListener("click", () => sendRequest($("sp-test"), "/api/music/test", { service: "spotify" },
+                                                           "test-spotify", "Testing…"));
+  $("yt-test").addEventListener("click", () => sendRequest($("yt-test"), "/api/music/test", { service: "youtube" },
+                                                           "test-youtube", "Testing…"));
+  $("yt-signin").addEventListener("click", () => sendRequest($("yt-signin"), "/api/youtube/signin", {},
+                                                             "youtube-sign-in", "Opening…"));
   $("sp-signout").addEventListener("click", () => busy($("sp-signout"), "Signing out…", async () => {
     await api("/api/spotify/disconnect", { method: "POST", body: {} });
     toast("Signed out of Spotify.", "ok");
