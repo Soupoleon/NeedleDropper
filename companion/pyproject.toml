@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "needledropper"
+version = "1.0.0"
+description = "Companion for the NeedleDropper WoW: Forever addon: Kojima-style needle drops the first time you arrive somewhere."
+readme = { text = "See docs/SPEC.md in the NeedleDropper repository.", content-type = "text/plain" }
+requires-python = ">=3.10"
+authors = [{ name = "NeedleDropper" }]
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Games/Entertainment",
+    "Topic :: Multimedia :: Sound/Audio :: Players",
+]
+
+[project.optional-dependencies]
+# Optional speed-ups for screen capture; the companion works without them.
+win = ["pywin32"]
+
+[project.scripts]
+needledropper = "needledropper.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["needledropper*"]
+
+[tool.setuptools.package-data]
+"needledropper.deck" = ["static/*"]

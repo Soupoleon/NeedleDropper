@@ -1,0 +1,504 @@
+{
+ "about": "The built-in default soundtrack (Share.FromSet).",
+ "code": "!NeedleDropper:1!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!",
+ "name": "azeroth-mixtape",
+ "pack": {
+  "author": "NeedleDropper",
+  "description": "The default NeedleDropper soundtrack for World of Warcraft: Forever, with needle drops at the places every player remembers: all six capitals, every starting zone, the signature zones, the famous landmarks and the four new Forever zones. Roughly half the songs fit so well they give you chills and half are there to make you laugh (metadata only; no audio is included).",
+  "drops": [
+   {
+    "areaID": 150,
+    "artist": "Otis Redding",
+    "durationMs": 163747,
+    "label": "Menethil Harbor",
+    "note": "Rain, gulls and the long wait for the boat: every Alliance player has spent a small lifetime on these docks.",
+    "subzone": "Menethil Harbor",
+    "tags": [
+     "fitting"
+    ],
+    "title": "(Sittin' On) The Dock of the Bay",
+    "youtube": "7C-VscEQugk",
+    "zone": 1437
+   },
+   {
+    "areaID": 2255,
+    "artist": "Vanilla Ice",
+    "durationMs": 271467,
+    "label": "Everlook",
+    "note": "The coldest town in vanilla WoW gets the most vanilla Ice of all.",
+    "subzone": "Everlook",
+    "tags": [
+     "funny"
+    ],
+    "title": "Ice Ice Baby",
+    "youtube": "jewmMjnbfzE",
+    "zone": 1452
+   },
+   {
+    "areaID": 2268,
+    "artist": "Jeff Buckley",
+    "durationMs": 413320,
+    "label": "Light's Hope Chapel",
+    "note": "The last holy ground in the Plaguelands, where the Argent Dawn still kneel: arrive, breathe and let it play.",
+    "subzone": "Light's Hope Chapel",
+    "tags": [
+     "fitting"
+    ],
+    "title": "Hallelujah",
+    "youtube": "hjn13QP05xM",
+    "zone": 1423
+   },
+   {
+    "areaID": 2562,
+    "artist": "Queen",
+    "durationMs": 354320,
+    "label": "Karazhan",
+    "note": "Medivh's tower: a possessed wizard, a haunted ballroom and its own opera house. Only rock's most operatic epic will do.",
+    "subzone": "Karazhan",
+    "tags": [
+     "funny"
+    ],
+    "title": "Bohemian Rhapsody",
+    "youtube": "fJ9rUzIMcZQ",
+    "zone": 1430
+   },
+   {
+    "areaID": 271,
+    "artist": "Edwin Starr",
+    "durationMs": 200267,
+    "label": "Southshore",
+    "note": "Southshore vs. Tarren Mill raged for months before battlegrounds and earned exactly what this song says war is good for.",
+    "subzone": "Southshore",
+    "tags": [
+     "funny"
+    ],
+    "title": "War",
+    "youtube": "gKAM1NfMXY8",
+    "zone": 1424
+   },
+   {
+    "areaID": 272,
+    "artist": "Dire Straits",
+    "durationMs": 298840,
+    "label": "Tarren Mill",
+    "note": "Tarren Mill vs. Southshore, vanilla's endless world-PvP war, scored by rock's most mournful soldiers' lament. Timed to the 4:58 single edit.",
+    "subzone": "Tarren Mill",
+    "tags": [
+     "fitting"
+    ],
+    "title": "Brothers in Arms",
+    "youtube": "jhdFe3evXpk",
+    "zone": 1424
+   },
+   {
+    "areaID": 348,
+    "artist": "John Powell",
+    "durationMs": 156307,
+    "label": "Aerie Peak",
+    "note": "Wildhammer gryphons and Celtic fiddles: How to Train Your Dragon's first-flight cue was all but written for this cliff.",
+    "subzone": "Aerie Peak",
+    "tags": [
+     "fitting"
+    ],
+    "title": "Test Drive",
+    "youtube": "IpPIK4T068s",
+    "zone": 1425
+   },
+   {
+    "areaID": 35,
+    "artist": "Klaus Badelt",
+    "durationMs": 90427,
+    "label": "Booty Bay",
+    "note": "Walk through the jaws of a giant shark into a goblin pirate harbour, and only one cue can possibly be playing.",
+    "subzone": "Booty Bay",
+    "tags": [
+     "fitting"
+    ],
+    "title": "He's a Pirate",
+    "youtube": "BuYf0taXoNw",
+    "zone": 1434
+   },
+   {
+    "areaID": 380,
+    "artist": "U2",
+    "durationMs": 277477,
+    "label": "The Crossroads",
+    "note": "Every Horde hero at the Crossroads ends up asking Barrens chat where Mankrik's wife is. Bono hasn't found her either.",
+    "subzone": "The Crossroads",
+    "tags": [
+     "funny"
+    ],
+    "title": "I Still Haven't Found What I'm Looking For",
+    "youtube": "e3-5YC_oHjE",
+    "zone": 1413
+   },
+   {
+    "areaID": 439,
+    "artist": "Elton John",
+    "durationMs": 281613,
+    "label": "The Shimmering Flats",
+    "note": "Gnome and goblin rocket cars tear across the salt flats, and you're the one stuck collecting Rocket Car Parts.",
+    "subzone": "The Shimmering Flats",
+    "tags": [
+     "funny"
+    ],
+    "title": "Rocket Man (I Think It's Going to Be a Long, Long Time)",
+    "youtube": "DtVBCG6ThDk",
+    "zone": 1441
+   },
+   {
+    "areaID": 72,
+    "artist": "AC/DC",
+    "durationMs": 208111,
+    "label": "The Dark Portal",
+    "note": "On the far side of the portal lies Hellfire Peninsula, and AC/DC named the road there back in 1979.",
+    "subzone": "The Dark Portal",
+    "tags": [
+     "funny"
+    ],
+    "title": "Highway to Hell",
+    "youtube": "l482T0yNkeo",
+    "zone": 1419
+   },
+   {
+    "areaID": 87,
+    "artist": "Eagles",
+    "durationMs": 391357,
+    "label": "Goldshire",
+    "note": "Azeroth's most notorious inn since 2004. The Lion's Pride never closes, and its regulars have been here since launch.",
+    "subzone": "Goldshire",
+    "tags": [
+     "funny"
+    ],
+    "title": "Hotel California",
+    "youtube": "dLl4PZtxia8",
+    "zone": 1429
+   },
+   {
+    "areaID": 976,
+    "artist": "ABBA",
+    "durationMs": 186070,
+    "label": "Gadgetzan",
+    "note": "Steamwheedle goblins sell to Horde and Alliance alike, as long as the gold is real and the auction cut is theirs.",
+    "subzone": "Gadgetzan",
+    "tags": [
+     "funny"
+    ],
+    "title": "Money, Money, Money",
+    "youtube": "1LPNuFkteI8",
+    "zone": 1446
+   },
+   {
+    "artist": "Dolly Parton",
+    "durationMs": 165547,
+    "label": "Durotar",
+    "note": "Your first job in the Valley of Trials is waking lazy peons, so Durotar opens with an anthem for the working orc.",
+    "tags": [
+     "funny"
+    ],
+    "title": "9 to 5",
+    "youtube": "d_vPJjqWxZM",
+    "zone": 1411
+   },
+   {
+    "artist": "John Barry",
+    "durationMs": 136867,
+    "label": "Mulgore",
+    "note": "Endless golden plains, wind in the tall grass and mesas on the horizon: a frontier theme fit for the tauren homeland.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "The John Dunbar Theme",
+    "youtube": "r2rAYwhM0Kc",
+    "zone": 1412
+   },
+   {
+    "artist": "Toto",
+    "durationMs": 295283,
+    "label": "The Barrens",
+    "note": "Lions, zhevra and endless golden savanna: Barrens chat finally gets the meme anthem it has always deserved.",
+    "tags": [
+     "funny"
+    ],
+    "title": "Africa",
+    "youtube": "QAo_Ycocl1E",
+    "zone": 1413
+   },
+   {
+    "artist": "Evanescence",
+    "durationMs": 235893,
+    "label": "Tirisfal Glades",
+    "note": "The Forsaken begin by waking up dead in Deathknell, so Tirisfal gets the internet's most famous plea to be woken up.",
+    "tags": [
+     "funny"
+    ],
+    "title": "Bring Me to Life",
+    "youtube": "Yhwal9i1uyw",
+    "zone": 1420
+   },
+   {
+    "artist": "Richard Armitage & The Dwarf Cast",
+    "durationMs": 103025,
+    "label": "Dun Morogh",
+    "note": "Deep dwarven voices mourning a lost mountain home: written for Erebor, felt by every gnome who fled Gnomeregan.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "Misty Mountains",
+    "youtube": "s4LX9NX7hS4",
+    "zone": 1426
+   },
+   {
+    "artist": "Billy Joel",
+    "durationMs": 291100,
+    "label": "Burning Steppes",
+    "note": "The Dark Irons summoned Ragnaros and set this whole land ablaze. Ask any of them, though, and it wasn't their fault.",
+    "tags": [
+     "funny"
+    ],
+    "title": "We Didn't Start the Fire",
+    "youtube": "WqkjYKUXERQ",
+    "zone": 1428
+   },
+   {
+    "artist": "The Beatles",
+    "durationMs": 185733,
+    "label": "Elwynn Forest",
+    "note": "Dawn over Northshire Abbey and a whole world ahead: the gentlest possible start to an adventure.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "Here Comes the Sun",
+    "youtube": "xUNqsfFUwhY",
+    "zone": 1429
+   },
+   {
+    "artist": "Michael Jackson",
+    "durationMs": 357753,
+    "label": "Duskwood",
+    "note": "Worgen in the woods, ghouls at Raven Hill and Stitches on the road: Duskwood is basically the music video.",
+    "tags": [
+     "funny"
+    ],
+    "title": "Thriller",
+    "youtube": "sO4vI8P88NM",
+    "zone": 1431
+   },
+   {
+    "artist": "Guns N' Roses",
+    "durationMs": 273483,
+    "label": "Stranglethorn Vale",
+    "note": "Raptors, tigers, trolls and a gank behind every tree: Stranglethorn is exactly the jungle Axl warned you about.",
+    "tags": [
+     "funny"
+    ],
+    "title": "Welcome to the Jungle",
+    "youtube": "0CNPR2qNzxk",
+    "zone": 1434
+   },
+   {
+    "artist": "Adele",
+    "durationMs": 286082,
+    "label": "Westfall",
+    "note": "Skyfall, but make it Westfall: a Bond-sized ballad for broken windmills and a Defias Brotherhood plotting its return.",
+    "tags": [
+     "funny"
+    ],
+    "title": "Skyfall",
+    "youtube": "LJzp_mDxaT0",
+    "zone": 1436
+   },
+   {
+    "artist": "Enya",
+    "durationMs": 211067,
+    "label": "Teldrassil",
+    "note": "Moonlight on the World Tree and the most elven song in film history, for the night elves' first steps into the world.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "May It Be",
+    "youtube": "acM4c1BYVlU",
+    "zone": 1438
+   },
+   {
+    "artist": "Darude",
+    "durationMs": 225667,
+    "label": "Tanaris",
+    "note": "An entire desert of blowing sand, and the one song that is basically required by law to play there.",
+    "tags": [
+     "funny"
+    ],
+    "title": "Sandstorm",
+    "youtube": "y6120QOlsfU",
+    "zone": 1446
+   },
+   {
+    "artist": "Britney Spears",
+    "durationMs": 198800,
+    "label": "Felwood",
+    "note": "Fel-poisoned rivers, oozing slimes and a forest rotten to the roots: Felwood is literally toxic. Britney said it first.",
+    "tags": [
+     "funny"
+    ],
+    "title": "Toxic",
+    "youtube": "7l1A2gShWZo",
+    "zone": 1448
+   },
+   {
+    "artist": "John Williams",
+    "durationMs": 207427,
+    "label": "Un'Goro Crater",
+    "note": "A lost crater of dinosaurs, steaming springs and glowing crystals. There's only one way a film would score this arrival.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "Theme from Jurassic Park",
+    "youtube": "lDlU08RU7Tk",
+    "zone": 1449
+   },
+   {
+    "artist": "Kansas",
+    "durationMs": 206267,
+    "label": "Silithus",
+    "note": "Wind-scoured dunes over a buried Qiraji empire, where whole armies of the Ahn'Qiraj war effort turned to sand.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "Dust in the Wind",
+    "youtube": "9fNrJMkTWEE",
+    "zone": 1451
+   },
+   {
+    "artist": "David Bowie",
+    "durationMs": 371417,
+    "label": "Stormwind City",
+    "note": "You walk in beneath the giant champion statues of the Valley of Heroes, and Bowie's anthem names the place for you.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "\"Heroes\"",
+    "youtube": "YLp2cW7ICCU",
+    "zone": 1453
+   },
+   {
+    "artist": "Hans Zimmer & Lisa Gerrard",
+    "durationMs": 254293,
+    "label": "Orgrimmar",
+    "note": "Thrall fought as a gladiator slave, then freed the orcs from the camps. His city gets Gladiator's anthem of freedom.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "Now We Are Free",
+    "youtube": "ghxzLw2wRis",
+    "zone": 1454
+   },
+   {
+    "artist": "Wind Rose",
+    "durationMs": 315986,
+    "label": "Ironforge",
+    "note": "A whole city carved out of a mountain by dwarves who have never once stopped digging. This is their work song.",
+    "tags": [
+     "funny"
+    ],
+    "title": "Diggy Diggy Hole",
+    "youtube": "34CZjsEI1yU",
+    "zone": 1455
+   },
+   {
+    "artist": "Tom Petty",
+    "durationMs": 255712,
+    "label": "Thunder Bluff",
+    "note": "For everyone who ever stepped off a Thunder Bluff elevator one second too early.",
+    "tags": [
+     "funny"
+    ],
+    "title": "Free Fallin'",
+    "youtube": "1lWJXDG2i0A",
+    "zone": 1456
+   },
+   {
+    "artist": "Céline Dion",
+    "durationMs": 310856,
+    "label": "Darnassus",
+    "note": "Azeroth's loveliest capital and famously its emptiest: the bank, the auction house and the moonwell are all yours.",
+    "tags": [
+     "funny"
+    ],
+    "title": "All by Myself",
+    "youtube": "3p-rsl10t9I",
+    "zone": 1457
+   },
+   {
+    "artist": "Siouxsie and the Banshees",
+    "durationMs": 243800,
+    "label": "Undercity",
+    "note": "The Banshee Queen rules a city beneath the ashes of Lordaeron, so naturally the Banshees supply the anthem.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "Cities in Dust",
+    "youtube": "wsOHvP1XnRg",
+    "zone": 1458
+   },
+   {
+    "artist": "Queen",
+    "durationMs": 316773,
+    "label": "Mount Hyjal",
+    "note": "Night elves gave up their immortality on this mountain to stop Archimonde, and now the whole game is called Forever.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "Who Wants to Live Forever",
+    "youtube": "cHh05dFIDmk",
+    "zone": 2482
+   },
+   {
+    "artist": "Electric Light Orchestra",
+    "durationMs": 303820,
+    "label": "Zephras Isle",
+    "note": "A Skyborne hero's very first needle drop: an island floating above the clouds gets the sunniest ode to the sky ever recorded.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "Mr. Blue Sky",
+    "youtube": "aQUlA8Hcv4s",
+    "zone": 2521
+   },
+   {
+    "artist": "Leon Bridges",
+    "durationMs": 238559,
+    "label": "Riverglades",
+    "note": "A brand-new land of rivers and reeds, welcomed with a hushed, gospel-quiet hymn about being baptised in the water.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "River",
+    "youtube": "0Hegd4xNfRo",
+    "zone": 2548
+   },
+   {
+    "artist": "Coldplay",
+    "durationMs": 241445,
+    "label": "Shen'dralas",
+    "note": "Highborne exiles still dressed for an empire that fell ten thousand years ago, scored with a deposed king's lament.",
+    "tags": [
+     "fitting"
+    ],
+    "title": "Viva la Vida",
+    "youtube": "dvgZkm1xWPE",
+    "zone": 2652
+   }
+  ],
+  "format": "needledropper-pack",
+  "id": "azeroth-mixtape",
+  "name": "Azeroth Mixtape",
+  "revision": 0,
+  "tags": [
+   "default",
+   "fitting",
+   "funny"
+  ],
+  "version": 1
+ },
+ "writer": "tests/v12_model_harness.py ref_encode"
+}

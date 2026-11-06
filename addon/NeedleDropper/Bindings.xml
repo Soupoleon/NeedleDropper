@@ -1,0 +1,16 @@
+<Bindings>
+	<!-- NeedleDropper key bindings (DESIGN-v1.2 §4.8). The client loads Bindings.xml by itself; it is not
+	     listed in the TOC. None is bound by default. BINDING_NAME_* strings come from Locale.lua, and the
+	     Keybindings panel shows the category through _G[category] or the text itself
+	     (Blizzard_SettingsDefinitions_Frame/Keybindings.lua L220-L226). The functions are defined in
+	     UI\Window.lua. -->
+	<Binding name="NEEDLEDROPPER_TOGGLE" category="NeedleDropper">
+		NeedleDropper_ToggleWindow()
+	</Binding>
+	<Binding name="NEEDLEDROPPER_ADD_HERE" category="NeedleDropper">
+		NeedleDropper_AddDropHere()
+	</Binding>
+	<Binding name="NEEDLEDROPPER_STOP" category="NeedleDropper">
+		NeedleDropper_StopDrop()
+	</Binding>
+</Bindings>

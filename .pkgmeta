@@ -1,0 +1,34 @@
+# BigWigs packager (https://github.com/BigWigsMods/packager) metadata: builds the
+# addon zip for CurseForge / Wago / WoWInterface.
+#
+# This repository holds more than the addon. The packager copies the checkout into
+# .release/NeedleDropper/ (minus everything ignored below; files and folders whose
+# names start with a dot are always ignored), then move-folders lifts
+# addon/NeedleDropper/ up to the package root and removes the emptied addon/ folder.
+# Result: a zip with one NeedleDropper/ folder holding the addon, the MIT LICENSE
+# and CHANGELOG.md (both kept on purpose). There is no NeedleDropper_Local folder in
+# the zip: the companion creates it on demand, and an addon manager would otherwise
+# wipe the player's own audio files on every update.
+#
+# The companion app (NeedleDropper.exe) is built separately by tools/build_release.ps1.
+
+package-as: NeedleDropper
+
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
+move-folders:
+  NeedleDropper/addon/NeedleDropper: NeedleDropper
+
+ignore:
+  - addon/NeedleDropper_Local
+  - assets
+  - build
+  - companion
+  - dist
+  - docs
+  - packs
+  - tests
+  - tools
+  - README.md

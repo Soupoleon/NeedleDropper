@@ -1,0 +1,53 @@
+{
+ "about": "The pack of DESIGN-v1.2 section 5.2.",
+ "code": "!NeedleDropper:1!eNplUU1TwjAU/CudXLwUh/KpvTGgyEAPqBwcx3HS9hWiSV4nSWEqw3/3haL4cUv2bXb3ZfeMV26DhsWMhSwHmxlROoGagAfUaxsUaAJVB1w66xkGS8vi5z3jBvhswuKrYUhnJ6yjJ4/okFiSpyDpOkWZ240wQJit0g/U8Ad1fO3lWFFpXbMXAoSTnjQqjMg4MWqsXJV6aDnC16cMMxndEN6IRb3O9SHcnxMscBfcIzc+a2W4XyUhh26/0263KUWJThQ1EU+n2Bmevce9arEabJLxWzIb9pNo1HHz1XLMznlmF1IGc4AyGKMSev0vQS4sTyXkjBQr+DEd/MqX+K0LcdS0Do3aCZ1fqrJLsNBTruD2OGxEvtzvUMEPx373QF9FzSjuNTVATs5UTQmmVdI+XoySMFW3msZCpkna+9fB5IQY2Ap7rLr3XQTJbsE0aHT4BEkwrxw=!",
+ "name": "design-example",
+ "pack": {
+  "author": "",
+  "description": "Songs for my alts",
+  "drops": [
+   {
+    "areaID": 87,
+    "artist": "Toto",
+    "label": "Goldshire",
+    "subzone": "Goldshire",
+    "tags": [
+     "funny"
+    ],
+    "title": "Africa",
+    "youtube": "QAo_Ycocl1E",
+    "zone": 1429
+   },
+   {
+    "artist": "Low Roar",
+    "durationMs": 352000,
+    "spotify": "spotify:track:4uLU6hMCjMI75M1A2tKUQC",
+    "title": "I'll Keep Coming",
+    "zone": 1429
+   },
+   {
+    "disabled": true,
+    "zone": 1426
+   },
+   {
+    "artist": "Me",
+    "file": "stormwind.mp3",
+    "inGameFile": true,
+    "title": "Home",
+    "zone": 1453
+   }
+  ],
+  "format": "needledropper-pack",
+  "id": "my-drops",
+  "name": "My Drops",
+  "revision": 4,
+  "tags": [],
+  "version": 1
+ },
+ "variants": {
+  "discord": "here's my soundtrack, enjoy :)\n```\n!NeedleDropper:1!eNplUU1TwjAU/CudXLwUh/KpvTGgyEAPqBwcx3HS9hWiSV4nSWEqw3/3haL4cUv2bXb3ZfeMV26DhsWMhSwHmxlROoGagAfUaxsUaAJVB1w66xkGS8vi5z3jBvhswuKrYUhnJ6yjJ4/okFiSpyDpOkWZ240wQJit0g/U8Ad1fO3lWFFpXbMXAoSTnjQqjMg4MWqsXJV6aDnC16cMMxndEN6IRb3O9SHcnxMscBfcIzc+a2W4XyUhh26/0263KUWJThQ1EU+n2Bmevce9arEabJLxWzIb9pNo1HHz1XLMznlmF1IGc4AyGKMSev0vQS4sTyXkjBQr+DEd/MqX+K0LcdS0Do3aCZ1fqrJLsNBTruD2OGxEvtzvUMEPx373QF9FzSjuNTVATs5UTQmmVdI+XoySMFW3msZCpkna+9fB5IQY2Ap7rLr3XQTJbsE0aHT4BEkwrxw=!\n```\nping me if it breaks",
+  "urlsafe-unpadded": "!NeedleDropper:1!eNplUU1TwjAU_CudXLwUh_KpvTGgyEAPqBwcx3HS9hWiSV4nSWEqw3_3haL4cUv2bXb3ZfeMV26DhsWMhSwHmxlROoGagAfUaxsUaAJVB1w66xkGS8vi5z3jBvhswuKrYUhnJ6yjJ4_okFiSpyDpOkWZ240wQJit0g_U8Ad1fO3lWFFpXbMXAoSTnjQqjMg4MWqsXJV6aDnC16cMMxndEN6IRb3O9SHcnxMscBfcIzc-a2W4XyUhh26_0263KUWJThQ1EU-n2Bmevce9arEabJLxWzIb9pNo1HHz1XLMznlmF1IGc4AyGKMSev0vQS4sTyXkjBQr-DEd_MqX-K0LcdS0Do3aCZ1fqrJLsNBTruD2OGxEvtzvUMEPx373QF9FzSjuNTVATs5UTQmmVdI-XoySMFW3msZCpkna-9fB5IQY2Ap7rLr3XQTJbsE0aHT4BEkwrxw!",
+  "wrapped-76": "!NeedleDropper:1!eNplUU1TwjAU/CudXLwUh/KpvTGgyEAPqBwcx3HS9hWiSV4nSWEqw3/3haL4cUv2bXb3ZfeMV26D\nhsWMhSwHmxlROoGagAfUaxsUaAJVB1w66xkGS8vi5z3jBvhswuKrYUhnJ6yjJ4/okFiSpyDpOkWZ\n240wQJit0g/U8Ad1fO3lWFFpXbMXAoSTnjQqjMg4MWqsXJV6aDnC16cMMxndEN6IRb3O9SHcnxMs\ncBfcIzc+a2W4XyUhh26/0263KUWJThQ1EU+n2Bmevce9arEabJLxWzIb9pNo1HHz1XLMznlmF1IG\nc4AyGKMSev0vQS4sTyXkjBQr+DEd/MqX+K0LcdS0Do3aCZ1fqrJLsNBTruD2OGxEvtzvUMEPx373\nQF9FzSjuNTVATs5UTQmmVdI+XoySMFW3msZCpkna+9fB5IQY2Ap7rLr3XQTJbsE0aHT4BEkwrxw=!"
+ },
+ "writer": "tests/v12_model_harness.py ref_encode"
+}

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- YouTube embeds need the page origin as referrer (error 153 otherwise). -->
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="color-scheme" content="dark">
+  <meta name="nd-token" content="{{ND_TOKEN}}">
+  <title>NeedleDropper</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/player.css">
+</head>
+<body class="idle">
+  <div class="vignette" aria-hidden="true"></div>
+
+  <main id="stage">
+    <button type="button" id="unlock" hidden>
+      <span class="unlock-icon" aria-hidden="true">&#9835;</span>
+      <span class="unlock-text">
+        <span class="unlock-title">Click to enable sound</span>
+        <span class="unlock-sub">Browsers play audio only after one click in the page.</span>
+      </span>
+    </button>
+
+    <div id="yt-wrap" role="region" aria-label="YouTube player"><div id="yt"></div></div>
+
+    <section id="card" aria-live="polite" aria-atomic="true">
+      <div id="art-wrap" hidden><img id="art" alt="" referrerpolicy="no-referrer"></div>
+      <h1 id="label"></h1>
+      <div id="rule" aria-hidden="true"></div>
+      <p id="song"><span id="artist"></span><span id="dot" aria-hidden="true">&nbsp;&middot;&nbsp;</span><span id="title"></span></p>
+      <p id="attribution" hidden><a id="link" target="_blank" rel="noopener noreferrer"></a><span id="attr-text"></span></p>
+      <p id="hint"></p>
+    </section>
+
+    <section id="idle" aria-live="polite">
+      <p class="brand">NeedleDropper</p>
+      <p class="idle-title" id="idle-title" hidden>Drop finished</p>
+      <p class="sub" id="idle-last" hidden></p>
+      <p class="sub" id="idle-line">Silence, until you arrive somewhere new.</p>
+      <p class="sub small" id="idle-help">This window plays YouTube drops. You can close it any time; it opens again for the next one.</p>
+    </section>
+  </main>
+
+  <footer id="status" role="status">
+    <span id="conn-dot" class="off" aria-hidden="true"></span>
+    <span id="conn-text">Connecting to the companion&hellip;</span>
+  </footer>
+
+  <audio id="audio" preload="auto"></audio>
+  <script src="/static/player.js"></script>
+</body>
+</html>

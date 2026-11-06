@@ -1,0 +1,64 @@
+{
+ "about": "Accents, CJK, Arabic, emoji, quotes, backslashes and raw | sequences.",
+ "code": "!NeedleDropper:1!eNptk89PE0EUx/+VyVy4lIRairhHqEQSEgwFNbjGTHdn2wm7M+vMLBVoEzWC/Eg4kXCp9kSIAhpo1IDxwsb/oXs1UDzyJ/imQLoY57B5+97b9/nOe2+XMIl0RUhs4VkR76HTvV8/T3+gyb4RySjHGexS5UgWaiY45EwwTpHg1OZdS1cF+v1qC9n4RSQ0VTbOINsuEWdO+URVwGEjwl1Uczw4A3Ac4YtIIkdA3ZpEczTUSJKqAUkRKmw9XcJEaqY00IqsDLlTcUtB3Ccl6oNzTMj4k0Zu332/usCNRA5oCMQrZSZtHn+IWxK8mmnfuB+IMIwPQuH7BLyLIB5b2cE79+oZQ6JkvICt4eFMj3p2vHzRbP05OIJ0FZWuvsAXG58vNjfOjjfO3xx1tpfPT7ZTjGIUBNRAF0Sko5JxzYzMZL0ZL8iPqv9gr1FTJAiUpszcgnGlCXeo0ZMb6t23wCiaNu0KoOMmUYVCM28BQteWpSV03MqTamF+8eVjz83nikWppmaHwyeTKZWFCFUIcHtyckO35CSvk/X2YbLaNlfXpGzGgT2mNeNl/KxXKFlpt5Jl1D5O3ibr8LKL2rtgvktWk7VU9Wz2VvXa9DjXVHrEobY97ggO21EMqe8/H2OSdh/WQE0jY6RUXza3dtBIJDnqWpfNza8pRn7wFiNec5muoIeMeKmVGSVe/BHFDe52h9Qb6j+BG+QEQY+g65QjKRRN03J1aIMnZEAMjVPq+tQsbkhlfwhDMHN0IRJxZla8H/4J029Ogu6GNnj8xYm/uQA9/Y467w/PTvZvbiTpPFPdv+xur/mOEQjBzvZOp7FvZjBP5VVWtv4Xou5p4A==!",
+ "name": "unicode",
+ "pack": {
+  "author": "Zoë «Ž» O'Brien",
+  "description": "Line one\nLine two — \"quotes\", \\backslashes\\ and |cffff0000colour codes|r kept raw",
+  "drops": [
+   {
+    "artist": "Sigur Rós",
+    "label": "Forêt d'Elwynn",
+    "note": "Ægir\nÞór",
+    "title": "Hoppípolla",
+    "zone": 1429
+   },
+   {
+    "areaID": 88,
+    "artist": "久石譲",
+    "subzone": "狮王之傲旅店",
+    "title": "Summer",
+    "youtube": "UBU1fUfm5Cs",
+    "zone": 1429
+   },
+   {
+    "artist": "Rammstein",
+    "instanceID": 36,
+    "label": "Die Todesminen",
+    "spotify": "spotify:track:5awDvzxWfd53SSrsRZ8pXO",
+    "title": "Du hast",
+    "zone": 1436
+   },
+   {
+    "artist": "فيروز",
+    "tags": [
+     "fitting"
+    ],
+    "title": "نسم علينا الهوى",
+    "zone": 1411
+   },
+   {
+    "artist": "|TInterface\\Icons\\Spell_Fire_Fire:0|t Fire",
+    "title": "🔥 Burn 🔥 🎵",
+    "zone": 1454
+   },
+   {
+    "artist": "Édith Piaf",
+    "label": "Café Ünder",
+    "subzone": "Café Ünder",
+    "title": "La Vie en rose",
+    "zone": 1453
+   }
+  ],
+  "format": "needledropper-pack",
+  "id": "unicode-test",
+  "name": "Ünïcödé · 東京 🎵",
+  "revision": 7,
+  "tags": [
+   "café",
+   "日本"
+  ],
+  "version": 1
+ },
+ "writer": "tests/v12_model_harness.py ref_encode"
+}

@@ -1,0 +1,87 @@
+{
+ "about": "Every pack key, the largest numbers and turned-off places.",
+ "code": "!NeedleDropper:1!eNp1VF1v2jAU/SuWX7ZJFAgkwPLG2tKiNdMqUU3TNE0mvhCvjh3ZDm2G+O+7DoQA657s3I9z7odPtpSVLtOGxnQB1oGhHcrBpkYUTmiF5qmUxGVAnqGyhJGCpc+EG12QlCmSsQ10fQoaLI1/bCkzwOY3NJ6MO3h3wjqP4UNKwzxkgnGDMOr3+x0q2RIk+u+05DYTBjBOaQdogg2Yilit1mQlQHL02EI7sarQebjFzmA1cVg+PI2y5Pp3Mh9HSTAduM9Pj9c+wWEFni+IIk9ny+UfreCC0LG1L52uSqUq+hMNwkkftEDnRssyx48Jple6dOXSex6n+tf3VKcyuMWYPWYQDj7uOtu26U8VbTt8wM7fWfLVCA5krhQ9reYNZ1PDF5bD/ynmCo8OFXgwlYKf+3DUki5wbTfAeC4U2BPQbwJXXjrcZo27h9yvLYj6p3tD61mlCShwmZDknpmlNheYRDi7h2wrHo7PKk68byXqFOu0yV+E4uS9FBv40M2LYd3NHTY9q2OcKaHluNf1MJqd9FuWaOhZuLBsKYE3ecepjd7ytl3NmFlrDlCQRKh/x32ZeDrucHLeHnu9eOrByTMcBOE4nAxH4bjtac7tkbD17/AZrnA6zIMqAI70KLECzJUXIGZkOIuCrT1E5lxh414PXlleSOimOu9ZXSpey8P2aildNSoSvFHX0aT8I4vpbS252cFoYCNs/QsIBsMwGp0IRTgn1NovspEMZh5id38B8dZk1g==!",
+ "name": "every-field",
+ "pack": {
+  "author": "Tester",
+  "description": "All the keys a pack drop can have.",
+  "drops": [
+   {
+    "areaID": 87,
+    "artist": "A",
+    "durationMs": 245000,
+    "label": "Goldshire",
+    "note": "every song field",
+    "spotify": "spotify:track:4uLU6hMCjMI75M1A2tKUQC",
+    "startMs": 15500,
+    "subzone": "Goldshire",
+    "tags": [
+     "funny"
+    ],
+    "title": "T",
+    "volume": 80,
+    "youtube": "QAo_Ycocl1E",
+    "zone": 1429
+   },
+   {
+    "artist": "By",
+    "label": "Lion's Pride Inn",
+    "subzone": "Lion's Pride Inn",
+    "title": "Name",
+    "zone": 1429
+   },
+   {
+    "artist": "Inst",
+    "instanceID": 36,
+    "label": "The Deadmines",
+    "title": "Without a zone"
+   },
+   {
+    "areaID": 150,
+    "artist": "Area",
+    "subzone": "Menethil Harbor",
+    "title": "With its zone",
+    "zone": 1437
+   },
+   {
+    "artist": "Me",
+    "file": "stormwind (live).mp3",
+    "inGameFile": true,
+    "title": "Home",
+    "volume": 0,
+    "zone": 1453
+   },
+   {
+    "disabled": true,
+    "zone": 1426
+   },
+   {
+    "disabled": true,
+    "subzone": "Fargodeep Mine",
+    "zone": 1429
+   },
+   {
+    "disabled": true,
+    "instanceID": 48
+   },
+   {
+    "artist": "Max",
+    "durationMs": 1,
+    "startMs": 2147483647,
+    "title": "Ids",
+    "zone": 2147483647
+   }
+  ],
+  "format": "needledropper-pack",
+  "homepage": "https://example.com/soundtracks/every-field",
+  "id": "every-field",
+  "name": "Every Field",
+  "revision": 123456,
+  "tags": [
+   "fitting",
+   "funny"
+  ],
+  "version": 1
+ },
+ "writer": "tests/v12_model_harness.py ref_encode"
+}

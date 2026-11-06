@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="referrer" content="no-referrer">
+  <meta name="nd-token" content="{{ND_TOKEN}}">
+  <title>Connect NeedleDropper</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/connect.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to the four steps</a>
+
+  <header class="masthead">
+    <div class="wrap">
+      <p class="wordmark" aria-hidden="true">NeedleDropper</p>
+      <span class="rule" aria-hidden="true"></span>
+      <h1 class="title"><span class="sr-only">NeedleDropper: </span>Connect</h1>
+      <p class="lede">Four quick checks, once. Afterwards NeedleDropper waits in the tray and everything else
+        happens in game: type <kbd>/needle</kbd>.</p>
+      <p class="app-status" id="app-status" aria-live="off"><span class="dot" aria-hidden="true"></span><span id="app-status-text">Connecting to NeedleDropper&hellip;</span></p>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="banner" id="banner" role="alert" hidden>
+      <p id="banner-text"></p>
+      <button type="button" class="btn small" id="banner-logs" hidden>Open log folder</button>
+      <button type="button" class="btn small" id="banner-reload" hidden>Reload this page</button>
+    </div>
+  </div>
+
+  <main id="main" class="wrap" tabindex="-1">
+    <ol class="cards">
+
+      <!-- 1. World of Warcraft -->
+      <li class="card" id="card-wow">
+        <section aria-labelledby="wow-h">
+          <div class="card-head">
+            <span class="step" aria-hidden="true">1</span>
+            <h2 id="wow-h">World of Warcraft</h2>
+            <p class="status" id="wow-status"><span class="glyph" aria-hidden="true"></span><span class="status-text">Checking&hellip;</span></p>
+          </div>
+          <div class="card-body">
+            <dl class="facts">
+              <div class="fact">
+                <dt>Game folder</dt>
+                <dd><span id="wow-folder" class="path">&hellip;</span> <span class="hint" id="wow-source"></span></dd>
+              </div>
+              <div class="fact">
+                <dt>Addon</dt>
+                <dd id="addon-line">&hellip;</dd>
+              </div>
+            </dl>
+            <p class="note" id="addon-note" hidden></p>
+            <div class="actions" id="addon-actions" hidden>
+              <a class="btn primary" id="addon-get" href="https://www.curseforge.com/wow/search?search=NeedleDropper" target="_blank" rel="noopener noreferrer">Get NeedleDropper on CurseForge<span class="sr-only"> (opens in a new tab)</span></a>
+              <button type="button" class="btn" id="addon-install" aria-describedby="addon-install-hint">Install addon</button>
+            </div>
+            <p class="hint" id="addon-install-hint" hidden>Copies the addon that comes with this app into your AddOns folder. Restart World of Warcraft afterwards.</p>
+            <div class="callout warn" id="addon-confirm" role="group" aria-labelledby="addon-confirm-text" hidden>
+              <p id="addon-confirm-text">World of Warcraft is running. The game only finds new addon files when it starts.</p>
+              <p class="actions">
+                <button type="button" class="btn" id="addon-force">Install anyway, I'll restart the game</button>
+                <button type="button" class="btn ghost" id="addon-cancel">Cancel</button>
+              </p>
+            </div>
+            <details class="more" id="wow-change">
+              <summary>Use a different folder</summary>
+              <form class="field" id="wow-form" novalidate>
+                <label for="wow-root">World of Warcraft folder</label>
+                <div class="field-row">
+                  <input type="text" id="wow-root" class="mono" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="1024" aria-describedby="wow-hint wow-error">
+                  <button type="submit" class="btn" id="wow-save">Use this folder</button>
+                  <button type="button" class="btn ghost" id="wow-detect">Find it again</button>
+                </div>
+                <p class="hint" id="wow-hint">The folder that contains <code>_forever_</code>, usually <code>C:\Program Files (x86)\World of Warcraft</code>.</p>
+                <p class="field-error" id="wow-error" role="alert"></p>
+              </form>
+            </details>
+          </div>
+        </section>
+      </li>
+
+      <!-- 2. Spotify -->
+      <li class="card" id="card-spotify">
+        <section aria-labelledby="sp-h">
+          <div class="card-head">
+            <span class="step" aria-hidden="true">2</span>
+            <h2 id="sp-h">Spotify <span class="tag">optional &middot; Premium</span></h2>
+            <p class="status" id="sp-status"><span class="glyph" aria-hidden="true"></span><span class="status-text">Checking&hellip;</span></p>
+          </div>
+          <div class="card-body">
+            <p class="note">Plays the real recording in your Spotify app. Spotify lets every player connect through a free developer app of their own: about two minutes, once.</p>
+
+            <ol class="steps" id="sp-steps">
+              <li>Open the <a id="sp-dashboard" href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener noreferrer">Spotify developer dashboard<span class="sr-only"> (opens in a new tab)</span></a>, sign in with the account you listen with and choose <strong>Create app</strong>. Any name will do; tick <strong>Web API</strong>.</li>
+              <li>Under <strong>Redirect URIs</strong> add exactly this address, then <strong>Save</strong>:
+                <span class="copy-row">
+                  <code id="sp-redirect">http://127.0.0.1:8321/callback</code>
+                  <button type="button" class="btn small" id="sp-copy" aria-describedby="sp-redirect">Copy</button>
+                </span>
+              </li>
+              <li>Open your app's <strong>Settings</strong>, copy the <strong>Client ID</strong>, paste it here and sign in:
+                <form class="field-row" id="sp-form" novalidate>
+                  <label class="sr-only" for="sp-client">Spotify Client ID</label>
+                  <input type="text" id="sp-client" class="mono" placeholder="Client ID" spellcheck="false" autocomplete="off" autocapitalize="off" maxlength="64" aria-describedby="sp-error">
+                  <button type="submit" class="btn primary" id="sp-signin">Sign in</button>
+                </form>
+                <p class="field-error" id="sp-error" role="alert"></p>
+              </li>
+            </ol>
+
+            <div class="callout" id="sp-waiting" hidden>
+              <p><span class="spinner" aria-hidden="true"></span><span>Approve access in the Spotify tab, then come back here.</span></p>
+              <p><a class="btn small" id="sp-auth-link" href="#" target="_blank" rel="noopener noreferrer">Open Spotify's sign-in page again<span class="sr-only"> (opens in a new tab)</span></a></p>
+            </div>
+            <p class="callout warn" id="sp-message" hidden></p>
+
+            <div id="sp-connected" hidden>
+              <dl class="facts">
+                <div class="fact"><dt>Account</dt><dd id="sp-account">&hellip;</dd></div>
+                <div class="fact"><dt>Premium</dt><dd id="sp-premium">&hellip;</dd></div>
+              </dl>
+              <div class="field">
+                <label for="sp-device">Play on</label>
+                <div class="field-row">
+                  <select id="sp-device" aria-describedby="sp-device-hint"><option value="">This PC (automatic)</option></select>
+                  <button type="button" class="btn small" id="sp-refresh">Refresh</button>
+                </div>
+                <p class="hint" id="sp-device-hint">Open Spotify on the device you want to hear it on, then Refresh.</p>
+              </div>
+              <p class="actions"><button type="button" class="btn ghost" id="sp-signout">Sign out of Spotify</button></p>
+            </div>
+          </div>
+        </section>
+      </li>
+
+      <!-- 3. YouTube -->
+      <li class="card" id="card-youtube">
+        <section aria-labelledby="yt-h">
+          <div class="card-head">
+            <span class="step" aria-hidden="true">3</span>
+            <h2 id="yt-h">YouTube</h2>
+            <p class="status" id="yt-status"><span class="glyph" aria-hidden="true"></span><span class="status-text">Checking&hellip;</span></p>
+          </div>
+          <div class="card-body">
+            <p class="note">Nothing to set up. When a song plays from YouTube, a small player window opens and closes again when the song is over: YouTube's rules say the video must stay visible while it plays. The first time, click once in that window to allow sound.</p>
+            <label class="switch">
+              <input type="checkbox" role="switch" id="yt-enabled">
+              <span class="track" aria-hidden="true"></span>
+              <span>Play songs from YouTube</span>
+            </label>
+          </div>
+        </section>
+      </li>
+
+      <!-- 4. Check the link -->
+      <li class="card" id="card-link">
+        <section aria-labelledby="link-h">
+          <div class="card-head">
+            <span class="step" aria-hidden="true">4</span>
+            <h2 id="link-h">Check the link</h2>
+            <p class="status" id="link-status"><span class="glyph" aria-hidden="true"></span><span class="status-text">Checking&hellip;</span></p>
+          </div>
+          <div class="card-body">
+            <p class="command">In WoW type <kbd>/needle test</kbd></p>
+            <div class="tick" id="link-tick">
+              <span class="tick-mark" aria-hidden="true"></span>
+              <p id="link-line" aria-live="polite">Listening for World of Warcraft&hellip;</p>
+            </div>
+            <p class="hint" id="link-detail"></p>
+            <details class="more" id="link-tips">
+              <summary>Nothing happens?</summary>
+              <ul class="tips">
+                <li>Play in <strong>Windowed</strong> or <strong>Windowed (Fullscreen)</strong> mode: NeedleDropper reads a tiny strip in the top-left corner of the game window.</li>
+                <li>Check that NeedleDropper is ticked in the AddOns list on the character screen.</li>
+                <li>Installed the addon while the game was running? Restart World of Warcraft.</li>
+                <li>Still nothing? <button type="button" class="link-btn" id="tips-logs">Open the log folder</button> and look at <code>needledropper.log</code>.</li>
+              </ul>
+            </details>
+          </div>
+        </section>
+      </li>
+    </ol>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-inner">
+      <label class="check" id="autostart-row">
+        <input type="checkbox" id="autostart" checked aria-describedby="autostart-hint">
+        <span>Start with Windows</span>
+      </label>
+      <span class="hint" id="autostart-hint">NeedleDropper starts quietly in the tray when you sign in to Windows.</span>
+      <button type="button" class="btn primary wide" id="done">Done</button>
+    </div>
+    <div class="wrap">
+      <p class="done-note" id="done-note" role="status" hidden>All set. NeedleDropper keeps running in the tray, next to the clock. You can close this page and open it again from the tray icon.</p>
+      <p class="meta"><button type="button" class="link-btn" id="open-logs">Open log folder</button> <span aria-hidden="true">&middot;</span> NeedleDropper <span id="version"></span> <span aria-hidden="true">&middot;</span> MIT License</p>
+    </div>
+  </footer>
+
+  <div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <script src="/static/connect.js"></script>
+</body>
+</html>

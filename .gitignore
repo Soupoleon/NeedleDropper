@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.venv/
+venv/
+
+# Release builds (tools/build_release.ps1, PyInstaller work and output folders).
+# Note: companion/NeedleDropper.spec is a source file - never ignore *.spec.
+/build/
+/dist/
+companion/build/
+companion/dist/
+
+# BigWigs packager output
+/.release/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.bak
+*.orig
+*.tmp
+.DS_Store
+Thumbs.db
+desktop.ini

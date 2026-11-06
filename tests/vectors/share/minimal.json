@@ -1,0 +1,23 @@
+{
+ "about": "The smallest pack.",
+ "code": "!NeedleDropper:1!eNo9jjEOwjAMRa9SeWEpEiAWujIhYGFFDFZrikUSR04oElXvjgOI0e/Z338EfOSbKDQANXSUWuWYWcIPqMQEzXkE1MwpGz3IszoJqtnM2ZGh3cy5ak8Uq614Dr2plwQzy/VqM11quIp6LMeBqHNUUiPpPGJ7t13uzNgde3Q2BvQl9PgHSgOnT6WF/cS+FLLQgfRLl9Mb5x9AMA==!",
+ "name": "minimal",
+ "pack": {
+  "author": "",
+  "description": "",
+  "drops": [
+   {
+    "artist": "Low Roar",
+    "title": "I'll Keep Coming",
+    "zone": 1429
+   }
+  ],
+  "format": "needledropper-pack",
+  "id": "minimal",
+  "name": "Minimal",
+  "revision": 0,
+  "tags": [],
+  "version": 1
+ },
+ "writer": "tests/v12_model_harness.py ref_encode"
+}

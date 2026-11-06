@@ -1,0 +1,590 @@
+{
+  "format": "needledropper-pack",
+  "version": 1,
+  "name": "Azeroth Unbound",
+  "author": "NeedleDropper",
+  "description": "A Death Stranding-style needle-drop soundtrack for World of Warcraft: Forever's open world. One song the first time you arrive in every zone and capital, plus a handful of iconic landmarks: melancholy, spacious post-rock, indie folk and ambient electronica for cresting a hill and seeing somewhere new. Metadata only; no audio is included.",
+  "drops": [
+    {
+      "zone": "Durotar",
+      "title": "The Wolves (Act I and II)",
+      "artist": "Bon Iver",
+      "youtube": "A938Em4iAeM",
+      "startMs": 0,
+      "durationMs": 322000,
+      "note": "Red rock, hot wind and a people newly freed: a hushed, slowly swelling lament for wolf riders who are only now learning what home means."
+    },
+    {
+      "zone": "Mulgore",
+      "title": "Birthplace",
+      "artist": "Novo Amor",
+      "youtube": "G7ZcSnF7lhY",
+      "startMs": 0,
+      "durationMs": 190000,
+      "note": "The tauren's cradle of golden grass and slow rivers deserves a song literally named for where you were born."
+    },
+    {
+      "zone": "Mulgore",
+      "subzone": "Skywatcher Plateau",
+      "areaID": 17045,
+      "title": "Awake",
+      "artist": "Tycho",
+      "youtube": "dm4tkSNKfFI",
+      "startMs": 0,
+      "durationMs": 283000,
+      "note": "A new lookout high above the plains of Mulgore, named for watching the sky: warm, wide-open sunlight in song form."
+    },
+    {
+      "zone": "The Barrens",
+      "title": "Your Hand in Mine",
+      "artist": "Explosions in the Sky",
+      "youtube": "1aMQ8db4Y4c",
+      "startMs": 0,
+      "durationMs": 390000,
+      "note": "An endless savanna under a huge sky; the guitars build and recede like heat over the road to the Crossroads. Plays a 6:30 excerpt of the 8:17 track."
+    },
+    {
+      "zone": "Teldrassil",
+      "title": "Near Light",
+      "artist": "Ólafur Arnalds",
+      "youtube": "-M9PnC6uJVs",
+      "startMs": 0,
+      "durationMs": 208000,
+      "note": "Moonlight filtered through the World Tree's canopy: piano, strings and a soft electronic pulse that glow rather than shine."
+    },
+    {
+      "zone": "Darkshore",
+      "title": "Sæglópur",
+      "artist": "Sigur Rós",
+      "youtube": "IP4kUjIXOMk",
+      "startMs": 0,
+      "durationMs": 390000,
+      "note": "The title means 'lost at sea', and Darkshore is a grey, mournful coast full of shipwrecks and drowned ruins. Plays a 6:30 excerpt of the 7:38 track."
+    },
+    {
+      "zone": "Ashenvale",
+      "title": "The Light",
+      "artist": "The Album Leaf",
+      "youtube": "28O4bMduFcc",
+      "startMs": 0,
+      "durationMs": 269000,
+      "note": "Ancient twilight forest where shafts of light still break through the canopy, even as the axes of war bite at its edge."
+    },
+    {
+      "zone": "Thousand Needles",
+      "title": "Asylums for the Feeling",
+      "artist": "Silent Poets",
+      "youtube": "GKAywP6yd60",
+      "startMs": 0,
+      "durationMs": 390000,
+      "note": "A Death Stranding needle drop (with Leila Adu on vocals) for a landscape that could be from it: towering mesas, a long way down, and a lot of quiet. Plays a 6:30 excerpt of the 7:09 track."
+    },
+    {
+      "zone": "Stonetalon Mountains",
+      "title": "Esja",
+      "artist": "Hania Rani",
+      "youtube": "VgxKGtjVx8w",
+      "startMs": 0,
+      "durationMs": 261000,
+      "note": "Named for a mountain over Reykjavík; climbing piano for the high, wind-cut peaks above the logging scars."
+    },
+    {
+      "zone": "Desolace",
+      "title": "Don't Be So Serious",
+      "artist": "Low Roar",
+      "youtube": "D56XxiS_pJ0",
+      "startMs": 0,
+      "durationMs": 372000,
+      "note": "A grey, bone-strewn wasteland of kodo graveyards and warring centaur, scored by Low Roar at their most weary and tender."
+    },
+    {
+      "zone": "Feralas",
+      "title": "Mystery of Love",
+      "artist": "Sufjan Stevens",
+      "youtube": "N0CP9zpbmAQ",
+      "startMs": 0,
+      "durationMs": 248000,
+      "note": "Humid summer light, overgrown elven ruins and giant trees: a lush, aching song for a forgotten corner of the world."
+    },
+    {
+      "zone": "Dustwallow Marsh",
+      "title": "Daydreaming",
+      "artist": "Radiohead",
+      "youtube": "TkiyWhETiJw",
+      "startMs": 0,
+      "durationMs": 384000,
+      "note": "Fog over black water and a city at the edge of everything; this song drifts and loops like the marsh itself."
+    },
+    {
+      "zone": "Tanaris",
+      "title": "A Shimmer",
+      "artist": "Nils Frahm",
+      "youtube": "BAqri1XfCTg",
+      "startMs": 0,
+      "durationMs": 396000,
+      "note": "Dunes wavering in the heat haze, with the Caverns of Time somewhere beyond them: a spare upright-piano piece whose title says the rest."
+    },
+    {
+      "zone": "Tanaris",
+      "subzone": "Gadgetzan",
+      "areaID": 976,
+      "title": "Maria También",
+      "artist": "Khruangbin",
+      "youtube": "H_kvg5fV6mw",
+      "startMs": 0,
+      "durationMs": 190000,
+      "note": "A walled goblin market in the middle of the desert, scored with a sun-baked, bazaar-flavoured groove."
+    },
+    {
+      "zone": "Azshara",
+      "title": "Wait",
+      "artist": "M83",
+      "startMs": 0,
+      "durationMs": 343000,
+      "note": "An eternal autumn coast of ruined Highborne palaces; a gentle, dream-heavy song about a glamour that is already gone."
+    },
+    {
+      "zone": "Felwood",
+      "title": "The Curse",
+      "artist": "Agnes Obel",
+      "youtube": "ZKEK5mVTOEo",
+      "startMs": 0,
+      "durationMs": 353000,
+      "note": "A forest poisoned from the roots up, and a song titled for exactly that."
+    },
+    {
+      "zone": "Un'Goro Crater",
+      "title": "Emerald Rush",
+      "artist": "Jon Hopkins",
+      "youtube": "zzwvuznsEJg",
+      "startMs": 0,
+      "durationMs": 336000,
+      "note": "Primeval green, hot springs and dinosaurs: a pulsing, overgrown rush of a track for the crater floor."
+    },
+    {
+      "zone": "Un'Goro Crater",
+      "subzone": "Marshal's Refuge",
+      "areaID": 541,
+      "title": "To Build a Home",
+      "artist": "The Cinematic Orchestra",
+      "youtube": "ozqw3UZRsIU",
+      "startMs": 0,
+      "durationMs": 371000,
+      "note": "A camp clinging to a cliff in a prehistoric world: a song about the fragile shelters we make."
+    },
+    {
+      "zone": "Moonglade",
+      "title": "An Ending (Ascent)",
+      "artist": "Brian Eno",
+      "youtube": "XbL9DT4QFc8",
+      "startMs": 0,
+      "durationMs": 264000,
+      "note": "The druids' sanctuary is the one place no war reaches; Eno's slow ascent is pure stillness."
+    },
+    {
+      "zone": "Moonglade",
+      "subzone": "Nighthaven",
+      "areaID": 2361,
+      "title": "Northern Sky",
+      "artist": "Nick Drake",
+      "youtube": "BBBkFWXiL9Q",
+      "startMs": 0,
+      "durationMs": 223000,
+      "note": "The druid village by the moonlit lake, greeted with a warm, glowing love song under a northern sky."
+    },
+    {
+      "zone": "Silithus",
+      "title": "Heptapod B",
+      "artist": "Jóhann Jóhannsson",
+      "youtube": "KzaqrQuwr1k",
+      "startMs": 0,
+      "durationMs": 222000,
+      "note": "Something alien lives under these dunes; Jóhannsson's choir-and-drone piece from Arrival makes the hives feel vast and unknowable."
+    },
+    {
+      "zone": "Silithus",
+      "subzone": "Cenarion Hold",
+      "areaID": 3425,
+      "title": "Easy Way Out",
+      "artist": "Low Roar",
+      "youtube": "270KVNiFJ64",
+      "startMs": 0,
+      "durationMs": 288000,
+      "note": "A lonely druid outpost holding the line against the swarm; Low Roar's weary hope for people who refuse to leave."
+    },
+    {
+      "zone": "Winterspring",
+      "title": "Holocene",
+      "artist": "Bon Iver",
+      "youtube": "pvC5YD-IjL0",
+      "startMs": 0,
+      "durationMs": 336000,
+      "note": "Snowfields so wide they make you feel small, which is exactly what this song is about."
+    },
+    {
+      "zone": "Winterspring",
+      "subzone": "Everlook",
+      "areaID": 2255,
+      "title": "White Winter Hymnal",
+      "artist": "Fleet Foxes",
+      "youtube": "bepPFNnaviA",
+      "startMs": 0,
+      "durationMs": 147000,
+      "note": "A warm goblin town in the snowfields, greeted by a round of voices singing about winter."
+    },
+    {
+      "zone": "Orgrimmar",
+      "title": "Ludens",
+      "artist": "Bring Me The Horizon",
+      "youtube": "caYD1-uck_c",
+      "startMs": 0,
+      "durationMs": 278000,
+      "note": "Iron spikes, war drums and a city built in defiance; the loudest Death Stranding song for the loudest capital."
+    },
+    {
+      "zone": "Thunder Bluff",
+      "title": "Go Do",
+      "artist": "Jónsi",
+      "youtube": "_aUh-7CPdQI",
+      "startMs": 0,
+      "durationMs": 281000,
+      "note": "Drums, flutes and wind high on the mesas: a joyful, primal call that fits the tauren's city above the clouds."
+    },
+    {
+      "zone": "Darnassus",
+      "title": "Runaway",
+      "artist": "AURORA",
+      "youtube": "1f5dO89GtuE",
+      "startMs": 0,
+      "durationMs": 248000,
+      "note": "A temple city of moonwells and owls; an ethereal Nordic song about longing for a home far away."
+    },
+    {
+      "zone": "Mount Hyjal",
+      "title": "Outro",
+      "artist": "M83",
+      "youtube": "1cEy4UyYHI0",
+      "startMs": 0,
+      "durationMs": 247000,
+      "note": "The climb toward Nordrassil, where the world was once saved, earns the biggest swell in the pack."
+    },
+    {
+      "zone": "Shen'dralas",
+      "title": "To the Wilder",
+      "artist": "Woodkid",
+      "youtube": "JKDPPIlk_HM",
+      "startMs": 0,
+      "durationMs": 279000,
+      "note": "A brand-new land of Highborne exiles and centaur plains, scored with a Death Stranding 2 song about heading out into the unknown."
+    },
+    {
+      "zone": "Alterac Mountains",
+      "title": "Helvegen",
+      "artist": "Wardruna",
+      "youtube": "g1RJv-27i6Q",
+      "startMs": 0,
+      "durationMs": 390000,
+      "note": "Snow, pine and the bones of a traitor kingdom; a Norse lament for the road to the dead. Plays a 6:30 excerpt of the 7:11 track."
+    },
+    {
+      "zone": "Alterac Mountains",
+      "subzone": "Dalaran",
+      "areaID": 279,
+      "title": "Glass",
+      "artist": "Hania Rani",
+      "youtube": "mneDuKb3BT8",
+      "startMs": 0,
+      "durationMs": 271000,
+      "note": "The city of mages sealed under a violet dome, seen from outside like something behind glass."
+    },
+    {
+      "zone": "Arathi Highlands",
+      "title": "Welcome, Ghosts",
+      "artist": "Explosions in the Sky",
+      "youtube": "WVdyjIrTq4U",
+      "startMs": 0,
+      "durationMs": 343000,
+      "note": "Windswept highlands, standing stones and the ruins of Stromgarde: post-rock that rises like weather over open hills, with a title that greets the ghosts of the first human kingdom."
+    },
+    {
+      "zone": "Badlands",
+      "title": "Paris, Texas",
+      "artist": "Ry Cooder",
+      "youtube": "ParIMYd-QV0",
+      "startMs": 0,
+      "durationMs": 172000,
+      "note": "Sun-bleached canyons and dragon bones; Ry Cooder's slide guitar is the sound of walking alone through a dry country."
+    },
+    {
+      "zone": "Blasted Lands",
+      "title": "Bridge of Death",
+      "artist": "Hildur Guðnadóttir",
+      "youtube": "aM_HhU_CV44",
+      "startMs": 0,
+      "durationMs": 284000,
+      "note": "A red wasteland poisoned by the magic that tore open the Dark Portal; Guðnadóttir's Chernobyl score is the sound of an invisible catastrophe still falling from the sky."
+    },
+    {
+      "zone": "Tirisfal Glades",
+      "title": "Bones",
+      "artist": "Low Roar",
+      "youtube": "o9wSw7KHHkU",
+      "startMs": 0,
+      "durationMs": 170000,
+      "note": "You wake up dead in a gloomy glade; Low Roar's Death Stranding song about what remains is the Forsaken's first breath."
+    },
+    {
+      "zone": "Silverpine Forest",
+      "title": "In a Week",
+      "artist": "Hozier",
+      "youtube": "yDZnKWdvTUo",
+      "startMs": 0,
+      "durationMs": 318000,
+      "note": "A dark folk duet about lying still in the woods long after it is over, for a pine forest full of the dead and the hunted."
+    },
+    {
+      "zone": "Western Plaguelands",
+      "title": "The Last of Us",
+      "artist": "Gustavo Santaolalla",
+      "youtube": "Y2UOwvUQ8L0",
+      "startMs": 0,
+      "durationMs": 184000,
+      "note": "Abandoned farmsteads and overgrown fields after the plague: a lonely guitar theme from the defining post-apocalyptic game."
+    },
+    {
+      "zone": "Eastern Plaguelands",
+      "title": "On the Nature of Daylight",
+      "artist": "Max Richter",
+      "youtube": "tUMc_-Bcunk",
+      "startMs": 0,
+      "durationMs": 371000,
+      "note": "The heart of the blight, where Stratholme burned; Richter's strings are grief with nowhere left to go."
+    },
+    {
+      "zone": "Eastern Plaguelands",
+      "subzone": "Light's Hope Chapel",
+      "areaID": 2268,
+      "title": "Hoppípolla",
+      "artist": "Sigur Rós",
+      "youtube": "559un6zgVq4",
+      "startMs": 0,
+      "durationMs": 268000,
+      "note": "The last bastion of light in the plague, and the moment of pure hope that the blight has not taken everything."
+    },
+    {
+      "zone": "Hillsbrad Foothills",
+      "title": "Passing Afternoon",
+      "artist": "Iron & Wine",
+      "youtube": "7JzLO2g9cZM",
+      "startMs": 0,
+      "durationMs": 241000,
+      "note": "Orchards, farmland and a quiet war between two villages; a gentle song with something sad underneath."
+    },
+    {
+      "zone": "Hillsbrad Foothills",
+      "subzone": "Southshore",
+      "areaID": 271,
+      "title": "An Ocean and a Rock",
+      "artist": "Lisa Hannigan",
+      "youtube": "D56S2UfcNrA",
+      "startMs": 0,
+      "durationMs": 261000,
+      "note": "A small seaside town clinging to the coast, with a small, tender song about the sea."
+    },
+    {
+      "zone": "The Hinterlands",
+      "title": "Blue Ridge Mountains",
+      "artist": "Fleet Foxes",
+      "youtube": "d370CKlg-wk",
+      "startMs": 0,
+      "durationMs": 265000,
+      "note": "Wild forested hills, gryphons overhead and a long way from anywhere: Appalachian harmonies for the Hinterlands."
+    },
+    {
+      "zone": "Dun Morogh",
+      "title": "King and Cross",
+      "artist": "Ásgeir",
+      "youtube": "eX5oljTS2_k",
+      "startMs": 0,
+      "durationMs": 212000,
+      "note": "Icelandic snow-pop for the first snowfall of a dwarf or gnome's life."
+    },
+    {
+      "zone": "Searing Gorge",
+      "title": "Open Eye Signal",
+      "artist": "Jon Hopkins",
+      "youtube": "2rqH8gT3R4A",
+      "startMs": 0,
+      "durationMs": 390000,
+      "note": "Molten rivers and Dark Iron slave pits; a relentless, machine-like pulse for a land that never stops working. Plays a 6:30 excerpt of the 7:48 track."
+    },
+    {
+      "zone": "Burning Steppes",
+      "title": "Quiet",
+      "artist": "This Will Destroy You",
+      "youtube": "mWRa3-3UM0o",
+      "startMs": 0,
+      "durationMs": 293000,
+      "note": "Ash falling without a sound on the scorched plains under Blackrock: the song keeps to its title for as long as it can, then the guitars catch fire."
+    },
+    {
+      "zone": "Elwynn Forest",
+      "title": "I'll Keep Coming",
+      "artist": "Low Roar",
+      "youtube": "mlM66FzjpgM",
+      "startMs": 0,
+      "durationMs": 352000,
+      "note": "The first needle drop: the most iconic Death Stranding song for the quiet, golden forest where so many journeys begin."
+    },
+    {
+      "zone": "Deadwind Pass",
+      "title": "Flight from the City",
+      "artist": "Jóhann Jóhannsson",
+      "youtube": "aXlx-YnvgKU",
+      "startMs": 0,
+      "durationMs": 391000,
+      "note": "Dead trees, endless wind and Karazhan looming; a slow piano piece that feels like walking away from something you cannot unsee."
+    },
+    {
+      "zone": "Duskwood",
+      "title": "Hunted by a Freak",
+      "artist": "Mogwai",
+      "youtube": "__IQOzqUUZA",
+      "startMs": 0,
+      "durationMs": 258000,
+      "note": "Eternal night, worgen in the trees and a graveyard on the hill; the title alone says it, and the song never quite lets you relax."
+    },
+    {
+      "zone": "Loch Modan",
+      "title": "Stay Alive",
+      "artist": "José González",
+      "youtube": "iuXtcFS7Xsc",
+      "startMs": 0,
+      "durationMs": 266000,
+      "note": "A calm highland lake behind a great dam, scored with the song from The Secret Life of Walter Mitty's own northern wanderings."
+    },
+    {
+      "zone": "Redridge Mountains",
+      "title": "Ends of the Earth",
+      "artist": "Lord Huron",
+      "youtube": "N0D8JtOc5u4",
+      "startMs": 0,
+      "durationMs": 284000,
+      "note": "The first time the road leaves Elwynn behind: a wanderlust song for red cliffs, a lake town and the open road east."
+    },
+    {
+      "zone": "Stranglethorn Vale",
+      "title": "Kiara",
+      "artist": "Bonobo",
+      "youtube": "mBgz9gNUotQ",
+      "startMs": 0,
+      "durationMs": 230000,
+      "note": "Dense, humid jungle full of overgrown troll ruins; a lush, melancholy electronic track with a heartbeat."
+    },
+    {
+      "zone": "Stranglethorn Vale",
+      "subzone": "Booty Bay",
+      "areaID": 35,
+      "title": "Elephant Gun",
+      "artist": "Beirut",
+      "youtube": "wmzVu5IDFR4",
+      "startMs": 0,
+      "durationMs": 348000,
+      "note": "A pirate town in a skull-shaped cove: Balkan brass, ukulele and a song that sways like a ship."
+    },
+    {
+      "zone": "Swamp of Sorrows",
+      "title": "Riverside",
+      "artist": "Agnes Obel",
+      "youtube": "d0n4rBcWhFI",
+      "startMs": 0,
+      "durationMs": 228000,
+      "note": "A drowned temple and a swamp named for grief: a spare piano song about going down to the water alone."
+    },
+    {
+      "zone": "Westfall",
+      "title": "The Stable Song",
+      "artist": "Gregory Alan Isakov",
+      "youtube": "jGDjO9kuKyY",
+      "startMs": 0,
+      "durationMs": 360000,
+      "note": "Abandoned farms, broken windmills and dust: a song from a man who actually farms, about what is left behind."
+    },
+    {
+      "zone": "Wetlands",
+      "title": "Anchor",
+      "artist": "Novo Amor",
+      "youtube": "E-MrJOz1VEY",
+      "startMs": 0,
+      "durationMs": 257000,
+      "note": "Rain, mud and the grey sea at Menethil; a hushed falsetto song with the weight of rain in it."
+    },
+    {
+      "zone": "Wetlands",
+      "subzone": "Menethil Harbor",
+      "areaID": 150,
+      "title": "Old Pine",
+      "artist": "Ben Howard",
+      "youtube": "Coj1Nb2DY_w",
+      "startMs": 0,
+      "durationMs": 327000,
+      "note": "A harbour of departures across the sea; a song of youth, fires on the beach and leaving."
+    },
+    {
+      "zone": "Stormwind City",
+      "title": "King and Lionheart",
+      "artist": "Of Monsters and Men",
+      "youtube": "6etreW3oyK0",
+      "startMs": 0,
+      "durationMs": 275000,
+      "note": "The city of the lion and its kings, greeted with an Icelandic anthem that marches in like a parade."
+    },
+    {
+      "zone": "Ironforge",
+      "title": "Iron",
+      "artist": "Woodkid",
+      "youtube": "HGoRCk7joUY",
+      "startMs": 0,
+      "durationMs": 201000,
+      "note": "Into the mountain, past the Great Forge: Woodkid's brass and war drums for the city literally made of iron."
+    },
+    {
+      "zone": "Undercity",
+      "title": "Goodbye",
+      "artist": "Apparat",
+      "youtube": "rA7KC225dxA",
+      "startMs": 0,
+      "durationMs": 269000,
+      "note": "A city of the dead beneath the ruins of a fallen kingdom; a funeral-slow song famous from the series Dark."
+    },
+    {
+      "zone": "Riverglades",
+      "title": "Árbakkinn",
+      "artist": "Ólafur Arnalds",
+      "youtube": "u1ZiOvVnxzk",
+      "startMs": 0,
+      "durationMs": 296000,
+      "note": "'Árbakkinn' is Icelandic for 'the riverbank': a spoken poem over piano for a brand-new land of rivers and contested glades."
+    },
+    {
+      "zone": "Riverglades",
+      "subzone": "Powderfuse Port",
+      "areaID": 16727,
+      "title": "Blurred",
+      "artist": "Kiasmos",
+      "youtube": "8V3lAgxp4_E",
+      "startMs": 0,
+      "durationMs": 305000,
+      "note": "A goblin port on a lit fuse: crisp, ticking electronics that slowly build to the bang."
+    },
+    {
+      "zone": "Zephras Isle",
+      "title": "Dayvan Cowboy",
+      "artist": "Boards of Canada",
+      "youtube": "A_XIF-ISBaM",
+      "startMs": 0,
+      "durationMs": 300000,
+      "note": "A floating island in the plane of air: a song forever tied to a record-breaking fall from the edge of space."
+    }
+  ]
+}

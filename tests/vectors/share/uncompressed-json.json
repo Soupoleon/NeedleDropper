@@ -1,0 +1,48 @@
+{
+ "about": "A payload of raw JSON ('{'): readers accept it, NeedleDropper never writes it.",
+ "code": "!NeedleDropper:1!eyJhdXRob3IiOiIiLCJkZXNjcmlwdGlvbiI6IlNvbmdzIGZvciBteSBhbHRzIiwiZHJvcHMiOlt7ImFyZWFJRCI6ODcsImFydGlzdCI6IlRvdG8iLCJsYWJlbCI6IkdvbGRzaGlyZSIsInN1YnpvbmUiOiJHb2xkc2hpcmUiLCJ0YWdzIjpbImZ1bm55Il0sInRpdGxlIjoiQWZyaWNhIiwieW91dHViZSI6IlFBb19ZY29jbDFFIiwiem9uZSI6MTQyOX0seyJhcnRpc3QiOiJMb3cgUm9hciIsImR1cmF0aW9uTXMiOjM1MjAwMCwic3BvdGlmeSI6InNwb3RpZnk6dHJhY2s6NHVMVTZoTUNqTUk3NU0xQTJ0S1VRQyIsInRpdGxlIjoiSSdsbCBLZWVwIENvbWluZyIsInpvbmUiOjE0Mjl9LHsiZGlzYWJsZWQiOnRydWUsInpvbmUiOjE0MjZ9LHsiYXJ0aXN0IjoiTWUiLCJmaWxlIjoic3Rvcm13aW5kLm1wMyIsImluR2FtZUZpbGUiOnRydWUsInRpdGxlIjoiSG9tZSIsInpvbmUiOjE0NTN9XSwiZm9ybWF0IjoibmVlZGxlZHJvcHBlci1wYWNrIiwiaWQiOiJteS1kcm9wcyIsIm5hbWUiOiJNeSBEcm9wcyIsInJldmlzaW9uIjo0LCJ0YWdzIjpbXSwidmVyc2lvbiI6MX0=!",
+ "name": "uncompressed-json",
+ "pack": {
+  "author": "",
+  "description": "Songs for my alts",
+  "drops": [
+   {
+    "areaID": 87,
+    "artist": "Toto",
+    "label": "Goldshire",
+    "subzone": "Goldshire",
+    "tags": [
+     "funny"
+    ],
+    "title": "Africa",
+    "youtube": "QAo_Ycocl1E",
+    "zone": 1429
+   },
+   {
+    "artist": "Low Roar",
+    "durationMs": 352000,
+    "spotify": "spotify:track:4uLU6hMCjMI75M1A2tKUQC",
+    "title": "I'll Keep Coming",
+    "zone": 1429
+   },
+   {
+    "disabled": true,
+    "zone": 1426
+   },
+   {
+    "artist": "Me",
+    "file": "stormwind.mp3",
+    "inGameFile": true,
+    "title": "Home",
+    "zone": 1453
+   }
+  ],
+  "format": "needledropper-pack",
+  "id": "my-drops",
+  "name": "My Drops",
+  "revision": 4,
+  "tags": [],
+  "version": 1
+ },
+ "writer": "tests/v12_model_harness.py ref_code_uncompressed"
+}

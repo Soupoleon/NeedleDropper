@@ -1,0 +1,497 @@
+{
+  "format": "needledropper-pack",
+  "version": 1,
+  "id": "azeroth-mixtape",
+  "name": "Azeroth Mixtape",
+  "author": "NeedleDropper",
+  "description": "The default NeedleDropper soundtrack for World of Warcraft: Forever, with needle drops at the places every player remembers: all six capitals, every starting zone, the signature zones, the famous landmarks and the four new Forever zones. Roughly half the songs fit so well they give you chills and half are there to make you laugh (metadata only; no audio is included).",
+  "tags": [
+    "default",
+    "fitting",
+    "funny"
+  ],
+  "drops": [
+    {
+      "zone": "Durotar",
+      "title": "9 to 5",
+      "artist": "Dolly Parton",
+      "durationMs": 165547,
+      "youtube": "d_vPJjqWxZM",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Your first job in the Valley of Trials is waking lazy peons, so Durotar opens with an anthem for the working orc."
+    },
+    {
+      "zone": "Mulgore",
+      "title": "The John Dunbar Theme",
+      "artist": "John Barry",
+      "durationMs": 136867,
+      "youtube": "r2rAYwhM0Kc",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "Endless golden plains, wind in the tall grass and mesas on the horizon: a frontier theme fit for the tauren homeland."
+    },
+    {
+      "zone": "The Barrens",
+      "title": "Africa",
+      "artist": "Toto",
+      "durationMs": 295283,
+      "youtube": "QAo_Ycocl1E",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Lions, zhevra and endless golden savanna: Barrens chat finally gets the meme anthem it has always deserved."
+    },
+    {
+      "zone": "The Barrens",
+      "subzone": "The Crossroads",
+      "areaID": 380,
+      "title": "I Still Haven't Found What I'm Looking For",
+      "artist": "U2",
+      "durationMs": 277477,
+      "youtube": "e3-5YC_oHjE",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Every Horde hero at the Crossroads ends up asking Barrens chat where Mankrik's wife is. Bono hasn't found her either."
+    },
+    {
+      "zone": "Teldrassil",
+      "title": "May It Be",
+      "artist": "Enya",
+      "durationMs": 211067,
+      "youtube": "acM4c1BYVlU",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "Moonlight on the World Tree and the most elven song in film history, for the night elves' first steps into the world."
+    },
+    {
+      "zone": "Thousand Needles",
+      "subzone": "The Shimmering Flats",
+      "areaID": 439,
+      "title": "Rocket Man (I Think It's Going to Be a Long, Long Time)",
+      "artist": "Elton John",
+      "durationMs": 281613,
+      "youtube": "DtVBCG6ThDk",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Gnome and goblin rocket cars tear across the salt flats, and you're the one stuck collecting Rocket Car Parts."
+    },
+    {
+      "zone": "Tanaris",
+      "title": "Sandstorm",
+      "artist": "Darude",
+      "durationMs": 225667,
+      "youtube": "y6120QOlsfU",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "An entire desert of blowing sand, and the one song that is basically required by law to play there."
+    },
+    {
+      "zone": "Tanaris",
+      "subzone": "Gadgetzan",
+      "areaID": 976,
+      "title": "Money, Money, Money",
+      "artist": "ABBA",
+      "durationMs": 186070,
+      "youtube": "1LPNuFkteI8",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Steamwheedle goblins sell to Horde and Alliance alike, as long as the gold is real and the auction cut is theirs."
+    },
+    {
+      "zone": "Felwood",
+      "title": "Toxic",
+      "artist": "Britney Spears",
+      "durationMs": 198800,
+      "youtube": "7l1A2gShWZo",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Fel-poisoned rivers, oozing slimes and a forest rotten to the roots: Felwood is literally toxic. Britney said it first."
+    },
+    {
+      "zone": "Un'Goro Crater",
+      "title": "Theme from Jurassic Park",
+      "artist": "John Williams",
+      "durationMs": 207427,
+      "youtube": "lDlU08RU7Tk",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "A lost crater of dinosaurs, steaming springs and glowing crystals. There's only one way a film would score this arrival."
+    },
+    {
+      "zone": "Silithus",
+      "title": "Dust in the Wind",
+      "artist": "Kansas",
+      "durationMs": 206267,
+      "youtube": "9fNrJMkTWEE",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "Wind-scoured dunes over a buried Qiraji empire, where whole armies of the Ahn'Qiraj war effort turned to sand."
+    },
+    {
+      "zone": "Winterspring",
+      "subzone": "Everlook",
+      "areaID": 2255,
+      "title": "Ice Ice Baby",
+      "artist": "Vanilla Ice",
+      "durationMs": 271467,
+      "youtube": "jewmMjnbfzE",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "The coldest town in vanilla WoW gets the most vanilla Ice of all."
+    },
+    {
+      "zone": "Orgrimmar",
+      "title": "Now We Are Free",
+      "artist": "Hans Zimmer & Lisa Gerrard",
+      "durationMs": 254293,
+      "youtube": "ghxzLw2wRis",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "Thrall fought as a gladiator slave, then freed the orcs from the camps. His city gets Gladiator's anthem of freedom."
+    },
+    {
+      "zone": "Thunder Bluff",
+      "title": "Free Fallin'",
+      "artist": "Tom Petty",
+      "durationMs": 255712,
+      "youtube": "1lWJXDG2i0A",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "For everyone who ever stepped off a Thunder Bluff elevator one second too early."
+    },
+    {
+      "zone": "Darnassus",
+      "title": "All by Myself",
+      "artist": "Céline Dion",
+      "durationMs": 310856,
+      "youtube": "3p-rsl10t9I",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Azeroth's loveliest capital and famously its emptiest: the bank, the auction house and the moonwell are all yours."
+    },
+    {
+      "zone": "Mount Hyjal",
+      "title": "Who Wants to Live Forever",
+      "artist": "Queen",
+      "durationMs": 316773,
+      "youtube": "cHh05dFIDmk",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "Night elves gave up their immortality on this mountain to stop Archimonde, and now the whole game is called Forever."
+    },
+    {
+      "zone": "Shen'dralas",
+      "title": "Viva la Vida",
+      "artist": "Coldplay",
+      "durationMs": 241445,
+      "youtube": "dvgZkm1xWPE",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "Highborne exiles still dressed for an empire that fell ten thousand years ago, scored with a deposed king's lament."
+    },
+    {
+      "zone": "Blasted Lands",
+      "subzone": "The Dark Portal",
+      "areaID": 72,
+      "title": "Highway to Hell",
+      "artist": "AC/DC",
+      "durationMs": 208111,
+      "youtube": "l482T0yNkeo",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "On the far side of the portal lies Hellfire Peninsula, and AC/DC named the road there back in 1979."
+    },
+    {
+      "zone": "Tirisfal Glades",
+      "title": "Bring Me to Life",
+      "artist": "Evanescence",
+      "durationMs": 235893,
+      "youtube": "Yhwal9i1uyw",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "The Forsaken begin by waking up dead in Deathknell, so Tirisfal gets the internet's most famous plea to be woken up."
+    },
+    {
+      "zone": "Eastern Plaguelands",
+      "subzone": "Light's Hope Chapel",
+      "areaID": 2268,
+      "title": "Hallelujah",
+      "artist": "Jeff Buckley",
+      "durationMs": 413320,
+      "youtube": "hjn13QP05xM",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "The last holy ground in the Plaguelands, where the Argent Dawn still kneel: arrive, breathe and let it play."
+    },
+    {
+      "zone": "Hillsbrad Foothills",
+      "subzone": "Southshore",
+      "areaID": 271,
+      "title": "War",
+      "artist": "Edwin Starr",
+      "durationMs": 200267,
+      "youtube": "gKAM1NfMXY8",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Southshore vs. Tarren Mill raged for months before battlegrounds and earned exactly what this song says war is good for."
+    },
+    {
+      "zone": "Hillsbrad Foothills",
+      "subzone": "Tarren Mill",
+      "areaID": 272,
+      "title": "Brothers in Arms",
+      "artist": "Dire Straits",
+      "durationMs": 298840,
+      "youtube": "jhdFe3evXpk",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "Tarren Mill vs. Southshore, vanilla's endless world-PvP war, scored by rock's most mournful soldiers' lament. Timed to the 4:58 single edit."
+    },
+    {
+      "zone": "The Hinterlands",
+      "subzone": "Aerie Peak",
+      "areaID": 348,
+      "title": "Test Drive",
+      "artist": "John Powell",
+      "durationMs": 156307,
+      "youtube": "IpPIK4T068s",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "Wildhammer gryphons and Celtic fiddles: How to Train Your Dragon's first-flight cue was all but written for this cliff."
+    },
+    {
+      "zone": "Dun Morogh",
+      "title": "Misty Mountains",
+      "artist": "Richard Armitage & The Dwarf Cast",
+      "durationMs": 103025,
+      "youtube": "s4LX9NX7hS4",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "Deep dwarven voices mourning a lost mountain home: written for Erebor, felt by every gnome who fled Gnomeregan."
+    },
+    {
+      "zone": "Burning Steppes",
+      "title": "We Didn't Start the Fire",
+      "artist": "Billy Joel",
+      "durationMs": 291100,
+      "youtube": "WqkjYKUXERQ",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "The Dark Irons summoned Ragnaros and set this whole land ablaze. Ask any of them, though, and it wasn't their fault."
+    },
+    {
+      "zone": "Elwynn Forest",
+      "title": "Here Comes the Sun",
+      "artist": "The Beatles",
+      "durationMs": 185733,
+      "youtube": "xUNqsfFUwhY",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "Dawn over Northshire Abbey and a whole world ahead: the gentlest possible start to an adventure."
+    },
+    {
+      "zone": "Elwynn Forest",
+      "subzone": "Goldshire",
+      "areaID": 87,
+      "title": "Hotel California",
+      "artist": "Eagles",
+      "durationMs": 391357,
+      "youtube": "dLl4PZtxia8",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Azeroth's most notorious inn since 2004. The Lion's Pride never closes, and its regulars have been here since launch."
+    },
+    {
+      "zone": "Deadwind Pass",
+      "subzone": "Karazhan",
+      "areaID": 2562,
+      "title": "Bohemian Rhapsody",
+      "artist": "Queen",
+      "durationMs": 354320,
+      "youtube": "fJ9rUzIMcZQ",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Medivh's tower: a possessed wizard, a haunted ballroom and its own opera house. Only rock's most operatic epic will do."
+    },
+    {
+      "zone": "Duskwood",
+      "title": "Thriller",
+      "artist": "Michael Jackson",
+      "durationMs": 357753,
+      "youtube": "sO4vI8P88NM",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Worgen in the woods, ghouls at Raven Hill and Stitches on the road: Duskwood is basically the music video."
+    },
+    {
+      "zone": "Stranglethorn Vale",
+      "title": "Welcome to the Jungle",
+      "artist": "Guns N' Roses",
+      "durationMs": 273483,
+      "youtube": "0CNPR2qNzxk",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Raptors, tigers, trolls and a gank behind every tree: Stranglethorn is exactly the jungle Axl warned you about."
+    },
+    {
+      "zone": "Stranglethorn Vale",
+      "subzone": "Booty Bay",
+      "areaID": 35,
+      "title": "He's a Pirate",
+      "artist": "Klaus Badelt",
+      "durationMs": 90427,
+      "youtube": "BuYf0taXoNw",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "Walk through the jaws of a giant shark into a goblin pirate harbour, and only one cue can possibly be playing."
+    },
+    {
+      "zone": "Westfall",
+      "title": "Skyfall",
+      "artist": "Adele",
+      "durationMs": 286082,
+      "youtube": "LJzp_mDxaT0",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "Skyfall, but make it Westfall: a Bond-sized ballad for broken windmills and a Defias Brotherhood plotting its return."
+    },
+    {
+      "zone": "Wetlands",
+      "subzone": "Menethil Harbor",
+      "areaID": 150,
+      "title": "(Sittin' On) The Dock of the Bay",
+      "artist": "Otis Redding",
+      "durationMs": 163747,
+      "youtube": "7C-VscEQugk",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "Rain, gulls and the long wait for the boat: every Alliance player has spent a small lifetime on these docks."
+    },
+    {
+      "zone": "Stormwind City",
+      "title": "\"Heroes\"",
+      "artist": "David Bowie",
+      "durationMs": 371417,
+      "youtube": "YLp2cW7ICCU",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "You walk in beneath the giant champion statues of the Valley of Heroes, and Bowie's anthem names the place for you."
+    },
+    {
+      "zone": "Ironforge",
+      "title": "Diggy Diggy Hole",
+      "artist": "Wind Rose",
+      "durationMs": 315986,
+      "youtube": "34CZjsEI1yU",
+      "startMs": 0,
+      "tags": [
+        "funny"
+      ],
+      "note": "A whole city carved out of a mountain by dwarves who have never once stopped digging. This is their work song."
+    },
+    {
+      "zone": "Undercity",
+      "title": "Cities in Dust",
+      "artist": "Siouxsie and the Banshees",
+      "durationMs": 243800,
+      "youtube": "wsOHvP1XnRg",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "The Banshee Queen rules a city beneath the ashes of Lordaeron, so naturally the Banshees supply the anthem."
+    },
+    {
+      "zone": "Riverglades",
+      "title": "River",
+      "artist": "Leon Bridges",
+      "durationMs": 238559,
+      "youtube": "0Hegd4xNfRo",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "A brand-new land of rivers and reeds, welcomed with a hushed, gospel-quiet hymn about being baptised in the water."
+    },
+    {
+      "zone": "Zephras Isle",
+      "title": "Mr. Blue Sky",
+      "artist": "Electric Light Orchestra",
+      "durationMs": 303820,
+      "youtube": "aQUlA8Hcv4s",
+      "startMs": 0,
+      "tags": [
+        "fitting"
+      ],
+      "note": "A Skyborne hero's very first needle drop: an island floating above the clouds gets the sunniest ode to the sky ever recorded."
+    }
+  ]
+}

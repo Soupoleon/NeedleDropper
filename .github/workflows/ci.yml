@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest lupa
+      - name: Run test suite (addon via Lua 5.1 shim, companion, contracts)
+        run: python -m pytest tests -q -p no:cacheprovider
+      - name: Bundled soundtrack sets are up to date
+        if: ${{ hashFiles('tools/gen_sets.py') != '' }}
+        run: python tools/gen_sets.py --check
+      - name: Byte-compile companion
+        run: python -m compileall -q companion
+
+  release:
+    name: Build release artifacts
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip pytest lupa
+          if (Test-Path companion/build-requirements.txt) { python -m pip install -r companion/build-requirements.txt }
+        shell: pwsh
+      - name: Build addon zip + companion
+        run: ./tools/build_release.ps1 -OutDir dist
+        shell: pwsh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: needledropper-${{ github.ref_name }}
+          path: dist/*

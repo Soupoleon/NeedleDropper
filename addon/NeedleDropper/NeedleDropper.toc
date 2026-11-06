@@ -1,0 +1,23 @@
+## Interface: 16001
+## Title: NeedleDropper
+## Notes: Kojima-style needle drops: curated songs the first time you arrive somewhere.
+## Author: NeedleDropper
+## Version: 1.0.0
+## X-License: MIT
+## Category: Audio & Video
+## IconTexture: Interface\Icons\INV_Misc_Drum_01
+## SavedVariables: NeedleDropperDB
+## SavedVariablesPerCharacter: NeedleDropperCharDB
+## AddonCompartmentFunc: NeedleDropper_OnAddonCompartmentClick
+Protocol.lua
+Map.lua
+Core.lua
+Location.lua
+Discovery.lua
+Audio.lua
+Beacon.lua
+ChatLink.lua
+Toast.lua
+Director.lua
+Options.lua
+SelfTest.lua

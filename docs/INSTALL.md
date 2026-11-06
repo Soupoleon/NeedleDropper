@@ -1,0 +1,231 @@
+# Installing NeedleDropper
+
+NeedleDropper has two parts:
+
+- the **addon**, which runs inside World of Warcraft: Forever. Everything you do with NeedleDropper
+  happens there: the NeedleDropper window, your soundtracks, the settings.
+- the **NeedleDropper app**, `NeedleDropper.exe`, for Windows. It is **optional**: it plays the
+  Spotify and YouTube songs, sits quietly in the notification area of the taskbar, and you set it up
+  once on its **Connect** page.
+
+Without the app you still get the title cards and the songs you play from your own
+[in-game audio files](#in-game-audio-files). The built-in soundtracks are Spotify and YouTube songs,
+so to hear them you need the app.
+
+**Contents:** [What you need](#what-you-need) ·
+[1. Install the addon](#1-install-the-addon) ·
+[2. First login](#2-first-login) ·
+[3. The app (optional)](#3-optional-the-needledropper-app) ·
+[4. The Connect page](#4-the-connect-page) ·
+[5. Check the link](#5-check-the-link) ·
+[Game settings](#game-settings-for-the-beacon) ·
+[Upgrading from 1.1](#upgrading-from-11) ·
+[Updating](#updating) ·
+[Uninstalling](#uninstalling)
+
+## What you need
+
+- **World of Warcraft: Forever.** Its files live in the `_forever_` folder inside your World of
+  Warcraft folder, by default `C:\Program Files (x86)\World of Warcraft\_forever_`.
+- For the app (optional):
+  - **Windows 10 or 11** (64-bit), and
+  - something to play the music, at least one of: **Spotify Premium** and the Spotify app (a free
+    Spotify account can't be remote-controlled), or **Microsoft Edge** (built into Windows) or
+    **Google Chrome** for YouTube.
+
+You do **not** need Python or any command line.
+
+## 1. Install the addon
+
+### With an addon manager
+
+If your addon manager supports World of Warcraft: Forever, search for **NeedleDropper** and install
+it like any other addon; it also keeps it up to date. Managers only replace the `NeedleDropper`
+folder. Your own audio files live in a separate `NeedleDropper_Local` folder, and the app's small
+data addon in `NeedleDropper_Companion`; managers never touch either.
+
+### From the addon zip
+
+1. Download `NeedleDropper-<version>-addon.zip` from the releases page (or from CurseForge, Wago or
+   WoWInterface).
+2. Open your AddOns folder: `World of Warcraft\_forever_\Interface\AddOns`. If `Interface` or
+   `AddOns` doesn't exist yet, create it.
+3. Double-click the zip to open it and drag the **NeedleDropper** folder into the AddOns folder.
+   You should end up with `...\AddOns\NeedleDropper\NeedleDropper.toc`, not
+   `...\AddOns\NeedleDropper\NeedleDropper\...` or `...\AddOns\NeedleDropper-<version>-addon\...`.
+4. Start the game (or restart it: WoW only loads new addon files when it starts).
+
+### Check that it loads
+
+On the character selection screen, open **Menu → AddOns** and make sure **NeedleDropper** is ticked.
+If it is listed as *Out of date* after a game patch, tick *Load out of date AddOns*.
+
+## 2. First login
+
+The chat window greets you with *NeedleDropper 1.2: your soundtrack is Azeroth Mixtape. Type /needle
+to change a song or pick another soundtrack.*
+
+- **The window:** type `/needle` (or `/nd`), or click NeedleDropper in the add-on compartment, the
+  small numbered button by the minimap. Its tabs are **Drops**, **Soundtracks** and **Journal**; see
+  [Soundtracks](PACKS.md) for everything it does.
+- **The settings:** right-click NeedleDropper in the add-on compartment, use the gear button in the
+  window, or open *Game Menu → Options → AddOns → NeedleDropper*.
+- **Key bindings** (optional): *Game Menu → Options → Keybindings*, section **NeedleDropper**: *Open
+  or close the NeedleDropper window*, *Add a needle drop where you stand* and *Stop the needle
+  drop*.
+
+Then just play, and go somewhere your character has never been. Drops are deliberately rare: after
+one plays, the next one waits at least 10 minutes (you can change that in the options).
+
+## 3. Optional: the NeedleDropper app
+
+1. Download **`NeedleDropper-<version>-win64.zip`** from the releases page. (The bare
+   `NeedleDropper.exe` is there too; it is the same file.)
+2. Right-click the zip, choose **Extract All…**, and pick a permanent place such as
+   `Documents\NeedleDropper`. Don't run the app from inside the zip or from a temporary folder.
+3. *Optional, for the careful:* compare the file's fingerprint with `SHA256SUMS.txt` from the
+   releases page. In PowerShell: `Get-FileHash .\NeedleDropper.exe` and compare the long code with
+   the `NeedleDropper.exe` line (case doesn't matter).
+4. Double-click `NeedleDropper.exe`. Its **Connect** page opens in your browser
+   ([next step](#4-the-connect-page)).
+
+**Start the app before the game the first time.** On its first run the app creates a small data
+addon, `NeedleDropper_Companion`, through which it tells the game whether it is connected. WoW only
+discovers new addon folders when it starts, so if the game was already running, restart it once.
+
+### "Windows protected your PC"
+
+The first time you start `NeedleDropper.exe`, Windows SmartScreen may show a blue *"Windows protected
+your PC"* box with *"Unknown publisher"*. That happens to every new app that isn't signed with a paid
+code-signing certificate, and NeedleDropper (a free fan project) doesn't have one.
+
+1. Click **More info**.
+2. Check that the app is `NeedleDropper.exe`.
+3. Click **Run anyway**. Windows remembers this for the file.
+
+Some antivirus programs wrongly flag apps packed with PyInstaller (the tool that bundles a Python app
+into a single .exe). If yours quarantines `NeedleDropper.exe`, check its fingerprint as above, restore
+it and add an exception, or build it yourself from the open source code (see the
+[README](../README.md#building-from-source)).
+
+## 4. The Connect page
+
+The Connect page is at `http://127.0.0.1:8322/`. It is served by the app on your own PC: it only
+works while the app runs, and nothing outside your PC can reach it. NeedleDropper doesn't need any
+firewall access; if Windows ever asks, you can cancel. It has four cards:
+
+| Card | What it does |
+|---|---|
+| **World of Warcraft** | Finds your game and shows which addon version is installed. If the addon is missing, it links to CurseForge and offers **Install addon** (close the game first). It doesn't offer to install when an addon manager looks after the addon |
+| **Spotify** | Optional, needs Premium. Three short steps (open the Spotify developer dashboard, copy the redirect URI, paste your Client ID), then **Sign in**. Afterwards the card shows your account, whether it has Premium, and **Play on**, the device that plays. Details: [Music services](PROVIDERS.md#spotify-premium) |
+| **YouTube** | Nothing to set up. A small player window appears while a YouTube song plays ([why it must stay visible](PROVIDERS.md#the-player-window-must-stay-visible)) |
+| **Check the link** | *In WoW type /needle test*. A tick appears when the app sees the game, normally within 2 seconds ([next step](#5-check-the-link)) |
+
+At the bottom: **Start with Windows** (ticked by default) and **Done**.
+
+After that the app lives in the notification area of the taskbar (maybe under the **^** arrow). It
+has no window of its own and no console. Left-click its icon to open the Connect page again;
+right-click it for the menu: a status line, **Open setup…**, **Pause needle drops**, **Start with
+Windows**, **Open log folder** and **Quit**.
+
+With **Start with Windows** ticked, the app starts quietly when you sign in to Windows and waits until
+World of Warcraft: Forever is running; only then does it start reading the game's beacon. It shows a
+notification only when something matters (linked to the game, a test signal, a Spotify sign-in that
+expired, a song it couldn't find or play, a new version). When its update check is on, it looks for
+a new version once a day; it never installs anything by itself.
+
+## 5. Check the link
+
+1. Start the game and log in a character.
+2. Type `/needle test`. The test title card appears in the game, the app shows a notification, and
+   the **Check the link** card on the Connect page gets its tick. Nothing plays: this only checks
+   that the app can see the game.
+3. No notification after a few seconds? See [Beacon not detected](TROUBLESHOOTING.md#beacon-not-detected).
+
+Then go somewhere new. Don't minimize the game while you play: while WoW is minimized the app can't
+see the beacon, so a song that should start only begins once you bring the game back.
+
+## Game settings for the beacon
+
+The addon tells the app what to play through the **beacon**, a thin strip of coloured squares in the
+very top-left corner of the game window. To keep it readable:
+
+- **Display mode:** in *Options → Graphics*, either choice the game offers works: **Windowed** or
+  **Fullscreen (Windowed)**.
+- **Picture settings:** keep brightness, contrast and gamma at their defaults, leave Windows HDR off,
+  and don't run filters (ReShade and the like) over the game. They change the beacon's colours.
+- **Top-left corner:** keep FPS counters and overlay notifications (Discord shows them there by
+  default) out of it.
+
+More in [Beacon not detected](TROUBLESHOOTING.md#beacon-not-detected).
+
+## In-game audio files
+
+To play your own .mp3 or .ogg files inside WoW, copy them into
+`World of Warcraft\_forever_\Interface\AddOns\NeedleDropper_Local\media`, then **restart the game**
+completely: WoW only notices new files when it starts, `/reload` is not enough. Then type the file
+name into a drop's **In-game file** field. Details: [In-game audio files](PROVIDERS.md#in-game-audio-files).
+
+## Upgrading from 1.1
+
+- **Update both parts.** The 1.2 addon needs the 1.2 app for Spotify and YouTube; with an older app
+  the window says *Update the NeedleDropper app to 1.2 to play Spotify and YouTube songs*. The 1.2
+  app, in turn, expects the 1.2 addon.
+- **Your data is kept.** At the first login the addon keeps your settings, the places you have heard
+  and your journal. A beacon cell size of 4 (the 1.1 default) becomes 3.
+- **The soundtrack is now Azeroth Mixtape.** The 1.1 addon played Azeroth Unbound; to keep it, turn
+  it on in the Soundtracks tab. Places you already heard stay heard.
+- **Your 1.1 packs** are offered in game at your next login, for example *2 soundtracks from your
+  NeedleDropper app: [Review & import]* ([more](PACKS.md#coming-from-11)).
+- **Your 1.1 audio files** from the app's media folder: the Connect page offers to copy the .mp3 and
+  .ogg files into `NeedleDropper_Local\media` (restart the game afterwards).
+- **No more Rebuild map and `/reload`:** edits in game apply at once.
+- **A Startup-folder shortcut** you made for 1.1 can go (press **Win + R**, type `shell:startup`):
+  the app now starts with Windows by itself.
+- `Map.lua` and `Map.json` in the addon folder are no longer used. If you unzipped 1.2 over the old
+  folder they may still be there; they are harmless.
+
+**Where did the control panel go?** The 1.1 app had a control panel in the browser. In 1.2 the game
+holds everything you change, and the app has only the Connect page and its tray menu:
+
+| 1.1 control panel | In 1.2 |
+|---|---|
+| **Status** | In game: the window's footer, the add-on compartment tooltip and `/needle status`. On the PC: the tray menu's status line and the **Check the link** card |
+| **Music services** | The **Spotify** and **YouTube** cards on the Connect page. There is no order to set any more ([how a source is picked](PROVIDERS.md#which-service-plays-a-drop)) |
+| **Soundtrack** | In game: the window's **Drops** and **Soundtracks** tabs ([Soundtracks](PACKS.md)) |
+| **Game & addon** | The **World of Warcraft** card on the Connect page |
+| **Advanced** | The beacon and chat-log options in the game's Settings panel; **Open log folder** in the tray menu |
+
+## Updating
+
+- **Addon:** update it with your addon manager, or close the game and unzip the new addon zip over the
+  old `NeedleDropper` folder. Your soundtracks, settings and history are kept: they live in WoW's
+  saved data, not in the addon folder.
+- **App:** download the new `win64` zip from the releases page (with its update check on, the app
+  tells you when one is out). Quit the app (tray icon → **Quit**), replace `NeedleDropper.exe` with
+  the new one and start it again. Your settings and your Spotify connection are kept: they live in
+  `%APPDATA%\NeedleDropper`, not next to the exe.
+
+## Uninstalling
+
+1. In the app's tray menu, untick **Start with Windows**, then choose **Quit**. (If the app is
+   already gone: Task Manager → *Startup apps* → NeedleDropper → **Disable**.)
+2. Delete the folder that holds `NeedleDropper.exe`.
+3. Delete the app's data folder: paste `%APPDATA%\NeedleDropper` into the address bar of a File
+   Explorer window and delete it. It holds your app settings, the encrypted Spotify login, logs,
+   caches, backup copies of the addon's saved data, the player window's browser profile and, from
+   1.1, the `packs` and `media` folders (back up any audio files you put there).
+4. Delete the addon: `World of Warcraft\_forever_\Interface\AddOns\NeedleDropper` (or remove it in
+   your addon manager) and the app's data addon `...\AddOns\NeedleDropper_Companion`.
+   `NeedleDropper_Local` next to them holds *your own* audio files; delete it only if you don't need
+   them.
+5. *Optional:* delete the addon's saved data: your soundtracks, settings and history, in
+   `World of Warcraft\_forever_\WTF\Account\<account>\SavedVariables\NeedleDropper.lua` and, per
+   character, `...\WTF\Account\<account>\<realm>\<character>\SavedVariables\NeedleDropper.lua`.
+   Share your soundtracks first if you want to keep them ([share codes](PACKS.md#share-codes)).
+6. *Spotify:* remove NeedleDropper's access on your Spotify account page
+   (<https://www.spotify.com/account/apps/>) and, if you like, delete your developer app in the
+   Spotify dashboard (<https://developer.spotify.com/dashboard>).
+7. *Chat-log link:* if you turned it on, type `/chatlog` in the game until it says chat logging is off,
+   and delete `World of Warcraft\_forever_\Logs\WoWChatLog.txt` if you don't want to keep your chat
+   history.

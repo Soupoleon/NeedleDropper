@@ -1,0 +1,378 @@
+===== in-game-editors
+Short answer: yes, soundtrack curation can move into the game, and that is how modern addons are built. I checked this against the Blizzard UI source for this exact client: the Gethe/wow-ui-source 'forever' branch, version.txt 1.60.1.70790, commit eac30af597 of 2026-11-04. That branch is mainline 12.x code plus 61 'Camelot' override folders. I also checked the live branch (12.1.5.70783), sparse clones of 12 addon repos (current as of Nov 2026), and warcraft.wiki.gg / CurseForge pages.
+
+What the client provides natively:
+- Blizzard window templates, which Forever automatically re-skins with its classic metal frame art.
+- ScrollBox lists and the new Menu API.
+- UISpecialFrames, so Escape closes addon windows.
+- The addon compartment, which can also auto-load a load-on-demand addon when clicked.
+- Location APIs. None of them are annotated as returning secret values.
+- C_EncodingUtil: JSON, zlib and URL-safe base64. These are exactly the pieces of the companion's NDPACK1 share-code format. CopyToClipboard is protected, so sharing has to go through EditBoxes.
+
+The pattern the addons agree on:
+- **Preferences** go in Blizzard's Settings panel as a vertical layout, which is searchable. NeedleDropper's Options.lua already does this correctly.
+- **Content editors** live in a standalone, movable window that closes on Escape and is built when first opened (or loaded on demand). It opens from a bare slash command and the compartment.
+- **Editing** is list + detail: a search box, per-row context menus, one-click add at the player's position (TomTom /wayb, HandyNotes /hnnew), and confirmation only for destructive bulk deletes.
+- **Named sets** work like Blizzard Edit Mode layouts: read-only presets, Copy to edit, account-wide or character-specific.
+- Ace3 is not needed.
+
+The addons Forever players actually run set the expectation: few tabs, works on defaults, opens from slash or compartment, no /reload. These are BigWigs, DBM, Bartender4, HandyNotes, ElvUI, Details (Details_Camelot.toc), Baganator and Ace3 (all with 16001 TOCs), plus Leatrix Plus and TomTom (Forever builds on CurseForge). WeakAuras, MDT and Plater have no Forever TOC, and WeakAuras ended retail support with Midnight. They are design references only.
+
+The one hard limit is the companion. SavedVariables reach disk only on /reload, logout, disconnect or quit, and the beacon carries only the drop number and a 16-bit map hash. So in-game edits take effect at once for the addon itself (title card, in-game audio files, history). The companion cannot play a new or edited Spotify or YouTube drop until there is a way to sync it, and the protocol work has to settle that.
+
+Recommended window: 'NeedleDropperSoundtracksFrame' built on ButtonFrameTemplate, about 640x460, with three tabs (Drops, Soundtracks, Journal). Settings stay in the Blizzard panel.
+-- recommendations
+  * **Make SavedVariables the source of truth.**
+- NeedleDropperDB.soundtracks holds user soundtracks (name, author, description, tags, drops), account-wide.
+- Built-ins ship read-only as Lua data compiled from packs/ at build time. Today's generated D:/NeedleDropper/addon/NeedleDropper/Map.lua becomes the bundled default seed.
+- NeedleDropperDB.active holds the ordered default refs; NeedleDropperCharDB.active is an optional per-character override.
+- After each edit, merge the active soundtracks (SPEC-v1.2 §A rules), re-run ns.BuildMap(raw), and fire an event such as ND_MAP_CHANGED so Director and Location re-evaluate. No /reload.
+  * **Window:**
+- CreateFrame('Frame', 'NeedleDropperSoundtracksFrame', UIParent, 'ButtonFrameTemplate') plus ButtonFrameTemplate_HidePortrait.
+- Default 640x460; SetResizable with SetResizeBounds(560, 380); movable by the title bar; SetClampedToScreen.
+- Save position and size in NeedleDropperDB; HIGH strata.
+- tinsert(UISpecialFrames, name).
+- Create it the first time it is opened, not at login.
+- Hide on PLAYER_REGEN_DISABLED and reopen on PLAYER_REGEN_ENABLED if it was open.
+  * **Tabs:** use PanelTabButtonTemplate with PanelTemplates_SetNumTabs/SetTab, the shape Baganator uses: Drops (default) | Soundtracks | Journal. No Settings tab. A gear button in the title bar calls ns.OpenOptions(), and D:/NeedleDropper/addon/NeedleDropper/Options.lua gets an 'Open Soundtracks' CreateSettingsButtonInitializer at the top, so Settings search keeps working.
+  * **Drops tab, top bar:**
+- 'Editing: [soundtrack v]' using WowStyle1DropdownTemplate with SetupMenu, styled like Edit Mode's layout dropdown: one radio per soundtrack, a Built-in label, Copy / Rename / Delete actions on each entry, then New, Import and Share at the bottom.
+- A SearchBoxTemplate filter over place, artist and title.
+- A WowStyle1FilterDropdownTemplate: All, Not heard yet, Drafts, In-game files.
+- The primary 'Add drop here' button.
+  * **Drops tab, list (about 260 px wide):**
+- WowScrollBoxList + MinimalScrollBar + CreateScrollBoxListLinearView with zone header rows (or CreateScrollBoxListTreeListView for continent > zone), CreateDataProvider, ScrollUtil.AddSelectionBehavior.
+- Each row: place ('Zone > Landmark'), 'Artist - Title' or 'needs a song', source letters S/Y/L, a heard-on-this-character marker, and a Test button on hover.
+- Right-click opens MenuUtil.CreateContextMenu: Test, Duplicate, Move to soundtrack, Delete.
+  * **Drops tab, detail form.** Edits apply on Enter or focus loss, Escape reverts the field, and Tab moves through the fields.
+- **Place:** a Zone dropdown built at runtime from C_Map.GetMapChildrenInfo, an optional Landmark dropdown, and a 'Use current location' button.
+- **Song:** Artist and Title, with InputBoxInstructionsTemplate placeholders.
+- **Sources:** Spotify link/URI, YouTube link/ID and in-game file path. Each is normalized with SPEC-v1.2 §B rules and shows whether it was recognized.
+- **'More...' expander:** Start at, Play for, Volume (MinimalSliderWithSteppersTemplate), Tags (Fitting / Funny checkboxes plus custom), Note (small ScrollingEditBoxTemplate), and a Disabled override.
+- **Footer:** Test (ns.Toast.Preview plus either the local file or a companion test event) and Delete (immediate, with an Undo toast).
+  * **'Add drop here'** (button, /needle add [Artist - Title], keybinding):
+1. Snapshot ns.Location plus CurrentAreaID() (planned in SPEC-v1.2 §D).
+2. If the soundtrack being edited already covers this place, select that drop.
+3. Otherwise insert a draft: Landmark when an areaID is known (with a switch to Zone), and put the cursor in Artist.
+
+Drafts never play and show 'needs a song'. This replaces the planned /needle mark and the companion's marks list.
+  * **Soundtracks tab:**
+- Rows show name, author, drop count and Built-in / Yours / Active badges.
+- An Active checkbox per row; the up/down layer-order controls appear only when two or more soundtracks are active.
+- A 'Use a different soundtrack on this character' checkbox.
+- Buttons: New, Duplicate (built-in becomes '<name> (my copy)'), Rename, Import, Export, and Delete. Delete confirms through StaticPopup_ShowCustomGenericConfirmation (acceptText = DELETE, showAlert) or an own StaticPopupDialogs key.
+  * **Share dialog** (globally named, in UISpecialFrames):
+- **Export:** C_EncodingUtil.SerializeJSON -> CompressString(Enum.CompressionMethod.Zlib) -> EncodeBase64(Enum.Base64Variant.StandardUrlSafe), strip the padding, add the 'NDPACK1:' prefix. Show it in a read-only select-all ScrollingEditBox with a 'press Ctrl+C' hint.
+- **Import:** use MDT's paste buffer, restore padding, decode, decompress, DeserializeJSON, then validate per SPEC-v1.2 §B (512 KB cap, never overwrite). Refuse imports in combat.
+- Write round-trip tests against Python zlib/base64url so the companion's NDPACK1 implementation matches.
+  * **Journal tab:** a newest-first list from NeedleDropperCharDB.journal (up to 200 entries) with Replay and 'Play again next time' (removes that id from done). This replaces /needle journal and /needle replay for most users.
+  * **Entry points:**
+- Keep AddonCompartmentFunc: left-click toggles the window, right-click opens Settings (using the buttonName argument).
+- Add AddonCompartmentFuncOnEnter/OnLeave for a status tooltip.
+- A bare /needle opens the window; /needle help lists the commands.
+- No minimap button by default; LibDBIcon with showInCompartment only if users ask.
+- Add Bindings.xml with Toggle Soundtracks, Add drop here and Stop current drop under a NeedleDropper category.
+  * **Keep D:/NeedleDropper/addon/NeedleDropper/Options.lua as the preferences surface.**
+- Keep O.CategoryID() via GetID().
+- C_SettingsUtil.OpenSettingsPanel is flagged HasRestrictions, so test Settings.OpenToCategory from a button click and from a C_Timer callback and watch for ADDON_ACTION_BLOCKED.
+- Keep the pcall and the slash-command fallback.
+  * **Localization:**
+- An L table with an enUS fallback, filled by the packager's @localization@ substitution.
+- Reuse DELETE, CANCEL, OKAY, ACCEPT, SEARCH, CLOSE and SAVE.
+- GameFont* font objects only.
+- Store map and area IDs; resolve names at display time.
+  * **Agree the companion boundary with the protocol work before building Spotify/YouTube editing.**
+- In-game data is the source of truth.
+- The companion keeps only Spotify sign-in and token storage, the YouTube player window, and playback.
+- It learns new drops by reading SavedVariables after /reload or logout (the SPEC-v1.2 §C.5 reader), or from a richer event.
+- The addon recomputes the map hash with protocol.py's canonical form and never renumbers n.
+- Until a live path exists, the detail pane says Spotify/YouTube changes reach NeedleDropper.exe after /reload.
+  * **Ship with no new libraries.** Split the editor into a load-on-demand NeedleDropper_Soundtracks addon (## LoadOnDemand: 1, ## Group: NeedleDropper) only if it grows large; the compartment already auto-loads demand-loaded addons when clicked.
+-- pitfalls
+  ! Don't copy Baganator's 'category.ID = name' override. In 12.x, Settings.OpenToCategory forwards to C_SettingsUtil.OpenSettingsPanel, which takes a number, and Ace3 r1390 says the override no longer works. Keep category:GetID().
+  ! Never handle Escape with EnableKeyboard / OnKeyDown / SetPropagateKeyboardInput. On 12.0.x, Cogworks did this, tainted the Escape path (ADDON_ACTION_FORBIDDEN on ClearTarget) and locked players out of the game menu until /reload. Use UISpecialFrames, which needs globally named frames.
+  ! A focused EditBox swallows Escape. Without OnEscapePressed = ClearFocus on every field, the window feels stuck open.
+  ! Avoid UIDropDownMenu. Blizzard's own Game.lua calls legacy menus avoid-only, and WeakAuras embeds LibUIDropDownMenu to dodge its taint. Use WowStyle1DropdownTemplate with the Menu API.
+  ! CopyToClipboard is protected, so a Copy button is impossible. Use a select-all EditBox with a Ctrl+C hint.
+  ! Pasting a long share code into a plain EditBox lays out every character. Use MDT's paste buffer and enforce the 512 KB cap.
+  ! WorldMapFrame:AddCanvasClickHandler taints on mainline; HandyNotes uses an Alt-only capture frame instead. GetExploredAreaIDsAtPosition only knows explored areas. Picking a landmark by clicking the map is therefore unreliable; prefer 'stand there and add'.
+  ! SavedVariables are written only on logout, disconnect, quit or /reload, and the game overwrites the file at logout. A companion that writes it while WoW is running loses the data, and it cannot see in-game edits before then.
+  ! Editing drops changes the drop numbers and the map hash. Unless n stays stable and the companion learns the new map, beacon events will resolve to a wrong or unknown song.
+  ! Addons cannot enumerate files and only see audio files present at client start. Validate typed paths with PlaySoundFile's willPlay return (then StopSound), and say plainly that new files need a restart.
+  ! Don't put the editor inside the Blizzard Settings panel. Canvas categories are not searchable, closing Settings returns to the Game Menu, and a standalone window lets players walk to a place with the editor still open.
+  ! Midnight-era restriction states exist: Combat, Encounter, ChallengeMode, PvPMatch, Map and Chat. Don't build sharing on chat or addon messages (chat lockdown, and the AddOnMessageLockdown result in Enum.SendAddonMessageResult). Test location capture inside instances.
+  ! Don't reproduce Plater- or ElvUI-scale option trees (29 tabs, dedicated search pages). If a soundtrack editor needs a search box to find a setting, its surface is too big.
+  ! Don't depend on WeakAuras, MDT or Plater on Forever: none ships a 16001 TOC, and WeakAuras ended retail support with Midnight.
+  ! Fonts are chosen per client alphabet, so CJK song titles may show missing glyphs on Latin-locale clients. Store titles as typed and never hard-code font file paths.
+  ! Not yet verified: whether C_EncodingUtil decodes unpadded base64url, and whether its JSON escaping matches Python's json.dumps(ensure_ascii=False). Test before promising NDPACK1 compatibility.
+  ! Confirmation fatigue: confirm only destructive bulk actions such as deleting a soundtrack. Single-drop deletes should be instant with Undo.
+===== share-strings
+Recommendation: use a native, data-only share code: `!NeedleDropper:1!` + Base64 (RFC 4648 standard alphabet, padded) of zlib-compressed UTF-8 JSON + a closing `!`. The JSON body is exactly a needledropper-pack v1 file, with zones written as numeric uiMapIDs.
+
+**Native APIs.** The Forever client has Blizzard's C_EncodingUtil (added in retail 11.1.5; listed in the forever branch's EncodingUtilDocumentation.lua and on the wiki for Forever 1.60.1 build 69913). It provides JSON, Base64 (Standard and UrlSafe) and Deflate/Zlib/Gzip natively. So the addon needs no LibDeflate, LibSerialize or pure-Lua codec, and the companion or a website can read and write the same code with the Python or JavaScript standard library.
+
+**What other addons do.** The ecosystem moved to these native calls in 2025-26:
+- Plater `!PLATER:2!`
+- ElvUI `!E2!`
+- MDT `!~MDT2~`
+- BigWigs `BW2:`
+- Details `D!ProfileV2-`
+- Blizzard's own Cooldown Manager `1|`
+
+All of them use SerializeCBOR, then Deflate, then EncodeBase64 with the Standard alphabet. WeakAuras (`!WA:2!`: LibSerialize + LibDeflate + EncodeForPrint) and Cell (`!CELL:<rev>:ALL!`) still use the Lua libraries. WeakAuras has also said it will not ship for Midnight-based clients, so copy its design, not its tooling.
+
+**Two deliberate differences from those addons:**
+- **JSON instead of CBOR.** Python reads it with the standard library, and people can inspect it. On a 40-drop test set, JSON + deflate came out 3% smaller than CBOR + deflate (6,920 vs 7,128 characters).
+- **zlib wrapper instead of raw Deflate.** I changed one character at random in 3,000 copies of a raw-Deflate code; 19.8% still decoded to valid JSON with different content and no error. With zlib's Adler-32 checksum the rate was 0%, for 8 extra characters.
+
+**Size.** A worst-case 40-drop soundtrack is about 6.9K characters. That case has a Spotify id, a YouTube id, start/length, a tag and a ~116-character note on every drop, plus 8 landmarks with areaIDs. Without Spotify ids it is about 5.7K, without notes about 3.7K, and a compact set about 2.5K. Each full drop adds about 150 characters.
+- That is far below the ~270K-character pastes reported to freeze edit boxes.
+- A 7K paste into a multi-line edit box needs no special handling. WeakAuras' own import box has none; its fix was shrinking strings by about 80%.
+- It is above Discord's 2,000-character message limit, where pastes become message.txt.
+
+So the reader must find the prefix inside surrounding text or code fences, and accept line breaks, zero-width characters, the URL-safe alphabet and missing padding.
+
+**Pure-Lua fallback.** A 251-line pure Lua 5.1 Base64 + JSON prototype (no bit ops), with LibDeflate test-only for inflate/deflate, round-trips with Python. Under lupa it decodes a 7K code in about 3.5 ms and encodes it in about 8 ms. Use it for the test shim; the shipped addon doesn't need it.
+
+**Security.** Treat the code as untrusted data:
+- strict schema checks, whitelisted keys, types and ranges, and size caps;
+- pcall around every native step;
+- escape `|` and strip control characters before any text reaches a FontString;
+- reduce `file` to a bare file name;
+- show a preview and require an explicit Import click;
+- never loadstring.
+-- recommendations
+  * Adopt share code container v1, replacing SPEC-v1.2 B's unimplemented 'NDPACK1:' + base64url-no-padding: code = '!NeedleDropper:1!' + Base64( zlib( UTF-8 JSON ) ) + '!'. Base64 is RFC 4648 section 4: alphabet A-Z a-z 0-9 + /, padded with '='. zlib is RFC 1950. JSON is RFC 8259, written as raw UTF-8 with no \u escapes for non-ASCII, in drop order. Readers must also accept '-', '_', missing padding, missing terminator and any whitespace.
+  * Make the JSON body a valid needledropper-pack file, byte-compatible with what packs.py loads: {"format":"needledropper-pack","version":1,"id","name","author","description","tags","drops":[...]}, plus the optional additive "revision" (an integer). Each drop has a numeric 'zone' (uiMapID), and optionally 'subzone', 'areaID', 'instanceID', 'label', 'artist', 'title', 'spotify' ('spotify:track:<22 base62>'), 'youtube' (11 characters), 'startMs', 'durationMs', 'volume', 'tags', 'note' and 'disabled'. Writers never emit null or empty arrays and always emit numeric zones; zone-name resolution stays a legacy path in the companion.
+  * Addon writer: local json = C_EncodingUtil.SerializeJSON(pack); local z = C_EncodingUtil.CompressString(json, Enum.CompressionMethod.Zlib, Enum.CompressionLevel.OptimizeForSize); code = '!NeedleDropper:1!' .. C_EncodingUtil.EncodeBase64(z, Enum.Base64Variant.Standard) .. '!'. Each call goes through pcall, and the stored soundtrack table is kept to string keys and non-empty sequences so SerializeJSON never sees a mixed table.
+  * Addon reader, step by step:
+1. Reject input over 65,536 characters.
+2. Remove U+200B, U+FEFF and non-breaking spaces.
+3. Find '!NeedleDropper:(%d+)!' anywhere in the text; if the version is greater than 1, say 'made with a newer NeedleDropper'.
+4. Take the following run of [%w%+/=%-_%s] and note whether '!' follows it.
+5. Strip whitespace, map '-' to '+' and '_' to '/', strip '=' and re-pad to a multiple of 4.
+6. pcall DecodeBase64(Standard), then pcall DecompressString(Zlib).
+7. Require the JSON to be at most 262,144 bytes, then pcall DeserializeJSON.
+8. Validate.
+If a step fails and the terminator is missing (or the length equals the cap), say 'cut off'; otherwise say 'damaged'.
+  * Python writer and reader for the companion and website, standard library only. Writer: '!NeedleDropper:1!' + base64.b64encode(zlib.compress(json.dumps(pack, ensure_ascii=False, separators=(',',':')).encode('utf-8'), 9)).decode('ascii') + '!'. Reader: re.search(r'!NeedleDropper:(\d+)!([A-Za-z0-9+/=_\-\s]*)(!?)'), normalise and re-pad, b64decode(validate=True), zlib.decompressobj().decompress(blob, 262144) with an eof check, json.loads, convert integer-valued floats to int, then run the existing packs.py validation.
+  * Validation and sanitising, the same on both sides:
+- At most 300 drops; JSON depth at most 4.
+- Length caps: name and author 64 bytes, description 1,000, artist and title 200, subzone and label 100, note 500; tags at most 8, each matching [a-z0-9-]{1,24}.
+- Integer ranges: zone, areaID and instanceID 1 to 2^31-1; startMs and durationMs 0 to 3,600,000; volume 0 to 100.
+- Spotify and YouTube ids checked against their regexes.
+- file and inGameFile reduced to a bare file name ending in .mp3 or .ogg, or dropped.
+- Unknown keys kept but ignored, with a warning.
+- Control characters stripped, and '|' escaped as '||' at display time.
+  * Import dialog on ScrollingEditBoxTemplate with maxLetters 65,536:
+- Decode in the OnTextChanged callback only when userChanged is true and the prefix is present, and skip it if the text equals the cached last text (Blizzard notes the event can fire twice on paste).
+- Preview the name, author, revision, drop count, a place/song list with S/Y/L source badges, and any warnings: unknown zones, dropped fields, places that override other active soundtracks.
+- Enable Import only when the code is valid, and prefill an editable name.
+- Import never overwrites (add the ' (2)' or '-2' suffix from SPEC-v1.2) and never activates automatically.
+- When an existing soundtrack has the same id and author and a lower revision, offer 'Update' alongside 'Import as copy'.
+  * Export dialog: SetText(code), HighlightText(), SetFocus(), and the hint 'Press Ctrl+C to copy' (CopyToClipboard is protected). Restore the code if the user edits it, show the character count, and add a note: paste it inside ``` in Discord; long codes arrive as message.txt, and that works.
+  * Recognise foreign strings and give a friendly error: '!WA:', '!E2!', '!E1!', '!PLATER:', '!~MDT2~', 'BW2:', 'BWB1:', 'D!ProfileV2-', '!CELL:', 'oetohH7' and Blizzard's '1|' should get 'This is a <addon> string, not a NeedleDropper soundtrack'.
+  * Versioning policy: bump the prefix number only when the container changes (alphabet, compression or payload type). Bump the JSON 'version' only for breaking schema changes; additive fields keep version 1. Keep every reader forever, and answer a newer version with 'update NeedleDropper' instead of failing silently.
+  * Tests: fake C_EncodingUtil in pure Lua in tests/lua/: Base64 and JSON adapted from the prototype, plus LibDeflate as a test-only file, never packaged. Commit golden vectors: Python-written codes decoded by the addon and addon-written codes decoded by Python. Add a robustness set: Discord fence with chatter, wrapped every 76 characters, zero-width spaces, URL-safe unpadded, truncated, one character changed, a code over the cap, a newer version, a foreign prefix, and malicious fields (a '|T...|t' title, a '..\\' file path, NaN, 1e400, nested depth 200).
+  * Update the docs: SPEC-v1.2 B (prefix, Standard Base64 with padding, closing '!', zlib unchanged, tolerant readers) and the 'Sharing packs' section of PACKS.md, so the in-game share code and the .json file are documented as the same pack.
+-- pitfalls
+  ! Raw DEFLATE, the ecosystem default, has no checksum. In my test, 19.8% of single-character corruptions decoded to different valid JSON without any error. Use the zlib method.
+  ! Never use '|' in the code, as a delimiter or anywhere else. It is WoW's escape character, and Blizzard's own '1|' format is not a model to copy. Escape '|' in every imported string before it reaches a FontString.
+  ! C_EncodingUtil behaviour on bad input is undocumented (it may raise an error or return nil), and Base64 padding tolerance is unknown. pcall every step and normalise Base64 yourself before calling DecodeBase64.
+  ! SerializeJSON fails on mixed or sparse tables, and its empty-table output ([] or {}) and key order are undocumented. Omit empty tables, keep drops and tags as dense sequences, and never compare codes as strings.
+  ! JSON null becomes nil, which can leave holes in drops. Reject non-table or holey drops instead of iterating with pairs.
+  ! Numbers that pass through Lua may come back as floats such as 283000.0. Convert them to int on the Python side before deriving ids like 'zone:1429'.
+  ! Decompression allocates its full output before you can check the size, up to Blizzard's 100 MB EncodingDecompressSizeLimit. Cap the input code length (about 64K characters) before decompressing and the JSON length (256 KiB) before parsing.
+  ! Python's base64.b64decode needs correct padding, and validate=True rejects whitespace. Strip, map and re-pad first.
+  ! The test harness's lupa runtime uses UTF-8 encoding: binary Lua strings passed into Python callbacks raise UnicodeDecodeError. Fake C_EncodingUtil in pure Lua rather than in Python.
+  ! Discord's 2,000-character message limit cannot be met for 40 drops: even a compact code is about 2.5K characters, because Spotify and YouTube ids don't compress. Expect message.txt attachments, and copies that include ``` fences and chatter; the reader must search for the prefix.
+  ! OnTextChanged can fire twice on paste (Blizzard's 'HACK' comment). Cache the last text, and don't decode on every keystroke before the prefix is present.
+  ! CopyToClipboard is protected, so don't plan a 'Copy' button; use a highlighted edit box and Ctrl+C.
+  ! Don't import a Lua-table text format through loadstring, even under pcall (ElvUI's 'Table' path does): it executes whatever the pasted text contains.
+  ! Don't take file paths from codes at face value. Use the bare file name only, with an extension allowlist; the companion must still keep paths inside its media folder.
+  ! Don't depend on WeakAuras tooling or wago.io's WeakAuras pipeline. The WeakAuras team said it does not expect to ship for Midnight, and Forever runs on the Midnight client architecture.
+  ! Dropping old readers (as MDT and ElvUI did) forces users to re-export. Keep a reader for every released container and schema version.
+===== companions
+Every desktop companion that WoW players accept has the same shape. It is installed once, finds the WoW folder from the Blizzard registry InstallPath, asks for a sign-in only when the web service requires one, sits in the tray, starts with Windows and updates itself. It has no screen anyone uses day to day. The game is where users see what the companion did and where they act on it: update badges and apply buttons in WeakAuras/Plater, the TSM AuctionDB age in item tooltips, Raider.IO's in-game "Client Customization" consent toggles and its /rio beacon test, WowUp's login notice.
+
+**Two directions of data**
+- **Companion to game.** Every vendor writes Lua files into an addon folder that the companion owns (WeakAurasCompanion/, wowup_data_addon/, TSM_AppHelper, RaiderIO db/db_client_config.lua). The game reads them at login or /reload.
+- **Game to companion.** Two routes: SavedVariables, which are only written at logout, /reload or disconnect, or a live side channel (pixels or log files).
+
+**Pixels are now a mainstream channel on this exact client.** Raider.IO's addon now ships a Forever TOC (RaiderIO_Camelot.toc, Interface 16001; PR #405 merged 2026-11-04). It includes LibClientBeacon-1.0, a fragmented, CRC-checked pixel packet transport that its desktop recorder reads for Clips, Journeys and Duels. The desktop client sets the strip's size, colour depth and screen position through a file, and that only takes effect after /reload. CraftPresence and Dwow do the same for Discord, with every setting held in-game and a "dumb" external relay. Their burden is Python/pip, manual alignment of the capture, and settings that must match in two places. They describe themselves as for advanced users only. RPGLogs even ships a "Lite" uploader for people who want nothing but the transport.
+
+**No supported way to push data into a running UI without /reload.** Addons cannot read files at runtime. C_AddOns.LoadAddOn is the only mid-session file load. It works once per load-on-demand (LoD) addon per UI session. Inbox addons must exist before the last /reload, because the addon list and the loose-file index are only rebuilt at launch and /reload. Whether it reads bytes the companion rewrote after the last /reload is undocumented. Raider.IO's own README says "After the desktop updates the file, /reload is needed". So it is an experiment to test, not a foundation.
+
+**Recommended architecture for NeedleDropper**
+- The addon owns curation, stored in SavedVariables and edited in-game.
+- Each drop's song (provider plus ID, or "Artist - Title") goes to the companion over the beacon, pre-sent during the ARM wait. In-game edits then take effect with no /reload.
+- The companion shrinks to tray plus Spotify token plus YouTube window plus playback.
+- Its results (matches, "not found", file lists, health and last-seen) go back through a separate NeedleDropper_Data addon read at the next login or /reload. Today the companion writes Map.lua into the NeedleDropper addon folder itself, which reproduces the TSM AppHelper conflict with addon managers.
+
+Source code read for this study: WeakAuras-Companion (write-addon-data.ts, electron/main/index.ts, stores/config.ts), raiderio-addon (beacon.lua, libs/LibClientBeacon-1.0, RaiderIO_Camelot.toc), CraftPresence-Wow-Edition, WowUp.Addon, Gethe/wow-ui-source@forever API docs. NeedleDropper files referenced: D:/NeedleDropper/companion/needledropper/mapgen.py (writes Map.lua/Map.json into the addon folder) and D:/NeedleDropper/addon/NeedleDropper/Beacon.lua and Protocol.lua (31-cell top-left strip with 10 payload bytes).
+-- recommendations
+  * 1. Make the in-game addon the single source of truth. Soundtracks and assignments live in NeedleDropperDB / NeedleDropperCharDB and are edited in an in-game panel. The companion must be able to play a drop without knowing the soundtrack or needing any Map.lua.
+  * 2. Turn the beacon into a self-describing command channel. Add a fragmented message type modelled on LibClientBeacon's packets: session ID, message ID, fragment offset and length, CRC16 per packet, CRC32 per message. It carries the place label, provider plus ID (a Spotify ID is 22 base62 characters, a YouTube ID 11) or 'Artist\tTitle'. Send it during ARM, the existing calm-moment wait, so FIRE stays tiny and instant. In-game edits then take effect with no /reload, and the title card shows what the user typed.
+  * 3. Move every companion-written file out of Interface\AddOns\NeedleDropper into a companion-owned NeedleDropper_Data addon:
+- TOC: ## Interface copied from the installed NeedleDropper.toc, ## Dependencies: NeedleDropper, ## Group: NeedleDropper.
+- data.lua plus an ADDON_LOADED hook calling NeedleDropper.AddCompanionData(t).
+- Contents: data generation, beacon position and layout, Spotify/YouTube match results, the local file list, lastSeen and spotifyConnected. The main addon is then distributed untouched via CurseForge, Wago or WowUp.
+  * 4. Shrink the companion to what players accept:
+- An installer or portable exe; keep the registry InstallPath detection.
+- Tray icon; start with Windows on by default (HKCU Run key, re-verified after updates); start minimised after first run; single instance.
+- Idle until _forever_\Wow.exe runs.
+- Update checks every few hours, applied with user confirmation.
+- Open the browser only for Spotify connect (per-user Client ID, PKCE). Show the YouTube player window only when needed. No daily control panel.
+- Optionally register needledropper:// for web-shared packs, like weakauras-companion://.
+  * 5. Put health and consent in-game:
+- Toggles such as 'Allow companion to play music' and 'Allow chat-log link', modelled on Raider.IO's 'Client Customization'.
+- A status line built from NeedleDropper_Data's timestamp ('companion seen 2 min before login, Spotify connected'), the TSM tooltip pattern.
+- /needle test, confirmed on the companion side by an OS toast or a short audible test, as Raider.IO's client reports a test signal.
+- When the companion owns a setting, show it read-only in-game.
+  * 6. Replace polling with a SavedVariables watcher on WTF\Account\*\SavedVariables\NeedleDropper.lua (mtime or ReadDirectoryChangesW). Pick the account whose file changed last instead of asking. Never write SavedVariables. Offer an in-game 'Save & sync now' that calls ReloadUI() only when the user wants an immediate sync (Raider.IO RWF pattern).
+  * 7. Run a 5-minute load-on-demand inbox test before designing anything around it:
+1. Ship NeedleDropper_Inbox01 with ## Interface: 16001, ## LoadOnDemand: 1, ## Dependencies: NeedleDropper, ## Group: NeedleDropper, and data.lua containing NeedleDropperInbox = {nonce = 0}.
+2. Log in.
+3. Have the companion rewrite data.lua with nonce = 42, once in place and once via temp+rename, and once with a larger file.
+4. Separately, create a brand-new file referenced from the TOC.
+5. Run /run print(C_AddOns.LoadAddOn("NeedleDropper_Inbox01"), NeedleDropperInbox and NeedleDropperInbox.nonce) and check C_AddOns.DoesAddOnHaveLoadError.
+6. Call it again to confirm it only works once.
+
+Use inboxes only if nonce 42 appears, and then only for in-game-initiated requests such as Spotify search results or a status refresh.
+  * 8. Local files without the companion. Use a NeedleDropper_Music folder separate from the addon. Check typed paths in-game with C_UIFileAsset.IsKnownFile. The companion optionally writes a file list into NeedleDropper_Data so the in-game picker can browse it. Tell users to /reload after copying files, with a restart as the fallback.
+  * 9. Beacon coexistence:
+- Keep hiding it when idle.
+- Let the companion choose its screen position via NeedleDropper_Data, like Raider.IO's client placement.
+- Avoid the top-left row that CraftPresence and Dwow use, or detect collisions through magic bytes and the checksum.
+- Keep 1-bit channels, or add in-strip grey calibration cells (Raider.IO v3) before raising colour depth.
+- Warn in-game when gamma, brightness or contrast differ from the defaults (CraftPresence AssertRenderSettings).
+- Implement your own transport rather than embedding LibClientBeacon, which is single-owner and not public.
+  * 10. Sharing without the companion: import/export soundtrack strings with C_EncodingUtil (JSON or CBOR, then Deflate, then Base64), accept pasted Spotify/YouTube links, and optionally share to party or guild via addon comms outside restricted content (the wowaudit/RCLootCouncil pattern).
+-- pitfalls
+  ! Writing companion output into the addon-manager-owned folder. NeedleDropper's mapgen.py writes Map.lua and Map.json into Interface\AddOns\NeedleDropper. CurseForge, Wago or WowUp will overwrite these files on update or flag them as modified, the TSM AppHelper reinstall loop.
+  ! A companion that also installs or updates the addon competes with CurseForge. Raider.IO and TSM both tell users to set their addon to Ignored.
+  ! Cloud backup or sync of the WoW folder (OneDrive, Google Drive) causes EPERM write failures (Raider.IO KB). Use atomic writes, retries, and a clear message.
+  ! Autostart helpers are fragile. WA's node-auto-launch silently failed (#857), so verify the Run entry after every update.
+  ! Stale SavedVariables. The companion only sees in-game changes after /reload or logout. Ghost entries follow (WA #2152, #2765), a crash loses the unsaved tail, and anything written to SavedVariables while the game runs is overwritten.
+  ! Two-reload loops. If curation goes in-game -> SavedVariables -> companion -> data file -> game, the user needs two reloads to see a result. Avoid it by sending the song key over the beacon and keeping data coming back into the game non-critical.
+  ! Assuming /reload always picks up brand-new files. The wiki says yes since 9.0.1, but WA Companion and MaliMusicPlayer still advise a restart. Keep restart as a documented fallback and verify through the beacon echo.
+  ! Load-on-demand inboxes are one-shot per session and must exist before the last /reload. They need a matching Interface version, clutter the AddOn List, can be read half-written, and whether they see bytes rewritten after the reload is undocumented.
+  ! Python/pip, terminal steps, manual alignment of the capture and settings duplicated in two places (CraftPresence, Dwow, MaliMusicPlayer) are tolerated only by self-described advanced users. RPGLogs ships a 'Lite' uploader precisely for minimalists.
+  ! Pixel capture is fragile under non-default gamma, brightness or contrast, HDR, MSAA and exclusive fullscreen. Dwow and CraftPresence require windowed or borderless mode with default render settings.
+  ! Beacon collisions: CraftPresence and Dwow draw at the top-left, and CraftPresence paints on zone change. Raider.IO's client can place its strip anywhere. LibClientBeacon is single-owner, not a public producer API, and only one day old (beta).
+  ! Spotify Development Mode (Feb 2026): 5 users per app, owner must have Premium, search capped at 10 results, no batch track lookups. A shared Client ID is impossible without Extended Quota, so every user must create their own app.
+  ! WeakAuras and its Companion are not on 12.x/Midnight. Cite them for the mechanism only, not for runtime behaviour on Forever.
+  ! Midnight chat lockdown and secret values affect chat-log and addon-comms transports in instances and encounters. Never compare or test secret values in beacon code; guard with issecretvalue as Raider.IO does.
+  ! Addons cannot read the clipboard. Paste is user-driven, so overwrite the user's clipboard from the companion only on an explicit user request.
+===== music-and-beacons
+Music addons. Every WoW music addon that lets users pick songs does the assigning inside the game. Soundtrack uses a tree of places with an "Add Zone" button and an "Automatically Add Zones" option. FFXIV's Orchestrion uses an in-game list of "song X will be replaced with song Y" rules. Two things push users out of the game. First, local audio files must exist when the client starts: a full restart is needed, not /reload, and building the library usually takes a generator script (Soundtrack GenerateMyLibrary.ps1/.bash/.py, EpicMusicPlayer PlaylistCreator.vbs). Second, signing in to a streaming service. No WoW addon integrates Spotify or YouTube. In other games (Minecraft Fabric mods, FFXIV Dalamud plugins) Spotify control runs inside the game process: PKCE sign-in with a localhost callback, Premium required, and a Client ID each user supplies. That last part is forced because Spotify development-mode apps are capped at 5 allowlisted users, and since 2025-05-15 extended quota is only open to organisations with 250k+ monthly users. Data gets into WoW without a restart by pasting into an edit box (Musician: web tool, then Ctrl+V; Soundtrack: export/import text). So NeedleDropper can accept pasted Spotify links and YouTube URLs in an in-game editor and keep soundtracks in SavedVariables, reducing the companion to sign-in, token storage, the YouTube window and playback. SavedVariables are only written at logout or reload, so the beacon itself must carry what to play.
+
+Pixel beacons. Prior designs: CraftPresence (6x6 root-UI-unit squares, 3 ASCII bytes per square in full 8-bit RGB, black separators, white terminator, shown for 5 s per change, needs gamma/brightness/contrast at defaults); LibSerpix (1x6-unit CBOR columns between anchor rows, size plus 8-bit-sum header, rewritten every frame); DataToColor (119 one-pixel cells each holding a 24-bit int, a layout cell, a calibration pass, and a requirement to turn off AA, sharpening, glow and HDR and set gamma to 1.0); wow-drp; WoWCerealize (chunked packets with packet number and checksum); and QR (Live Armory QR). Every 8-bit-per-channel design needs display calibration. NeedleDropper's decoder (one bit per channel, thresholds calibrated on the header, sub-pixel lattice fit) already needs none.
+
+Recommendations:
+- Keep one bit per channel.
+- Draw a single row no more than 4 px tall at the client's (0,0). In Forever's Classic Edit Mode preset the PlayerFrame box starts 4 UI units down, about 3.7-6.5 px at 1080p.
+- Make frames variable length: up to 4+128 cells, 48 bytes per page, 38 of them data.
+- Send each song descriptor during ARM as a repeating carousel of pages (descriptor hash, page i of n, Fletcher-16 per page, Fletcher-32 over the whole message) so FIRE stays instant.
+- Allow stacked rows only where measured clearance permits.
+- Pack IDs at 6 bits per character (Spotify 17 B, YouTube 9 B).
+- In the companion, add palette calibration, lock-on and an adaptive capture rate.
+-- recommendations
+  * In-game curation (replaces the external control panel). Add a 'Soundtrack' window opened from the addon compartment and /nd, with two halves:
+- Left: a tree of places collected automatically as the character visits them, using the Director's keys (zone:uiMapID > area/sub > inst:). Filters: assigned, unassigned, current. An 'Assign here' button selects the current place, like Soundtrack's 'Add Zone'.
+- Right: an editor for the selected entry. A paste box accepts open.spotify.com/(intl-xx/)track/<id>?si=..., spotify:track:<id>, youtu.be/<id> and youtube.com/watch?v=<id>&t=<s>, parsed with Lua patterns. Optional Artist and Title fields drive the title card and search-only entries. Also: start offset; a local file name with a Test button (PlaySoundFile willPlay) and a notice that new files need a full restart; Preview and Stop buttons (sent to the companion as a PREVIEW event); soundtrack sets (create, rename, duplicate, enable, priority); Import (paste) and Export (highlighted EditBox plus Ctrl+C).
+All of it lives in SavedVariables, with no Map.lua and no /reload.
+  * Shrink the companion to what cannot be avoided: a tray app with
+- a first-run 'Connect Spotify' wizard: create your own Spotify developer app in development mode, allowlist yourself, register the 127.0.0.1 redirect, paste the Client ID, sign in with PKCE in the browser, store tokens in the OS credential store, check Premium;
+- the YouTube player window;
+- the beacon reader;
+- playback.
+Optionally use Windows media-session controls for pause/skip/now-playing. Retire Map.lua/Map.json generation and companion ownership of packs; offer a one-time 'export my packs as import strings' to migrate existing users.
+  * Beacon v2 geometry: keep one bit per channel (8 colours, 3 bits per cell). Draw a single row at client (0,0), anchored to WorldFrame TOPLEFT as now. Keep cellPx at 4 (3 allowed, 4-6 at 4K) so the strip is at most 4 px tall at 1080p, clear of the Classic-preset PlayerFrame box at every UI scale. Frames are variable length: a page is the m-g-m-g finder plus up to 128 payload cells, which is 532 px wide at 4 px or 399 px at 3 px. Offer a 'compact' option capped at 64 payload cells. Idle and small events stay at about 31 cells (124 px), the same as v1.
+  * v2 page bytes, packed MSB-first into cells in R, G, B order exactly as in v1:
+- b0 0x4E
+- b1 0x20|type (version 2 in the high nibble)
+- b2 seq
+- b3 flags
+- b4-b5 descHash (uint16)
+- b6 (pageIdx<<4)|pageCount (1-15)
+- b7 len
+- data[len]
+- Fletcher-16 (2 bytes)
+That is 10 bytes of overhead, so 128 cells = 384 bits = 48 bytes gives at most 38 data bytes per page. The message is the descriptor followed by a Fletcher-32 or Adler-32 checksum, which stays pure arithmetic like the current Protocol.lua. CRC-32 would require WoW's bit library, which DataToColor uses but NeedleDropper's tests deliberately avoid. Unknown event types and descriptor tags must be skipped, so the format can grow.
+  * Descriptor encoding:
+- 1 byte kind bitmask
+- Spotify track ID: 22 base62 characters packed at 6 bits each = 17 bytes (or 16 bytes as a 128-bit number)
+- YouTube ID: 11 base64url characters at 6 bits = 9 bytes
+- dropKey: u32
+- optional timing: startSec u16, durSec u16, volume u8
+- optional text: length byte plus up to 80 bytes UTF-8, cut at a character boundary
+- optional label: up to 24 bytes
+Resulting sizes: Spotify only about 26-31 bytes and YouTube only about 18-23 bytes, so 1 page; both IDs with timing about 40 bytes, 2 pages; worst case with text and label about 146 bytes, 4 pages.
+  * Timing and acceptance:
+- During ARM, the addon cycles the descriptor pages continuously, holding each about 0.5 s (4 pages take about 2 s), well inside the 10 s dwell and normally inside the 3 s discovery dwell.
+- FIRE pages carry the same descHash, so the companion plays immediately if it already holds a verified descriptor with that hash. Otherwise the addon keeps cycling FIRE pages for about 6 s and the companion plays when the message completes, or gives up after about 8 s.
+- A page counts after one valid read (magic, version, Fletcher-16). Anything that starts playback must also pass the whole-message 32-bit check. Single-page events with no message checksum (CANCEL/STOP/legacy v1) keep the existing 2-identical-reads rule.
+- The companion raises capture to 8-10 Hz while a multi-page message is incomplete and drops back to 2-4 Hz when idle.
+  * Optional stacked rows: when there is enough measured clearance, show all pages at once as rows at y = 0, cellPx, 2*cellPx and so on, each row a complete page with its own finder, so there is no paging delay. Clearance px = physicalHeight - PlayerFrame:GetTop()*PlayerFrame:GetEffectiveScale()/PixelUtil.GetPixelToUIUnitFactor(). Re-measure on UI_SCALE_CHANGED, DISPLAY_SIZE_CHANGED and after Edit Mode changes. Rows are typically available at 4K, in the Modern preset, or by user choice; the companion simply scans for more finders at multiples of the pitch.
+  * Robustness without user calibration:
+- Keep the regex finder, sub-pixel lattice fit and per-channel thresholds from the header.
+- Add an 8-colour calibration run (black, red, green, blue, cyan, magenta, yellow, white) in idle frames, classify cells by nearest learned colour, and fall back to header thresholds.
+- Call SetSnapToPixelGrid(true) on the cell textures; SetRoundLayoutToNearestPixel is protected.
+- Never ask users to change gamma, brightness, contrast, HDR, AA or sharpening.
+- Have /needle selftest beacon and the companion's diagnostics print the measured channel levels and the number of unreadable cells.
+  * How the companion should locate the strip:
+1. Find the window by class GxWindowClass, with per-monitor DPI awareness V2, and get the client origin from GetClientRect plus ClientToScreen.
+2. Capture a small region at that origin: width about (4+128)*maxCellPx + 32, height about max(16, rows*cellPx + 8) + maxOffset. BitBlt when the window is visible; PrintWindow(PW_CLIENTONLY|PW_RENDERFULLCONTENT) when it may be covered, which also leaves out overlays drawn as separate windows.
+3. Lock on: cache x, y, pitch and rows, and sample only cell centres each tick.
+4. Re-scan after N failures, a window move or resize, or a geometry-flag change.
+5. If nothing is found within maxOffset, scan the top 16 rows across the left half of the client, to support an addon x-offset setting for users whose overlays occupy the corner.
+6. In diagnostics, report 'finder found but N cells unreadable at x=...', which indicates something is covering the strip.
+  * Migration and compatibility: the companion keeps decoding v1 frames (version nibble 1) and v2. The addon gets a 'beacon protocol' option and defaults to v2 once the companion version advertised in its HELLO-equivalent log line supports it. The chat-log channel gets a v2 line carrying the same descriptor text, for users who cannot use pixels.
+  * Text-only entries (Artist - Title with no ID): the companion resolves them with Spotify search when the ARM arrives (prewarm) and caches the resulting URI by descHash. Require a YouTube URL for YouTube entries, since YouTube search needs a Data API key.
+  * Detect other music addons that use PlayMusic (Soundtrack, EpicMusicPlayer and similar) at login and warn that they can overlap. Restore zone music and volume defensively; Soundtrack had a fade bug that kept lowering the music volume over time.
+-- pitfalls
+  ! Encoding a full 8 bits per channel (CraftPresence, LibSerpix, DataToColor) forces users to set gamma 1.0, brightness 50 and contrast 50, turn off AA, sharpening and glow, avoid f.lux, disable HDR, and often calibrate by hand. Do not trade NeedleDropper's one-bit cells for density; reject 2 bits per channel for the same reason.
+  ! Sizing cells in UI units instead of physical pixels gives non-integer cells (CraftPresence: 6 root units is about 8.4 px at 1080p and 16.9 px at 4K; LibSerpix uses UIParent units). The edges blend, so readers have to skip pixels or need calibration.
+  ! Tall strips, multi-row blocks and QR squares at the top-left enter the Classic-preset PlayerFrame box (TOPLEFT +4,-4 UI units, about 3.7-6.5 px at 1080p). Add rows only after measuring clearance at runtime.
+  ! Requiring 2 identical reads per page at 4 Hz makes paging slow (8 pages is about 5 s). Accept a page on one read when its checksum passes, gate playback on the whole-message checksum, and raise the capture rate while a message is incomplete.
+  ! Overlays, other windows and notifications can cover the corner. Desktop BitBlt captures them. PrintWindow and WGC avoid overlays drawn as separate windows, but overlays injected into the game's rendering still draw over the strip.
+  ! New audio files need a full client restart (not /reload). Addon managers wipe files inside addon folders. Generator scripts break on PowerShell execution policy, the VBScript phase-out and Python dependencies. Avoid manifest generators altogether.
+  ! Using localized zone names as keys (Soundtrack) breaks soundtracks shared across client languages. Use uiMapID, areaID and instanceID; the sub:<mapID>:<slug> keys are still language-dependent.
+  ! CopyToClipboard is protected, addon hyperlinks are local-only, and addon messages are blocked during chat-messaging lockdown (encounters, M+, PvP, restricted maps). Design sharing around paste and import strings.
+  ! Secret values: arithmetic or comparison on a secret in tainted code raises an immediate Lua error, and 12.0.5 guarded APIs return secrets on restricted maps. Never feed an unchecked API value into the beacon encoder.
+  ! Spotify's 5-user development-mode cap, and extended quota being closed to individuals, mean NeedleDropper cannot ship a shared Client ID. Each user needs their own developer app plus Premium for playback, so budget the onboarding text accordingly.
+  ! SetRoundLayoutToNearestPixel is protected and the PixelUtil.Set* helpers are deprecated (still callable). Keep NeedleDropper's own px-to-unit arithmetic and the lattice fit as the safety net.
+  ! HDR, Windows Auto HDR, colour management, night light and possibly WoW's colorblind filters can shift captured colours, and Desktop Duplication may return FP16 under HDR. Test with Forever's HDR console variables on and off before claiming HDR support.
+  ! Do not put personal data (character names, chat, realm) in the beacon or the chat-log line. Truncate UTF-8 text at character boundaries.
+  ! Stay output-only: input injection like the Hekili-reader tools is a ToS and ban risk. Say this explicitly in the docs and keep combat state out of the beacon.
+  ! Don't rely on polling the SavedVariables file for live state: it is written only at logout, disconnect, quit or /reload.
+===== forever-ui-apis
+Verified by cloning Gethe/wow-ui-source 'forever' @eac30af (1.60.1.70790, 2026-11-04) and 'live' @297d7aa (12.1.5.70783) and grepping both trees. Forever runs as game type 'camelot' (WOW_PROJECT_ID = WOW_PROJECT_CAMELOT = 18) inside the 'mainline' TOC family. Every [Family] file therefore resolves to Mainline, so the full retail 12.x widget kit loads, plus 61 small Camelot override folders (mostly art offsets and gamepad focus/smart-navigation). Every requested building block exists on Forever under the same name as on live: ButtonFrameTemplate, PortraitFrameTemplate, DefaultPanelFlatTemplate, BasicFrameTemplateWithInset, InsetFrameTemplate, UIPanelButtonTemplate, UIPanelCloseButton, InputBoxTemplate, SearchBoxTemplate, UICheckButtonTemplate, UIRadioButtonTemplate, PanelTabButtonTemplate + PanelTemplates_*, ScrollingEditBoxTemplate, InputScrollFrameTemplate, UIPanelScrollFrameTemplate (deprecated), WowScrollBoxList / MinimalScrollBar / CreateScrollBoxListLinearView / CreateDataProvider / ScrollUtil.InitScrollBoxListWithScrollBar, and the Blizzard_Menu system (DropdownButton intrinsic, WowStyle1DropdownTemplate, :SetupMenu, MenuUtil.CreateContextMenu / CreateRadioMenu, rootDescription:CreateButton / CreateRadio / CreateCheckbox). The same holds for UISpecialFrames, AddonCompartment (Camelot-skinned), StaticPopupDialogs, GameTooltip, C_Timer, Settings.OpenToCategory, C_AddOns.LoadAddOn and all GameFont* objects. Differences from live only add things. Forever-only: WowClassicScrollBar, CheckboxWithLabelTemplate, MenuUtil.CreateSearchEntry / CreateRedHighlightButton, StaticPopup OnEscape and gamepad focus mixins. Nothing an editor needs is missing. Conclusion: a complete in-game soundtrack editor can be built from stock Blizzard widgets with no libraries. The traps that matter: (1) The stock close button (UIPanelCloseButton -> HideUIPanel) and ShowUIPanel/HideUIPanel are blocked for addon code in combat. (2) 12.x StaticPopup handlers receive (dialog, data) and must use dialog:GetEditBox()/GetButton1(); there are no .editBox/.button1 fields. (3) ReloadUI() needs a hardware event: it works from a button or a popup OnAccept, not from timers or events. (4) CopyToClipboard is protected, but Ctrl+V paste into EditBoxes works by default. (5) EditBoxes autofocus by default. (6) Lua-only ScrollBox rows need view:SetElementExtent. (7) UISpecialFrames needs a global frame name. No Midnight secret-value rule affects a non-secure config window, and the zone APIs NeedleDropper uses carry no secret flags in this build.
+-- recommendations
+  * Build the curation UI in game as one named ButtonFrameTemplate window, 'NeedleDropperEditor': title via SetTitle, portrait hidden, frameStrata DIALOG, movable. Ideally ship it as a LoadOnDemand child addon NeedleDropper_Editor (## Interface: 16001, ## LoadOnDemand: 1, ## Dependencies: NeedleDropper) loaded with C_AddOns.LoadAddOn on first use. Entry points: AddonCompartment left-click, /nd edit, and a CreateSettingsButtonInitializer row in the existing Settings category.
+  * Lay it out from stock parts only. Tabs: PanelTabButtonTemplate (Soundtracks | Needle drops | Playback). Left pane: WowScrollBoxList + MinimalScrollBar with CreateScrollBoxListLinearView + CreateDataProvider, and a SearchBoxTemplate filter on top. Right pane form: InputBoxTemplate (place label, Spotify/YouTube URL or file path), WowStyle1DropdownTemplate (source type, soundtrack), UICheckButtonTemplate or MinimalCheckboxTemplate (first-visit only, enabled). Footer: UIPanelButtonTemplate buttons (Save, Preview, Delete, Use current location). Bulk import/export: ScrollingEditBoxTemplate + MinimalScrollBar.
+  * Open and close only with frame:Show()/Hide(). Immediately override f.CloseButton's OnClick to call f:Hide(), and run tinsert(UISpecialFrames, 'NeedleDropperEditor'). Never use ShowUIPanel, HideUIPanel or UIPanelWindows. Keep every editor frame insecure and do not anchor it to Blizzard secure frames, so it works in combat and in instances.
+  * Use Blizzard_Menu exclusively. Form dropdowns: DropdownButton:SetupMenu with rootDescription:CreateRadio/CreateCheckbox/CreateButton; call :GenerateMenu() after external state changes. Right-click row actions: MenuUtil.CreateContextMenu(row, ...). Do not use UIDropDownMenu*. If you use the Forever-only MenuUtil.CreateSearchEntry/CreateRedHighlightButton, feature-detect them.
+  * For ScrollBox rows, choose one of two approaches. (a) Ship an Editor.xml with a virtual Button row template; the extent then comes from its <Size>. (b) In pure Lua, call view:SetElementExtent(n) before ScrollUtil.InitScrollBoxListWithScrollBar, and do one-time row construction inside the initializer behind a guard flag. Update lists by mutating the DataProvider (Insert/Remove/SetSortComparator) or by calling SetDataProvider(dp, ScrollBoxConstants.RetainScrollPosition).
+  * Make paste the primary way to enter data. Users copy a Spotify or YouTube link in the browser and press Ctrl+V into an InputBoxTemplate (SetAutoFocus(false), SetMaxLetters(0)); parse and validate the URI in Lua and show the result inline. CopyToClipboard is protected, so export or share soundtracks as a string in a highlighted ScrollingEditBox for the user to copy with Ctrl+C.
+  * Add an 'Add needle drop here' button that captures GetZoneText(), GetSubZoneText() and C_Map.GetBestMapForUnit('player'). None of these return secret values in this build, so players can curate where they are standing.
+  * For confirmations and naming prompts, use unique StaticPopupDialogs['NEEDLEDROPPER_*'] definitions with (dialog, data) handlers and dialog:GetEditBox()/GetEditBoxText()/GetButton1(). Omit preferredIndex. Reserve StaticPopup_ShowGenericConfirmation for throwaway prompts.
+  * Apply edits live to the SavedVariables-backed tables; no reload is needed. Expose one explicit 'Sync to companion (reloads UI)' button whose OnClick calls ReloadUI() to flush SavedVariables to disk. Never trigger ReloadUI from timers, events or ADDON_LOADED.
+  * Polish with Blizzard helpers: GameTooltip_SetTitle/AddNormalLine/AddInstructionLine for row tooltips; GameFontNormal/GameFontHighlight/GameFontDisableSmall for text; ZoneTextFont/SubZoneTextFont for the title card. In internal docs, cite line numbers per branch using pinned commits, because forever and live line numbers differ.
+-- pitfalls
+  ! UIPanelCloseButton (on ButtonFrameTemplate, PortraitFrameTemplate and BasicFrameTemplate) calls HideUIPanel, which addon code cannot use in combat (UIParentPanelManager.lua:853-861). The X button then does nothing except show 'Interface action blocked'. Override its OnClick with frame:Hide().
+  ! In 12.x StaticPopup, handlers receive (dialog, data), and the frame exposes EditBox/ButtonContainer through dialog:GetEditBox()/GetButton1(). The legacy self.editBox and self.button1 are nil, and the wiki tutorial is outdated. preferredIndex is gone.
+  ! ReloadUI()/C_UI.Reload needs a hardware event (wiki #hwevent; the generated docs do not flag it). It works from OnClick or OnAccept and fails from C_Timer or OnEvent.
+  ! CreateFrame('EditBox') and InputBoxTemplate default to autoFocus=true (UI.xsd:1065), so they steal keyboard input when shown. Call :SetAutoFocus(false).
+  ! ScrollBox: SetElementInitializer('Button', ...) without view:SetElementExtent or an extent calculator raises 'Failed to assign an explicit element extent or set an extent calculator.' (ScrollBoxListView.lua:44). Addons cannot declare virtual templates from Lua, only in an XML file listed in the TOC.
+  ! InputScrollFrameTemplate with maxLetters 0 shows a negative .CharCount (GetMaxLetters() - GetNumLetters()). hideCharCount is only read in OnLoad, so from Lua call frame.CharCount:Hide() after creation, or use ScrollingEditBoxTemplate instead.
+  ! Template KeyValues (ScrollingEditBoxTemplate fontName/maxLetters/defaultText; InputScrollFrameTemplate instructions/hideCharCount) are read in OnLoad, which runs inside CreateFrame. Set them afterwards through methods, or in an XML-derived template.
+  ! UISpecialFrames stores frame names and looks them up with _G[name], so anonymous frames cannot close on Esc. The OnKeyDown/SetPropagateKeyboardInput alternative has been #nocombat since 10.1.5.
+  ! PanelTabButtonTemplate has no OnClick, and AnchorTabs only chains tabs 2..n. Set the IDs, the OnClick (PanelTemplates_SetTab) and the first tab's anchor yourself. Note that UIRadioButtonTemplate's label is lowercase .text, while UICheckButtonTemplate's is .Text.
+  ! CopyToClipboard is protected (secure code only); addons have no way to write or read the clipboard. Rely on the user pressing Ctrl+C/Ctrl+V in an EditBox.
+  ! Not available on this client: EasyMenu, InterfaceOptions_AddCategory, InterfaceOptionsFrame_OpenToCategory, and the global LoadAddOn/GetAddOnMetadata/IsAddOnLoaded aliases. Use Blizzard_Menu, Settings.* and C_AddOns.* instead. UIDropDownMenu, UIPanelScrollFrameTemplate and HybridScrollFrame still exist but are explicitly deprecated.
+  ! Settings.OpenToCategory takes a numeric category ID (category:GetID()) and routes to C_SettingsUtil.OpenSettingsPanel, which is flagged HasRestrictions. Call it from clicks, out of combat, and keep the pcall. SettingsPanel is HIGH strata, so give the editor DIALOG strata rather than touching SettingsPanel from addon code.
+  ! The generic Blizzard dialogs (GENERIC_CONFIRMATION/GENERIC_INPUT_BOX, via StaticPopup_ShowGenericConfirmation/ShowCustomGenericInputBox) attach addon callbacks to dialog frames that Blizzard also uses. Prefer unique NEEDLEDROPPER_* keys for anything recurring.
+  ! Forever-only helpers (MenuUtil.CreateSearchEntry/CreateRedHighlightButton, CheckboxWithLabelTemplate, WowClassicScrollBar, StaticPopup OnEscape) do not exist on retail 12.1.5; feature-detect them if you plan a shared codebase. 'CreateSearchEntry' is a styled button, not a text-entry field.
+  ! AddonCompartment registers TOC entries only once, at PLAYER_ENTERING_WORLD, and passes (addonName, buttonName) to the global handler. The button is hidden if no addon registers or if the UserAddonsDisabled game rule is active.
