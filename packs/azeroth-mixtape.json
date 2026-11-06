@@ -16,6 +16,7 @@
       "title": "9 to 5",
       "artist": "Dolly Parton",
       "durationMs": 165547,
+      "spotify": "spotify:track:4w3tQBXhn5345eUXDGBWZG",
       "youtube": "d_vPJjqWxZM",
       "startMs": 0,
       "tags": [
@@ -28,6 +29,7 @@
       "title": "The John Dunbar Theme",
       "artist": "John Barry",
       "durationMs": 136867,
+      "spotify": "spotify:track:4VyuAqNcplPZkNGLyNza4H",
       "youtube": "r2rAYwhM0Kc",
       "startMs": 0,
       "tags": [
@@ -40,6 +42,7 @@
       "title": "Africa",
       "artist": "Toto",
       "durationMs": 295283,
+      "spotify": "spotify:track:2374M0fQpWi3dLnB54qaLX",
       "youtube": "QAo_Ycocl1E",
       "startMs": 0,
       "tags": [
@@ -54,6 +57,7 @@
       "title": "I Still Haven't Found What I'm Looking For",
       "artist": "U2",
       "durationMs": 277477,
+      "spotify": "spotify:track:3MRQ3CSjoiV1HFil8ykM9M",
       "youtube": "e3-5YC_oHjE",
       "startMs": 0,
       "tags": [
@@ -66,6 +70,7 @@
       "title": "May It Be",
       "artist": "Enya",
       "durationMs": 211067,
+      "spotify": "spotify:track:1wIQ2Nm0raqOapHK4bCD3J",
       "youtube": "acM4c1BYVlU",
       "startMs": 0,
       "tags": [
@@ -80,6 +85,7 @@
       "title": "Rocket Man (I Think It's Going to Be a Long, Long Time)",
       "artist": "Elton John",
       "durationMs": 281613,
+      "spotify": "spotify:track:3gdewACMIVMEWVbyb8O9sY",
       "youtube": "DtVBCG6ThDk",
       "startMs": 0,
       "tags": [
@@ -92,7 +98,8 @@
       "title": "Sandstorm",
       "artist": "Darude",
       "durationMs": 225667,
-      "youtube": "y6120QOlsfU",
+      "spotify": "spotify:track:3dxDj8pDPlIHCIrUPXuCeG",
+      "youtube": "XjvkxXblpz8",
       "startMs": 0,
       "tags": [
         "funny"
@@ -106,6 +113,7 @@
       "title": "Money, Money, Money",
       "artist": "ABBA",
       "durationMs": 186070,
+      "spotify": "spotify:track:3lKN03PDeBnXZS7sDukRBt",
       "youtube": "1LPNuFkteI8",
       "startMs": 0,
       "tags": [
@@ -118,6 +126,7 @@
       "title": "Toxic",
       "artist": "Britney Spears",
       "durationMs": 198800,
+      "spotify": "spotify:track:6I9VzXrHxO9rA9A5euc8Ak",
       "youtube": "7l1A2gShWZo",
       "startMs": 0,
       "tags": [
@@ -130,6 +139,7 @@
       "title": "Theme from Jurassic Park",
       "artist": "John Williams",
       "durationMs": 207427,
+      "spotify": "spotify:track:2TZbQZXOuR8osP2AK8yYMN",
       "youtube": "lDlU08RU7Tk",
       "startMs": 0,
       "tags": [
@@ -142,6 +152,7 @@
       "title": "Dust in the Wind",
       "artist": "Kansas",
       "durationMs": 206267,
+      "spotify": "spotify:track:6zeE5tKyr8Nu882DQhhSQI",
       "youtube": "9fNrJMkTWEE",
       "startMs": 0,
       "tags": [
@@ -156,6 +167,7 @@
       "title": "Ice Ice Baby",
       "artist": "Vanilla Ice",
       "durationMs": 271467,
+      "spotify": "spotify:track:11d9oUiwHuYt216EFA2tiz",
       "youtube": "jewmMjnbfzE",
       "startMs": 0,
       "tags": [
@@ -168,6 +180,7 @@
       "title": "Now We Are Free",
       "artist": "Hans Zimmer & Lisa Gerrard",
       "durationMs": 254293,
+      "spotify": "spotify:track:1elGwF4VwkwglV4nCBPJtv",
       "youtube": "ghxzLw2wRis",
       "startMs": 0,
       "tags": [
@@ -180,6 +193,7 @@
       "title": "Free Fallin'",
       "artist": "Tom Petty",
       "durationMs": 255712,
+      "spotify": "spotify:track:5tVA6TkbaAH9QMITTQRrNv",
       "youtube": "1lWJXDG2i0A",
       "startMs": 0,
       "tags": [
@@ -192,6 +206,7 @@
       "title": "All by Myself",
       "artist": "Céline Dion",
       "durationMs": 310856,
+      "spotify": "spotify:track:0gsl92EMIScPGV1AU35nuD",
       "youtube": "3p-rsl10t9I",
       "startMs": 0,
       "tags": [
@@ -204,6 +219,7 @@
       "title": "Who Wants to Live Forever",
       "artist": "Queen",
       "durationMs": 316773,
+      "spotify": "spotify:track:4IgwcozjYTR0MFrHurw1un",
       "youtube": "cHh05dFIDmk",
       "startMs": 0,
       "tags": [
@@ -216,6 +232,7 @@
       "title": "Viva la Vida",
       "artist": "Coldplay",
       "durationMs": 241445,
+      "spotify": "spotify:track:1mea3bSkSGXuIRvnydlB5b",
       "youtube": "dvgZkm1xWPE",
       "startMs": 0,
       "tags": [
@@ -230,6 +247,7 @@
       "title": "Highway to Hell",
       "artist": "AC/DC",
       "durationMs": 208111,
+      "spotify": "spotify:track:2zYzyRzz6pRmhPzyfMEC8s",
       "youtube": "l482T0yNkeo",
       "startMs": 0,
       "tags": [
@@ -242,6 +260,7 @@
       "title": "Bring Me to Life",
       "artist": "Evanescence",
       "durationMs": 235893,
+      "spotify": "spotify:track:2UYK6Xdo2519MY0o2NtA3n",
       "youtube": "Yhwal9i1uyw",
       "startMs": 0,
       "tags": [
@@ -256,6 +275,7 @@
       "title": "Hallelujah",
       "artist": "Jeff Buckley",
       "durationMs": 413320,
+      "spotify": "spotify:track:3pRaLNL3b8x5uBOcsgvdqM",
       "youtube": "hjn13QP05xM",
       "startMs": 0,
       "tags": [
@@ -270,6 +290,7 @@
       "title": "War",
       "artist": "Edwin Starr",
       "durationMs": 200267,
+      "spotify": "spotify:track:4ZEEcEMGjkWOfZNBcIB9yE",
       "youtube": "gKAM1NfMXY8",
       "startMs": 0,
       "tags": [
@@ -284,6 +305,7 @@
       "title": "Brothers in Arms",
       "artist": "Dire Straits",
       "durationMs": 298840,
+      "spotify": "spotify:track:3eIRJjo9p51WRInZbEe7RW",
       "youtube": "jhdFe3evXpk",
       "startMs": 0,
       "tags": [
@@ -298,6 +320,7 @@
       "title": "Test Drive",
       "artist": "John Powell",
       "durationMs": 156307,
+      "spotify": "spotify:track:2QTDuJIGKUjR7E2Q6KupIh",
       "youtube": "IpPIK4T068s",
       "startMs": 0,
       "tags": [
@@ -310,6 +333,7 @@
       "title": "Misty Mountains",
       "artist": "Richard Armitage & The Dwarf Cast",
       "durationMs": 103025,
+      "spotify": "spotify:track:3AAwJ043uT1wXSKDtGyuxF",
       "youtube": "s4LX9NX7hS4",
       "startMs": 0,
       "tags": [
@@ -322,6 +346,7 @@
       "title": "We Didn't Start the Fire",
       "artist": "Billy Joel",
       "durationMs": 291100,
+      "spotify": "spotify:track:3Cx4yrFaX8CeHwBMReOWXI",
       "youtube": "WqkjYKUXERQ",
       "startMs": 0,
       "tags": [
@@ -334,6 +359,7 @@
       "title": "Here Comes the Sun",
       "artist": "The Beatles",
       "durationMs": 185733,
+      "spotify": "spotify:track:6dGnYIeXmHdcikdzNNDMm2",
       "youtube": "xUNqsfFUwhY",
       "startMs": 0,
       "tags": [
@@ -348,6 +374,7 @@
       "title": "Hotel California",
       "artist": "Eagles",
       "durationMs": 391357,
+      "spotify": "spotify:track:40riOy7x9W7GXjyGp4pjAv",
       "youtube": "dLl4PZtxia8",
       "startMs": 0,
       "tags": [
@@ -362,7 +389,8 @@
       "title": "Bohemian Rhapsody",
       "artist": "Queen",
       "durationMs": 354320,
-      "youtube": "fJ9rUzIMcZQ",
+      "spotify": "spotify:track:2JiDi0qAXsPwhPqA2qaKGt",
+      "youtube": "BSTsnWoslP4",
       "startMs": 0,
       "tags": [
         "funny"
@@ -374,6 +402,7 @@
       "title": "Thriller",
       "artist": "Michael Jackson",
       "durationMs": 357753,
+      "spotify": "spotify:track:2LlQb7Uoj1kKyGhlkBf9aC",
       "youtube": "sO4vI8P88NM",
       "startMs": 0,
       "tags": [
@@ -386,6 +415,7 @@
       "title": "Welcome to the Jungle",
       "artist": "Guns N' Roses",
       "durationMs": 273483,
+      "spotify": "spotify:track:0G21yYKMZoHa30cYVi1iA8",
       "youtube": "0CNPR2qNzxk",
       "startMs": 0,
       "tags": [
@@ -400,6 +430,7 @@
       "title": "He's a Pirate",
       "artist": "Klaus Badelt",
       "durationMs": 90427,
+      "spotify": "spotify:track:08QaHlMPWuO5PUxjl61bXn",
       "youtube": "BuYf0taXoNw",
       "startMs": 0,
       "tags": [
@@ -412,6 +443,7 @@
       "title": "Skyfall",
       "artist": "Adele",
       "durationMs": 286082,
+      "spotify": "spotify:track:6VObnIkLVruX4UVyxWhlqm",
       "youtube": "LJzp_mDxaT0",
       "startMs": 0,
       "tags": [
@@ -426,6 +458,7 @@
       "title": "(Sittin' On) The Dock of the Bay",
       "artist": "Otis Redding",
       "durationMs": 163747,
+      "spotify": "spotify:track:3zBhihYUHBmGd2bcQIobrF",
       "youtube": "7C-VscEQugk",
       "startMs": 0,
       "tags": [
@@ -438,6 +471,7 @@
       "title": "\"Heroes\"",
       "artist": "David Bowie",
       "durationMs": 371417,
+      "spotify": "spotify:track:7Jh1bpe76CNTCgdgAdBw4Z",
       "youtube": "YLp2cW7ICCU",
       "startMs": 0,
       "tags": [
@@ -450,7 +484,8 @@
       "title": "Diggy Diggy Hole",
       "artist": "Wind Rose",
       "durationMs": 315986,
-      "youtube": "34CZjsEI1yU",
+      "spotify": "spotify:track:0FDY2EHOv32kUoqplU1hdY",
+      "youtube": "0FvHyHaT8ys",
       "startMs": 0,
       "tags": [
         "funny"
@@ -462,6 +497,7 @@
       "title": "Cities in Dust",
       "artist": "Siouxsie and the Banshees",
       "durationMs": 243800,
+      "spotify": "spotify:track:0LvH53IYMdkQ2VHanpCiBi",
       "youtube": "wsOHvP1XnRg",
       "startMs": 0,
       "tags": [
@@ -474,7 +510,8 @@
       "title": "River",
       "artist": "Leon Bridges",
       "durationMs": 238559,
-      "youtube": "0Hegd4xNfRo",
+      "spotify": "spotify:track:3hhbDnFUb2bicI2df6VurK",
+      "youtube": "7ug41DBUJOw",
       "startMs": 0,
       "tags": [
         "fitting"
@@ -486,7 +523,8 @@
       "title": "Mr. Blue Sky",
       "artist": "Electric Light Orchestra",
       "durationMs": 303820,
-      "youtube": "aQUlA8Hcv4s",
+      "spotify": "spotify:track:2RlgNHKcydI9sayD2Df2xp",
+      "youtube": "bJ8Sz8CJY5g",
       "startMs": 0,
       "tags": [
         "fitting"

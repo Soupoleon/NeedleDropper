@@ -24,13 +24,10 @@ A needle drop is an arrival, not a concert. Most songs play in full; the five th
 minutes play as 6:30 excerpts, and the notes below give their full length.
 
 The soundtrack holds **metadata only**: no audio and no lyrics. The NeedleDropper app plays each song
-through your own Spotify Premium account (it looks the song up by artist and title as you approach the
-place) or through YouTube, in a small player window that stays visible while the song plays.
-**Every drop except Azshara has a YouTube version**: an official upload of the same recording, from the
-artist's or label's channel or YouTube's auto-generated "Topic" upload. Azshara (M83, "Wait") has none
-yet: M83's Topic uploads ask viewers to sign in to YouTube, and the official video runs longer than the
-album track, so that drop plays through Spotify, or through an audio file of your own if you give it
-one (see [Make it yours](#make-it-yours)).
+through your own Spotify Premium account (every drop names its exact Spotify recording) or through
+YouTube, in a small player window that stays visible while the song plays.
+**Every drop has a YouTube version**: an official upload of the same recording, from the artist's or
+label's channel or YouTube's auto-generated "Topic" upload.
 
 Each landmark carries its area id as well as its English name, so it triggers, and its title card
 shows the right place name, on every game language.
@@ -429,8 +426,7 @@ A floating island in the plane of air: a song forever tied to a record-breaking 
 3. **Use your own audio file.** Copy an .mp3 or .ogg into
    `World of Warcraft\_forever_\Interface\AddOns\NeedleDropper_Local\media`, restart the game (WoW
    only notices new files when it starts), and type the file's name into the drop's **In-game file**
-   field. WoW then plays it itself, with no app needed. That is also the way to give Azshara a song
-   without Spotify.
+   field. WoW then plays it itself, with no app needed.
 4. **Or silence a place:** **Turn off here**. **Revert to Azeroth Unbound** undoes either change.
 5. **Add landmarks it doesn't cover:** stand inside one and press **Add drop here**.
 

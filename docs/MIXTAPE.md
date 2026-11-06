@@ -22,8 +22,8 @@ for more than twenty years, and the only honest soundtrack for them is the punch
 The soundtrack holds metadata only: titles, artists, lengths and links, never audio and never lyrics.
 The songs belong to their artists and labels. Every drop has its length and an official YouTube upload
 that allows embedding, so with the NeedleDropper app running it plays without connecting any account.
-If you connect Spotify Premium, the app plays the songs there instead, looking each one up by artist
-and title (see [Music services](PROVIDERS.md)). A few of the YouTube uploads are blocked in some
+If you connect Spotify Premium, the app plays the songs there instead, each one pinned to its exact
+Spotify recording (see [Music services](PROVIDERS.md)). A few of the YouTube uploads are blocked in some
 countries; there, connect Spotify or paste another official upload for that place (see
 [Make it yours](#make-it-yours)).
 

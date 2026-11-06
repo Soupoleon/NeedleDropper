@@ -235,7 +235,7 @@ def test_azeroth_unbound_carries_the_pack_data():
     assert (elwynn["label"], elwynn["title"], elwynn["artist"], elwynn["durationMs"], elwynn["youtube"]) == \
         ("Elwynn Forest", "I'll Keep Coming", "Low Roar", 352000, "mlM66FzjpgM")
     assert by_id["area:279"]["mapID"] == 1416 and by_id["area:279"]["subzone"] == "Dalaran"
-    assert "youtube" not in by_id["zone:1447"], "Azshara has no YouTube id in the pack: omitted, not empty"
+    assert by_id["zone:1447"]["youtube"] == "iQnRCdtECl8", "Azshara gained a YouTube id in the 2026-11-05 pack audit"
     assert by_id["zone:2548"]["artist"] == "Ólafur Arnalds"
 
 
