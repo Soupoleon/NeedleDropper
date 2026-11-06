@@ -15,6 +15,7 @@ import re
 import shutil
 import struct
 import sys
+import zlib
 from pathlib import Path
 
 import pytest
@@ -516,13 +517,41 @@ def test_icon_is_a_valid_multi_size_ico():
     assert {16, 32, 48, 256} <= sizes
 
 
+def _icon_content(data: bytes) -> list:
+    """Each ICO entry's header fields and pixels, with PNG image data decompressed.
+
+    The comparison must not depend on the zlib build: Python 3.14 on Windows ships zlib-ng, whose
+    deflate output differs byte for byte from classic zlib's (Python 3.10 to 3.13), so the PNG
+    entries' compressed bytes, and with them the entry sizes and offsets, differ between the two."""
+    _reserved, _kind, count = struct.unpack_from("<HHH", data, 0)
+    entries = []
+    for i in range(count):
+        w, h, colors, res, planes, bpp, size, offset = struct.unpack_from("<BBBBHHII", data, 6 + 16 * i)
+        blob = data[offset:offset + size]
+        if blob[:8] != b"\x89PNG\r\n\x1a\n":
+            entries.append((w, h, colors, res, planes, bpp, "bmp", blob))
+            continue
+        chunks, idat, pos = [], b"", 8
+        while pos + 8 <= len(blob):
+            (n,) = struct.unpack_from(">I", blob, pos)
+            kind, body = blob[pos + 4:pos + 8], blob[pos + 8:pos + 8 + n]
+            pos += 12 + n
+            if kind == b"IDAT":
+                idat += body
+            else:
+                chunks.append((kind, body))
+        entries.append((w, h, colors, res, planes, bpp, "png", chunks, zlib.decompress(idat)))
+    return entries
+
+
 def test_icon_is_reproducible_from_its_generator():
     spec = importlib.util.spec_from_file_location("nd_make_icon", ROOT / "assets" / "make_icon.py")
     mod = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     spec.loader.exec_module(mod)
     data, _ = mod.build_icon()
-    assert data == ICON.read_bytes(), "assets/NeedleDropper.ico is stale: run python assets/make_icon.py"
+    assert _icon_content(data) == _icon_content(ICON.read_bytes()), \
+        "assets/NeedleDropper.ico is stale: run python assets/make_icon.py"
 
 
 # --------------------------------------------------------- license, git ----
