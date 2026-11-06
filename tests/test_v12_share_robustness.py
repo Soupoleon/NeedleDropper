@@ -115,9 +115,11 @@ def test_a_missing_final_bang_still_decodes(rt, code):
 
 def test_truncated_codes_say_cut_off(rt, mixtape):
     text, pack = mixtape
+    # Cuts must lose data: the final "!" and the Base64 padding carry none (see the lossless test below).
+    data_end = len(text.rstrip("!").rstrip("="))
     rng = random.Random(7)
-    cuts = sorted({len(PREFIX), len(PREFIX) + 1, len(PREFIX) + 2, len(PREFIX) + 3, len(text) - 2, len(text) // 2}
-                  | {rng.randrange(len(PREFIX), len(text) - 1) for _ in range(40)})
+    cuts = sorted({len(PREFIX), len(PREFIX) + 1, len(PREFIX) + 2, len(PREFIX) + 3, data_end - 1, len(text) // 2}
+                  | {rng.randrange(len(PREFIX), data_end) for _ in range(40)})
     for cut in cuts:
         assert reason(rt, text[:cut]) == "cutoff", cut
         with pytest.raises(Exception) as exc:
@@ -126,6 +128,14 @@ def test_truncated_codes_say_cut_off(rt, mixtape):
     for cut in range(1, len(PREFIX)):
         assert reason(rt, text[:cut]) == "notcode"
 
+
+
+def test_code_missing_only_its_end_mark_and_padding_still_decodes(rt, mixtape):
+    """Losing just the final "!" and the "=" padding loses no data: both decoders return the pack."""
+    text, pack = mixtape
+    for cut in sorted({len(text) - 1, len(text.rstrip("!").rstrip("="))}):
+        assert canon(ok(rt, text[:cut], pack)) == pack, cut
+        assert canon(ref_decode(text[:cut])) == pack, cut
 
 # --------------------------------------------------------------- mutations --
 
