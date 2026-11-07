@@ -39,7 +39,9 @@ The letters next to each drop in the window's Drops tab show what it has: **S** 
 YouTube, **F** in-game file. **Test** plays any drop right away, without marking it as heard.
 **Test Spotify** and **Test YouTube** (in the game's Music services section, in the dialog and on the
 Connect page) play 15 seconds of Toto's *Africa*, whatever *Play music with* says, or a Windows
-notification tells you why they can't.
+notification tells you why they can't. Each test uses only the named service: **Test Spotify does
+not try YouTube on failure**. **Send a test signal** and `/needle test` check only the link and
+play nothing; the drop editor's **Test** and Journal's **Replay** use your normal music choices.
 
 ---
 
@@ -66,9 +68,11 @@ phone, in the Spotify app, anywhere) can pick up where it was.
 
 Spotify only lets an app play music or control playback after a developer registers it. A new app
 runs in Spotify's *Development Mode*, which allows **at most 5 users per app**, requires the app's
-owner to have Premium, and returns at most 10 results per search. Wider access is granted only to
-large, established companies, not to free fan projects. A single shared NeedleDropper app would
-therefore stop working after the fifth player.
+owner to have Premium, and returns at most 10 results per search. New development access is limited
+to one Client ID per developer. Use an app you already own if that limit prevents you from creating
+another. A shared app cannot authorize an unlimited number of testers. See Spotify's
+[developer access update](https://developer.spotify.com/blog/2026-02-06-update-on-developer-access-and-platform-security)
+and [development-mode limits](https://developer.spotify.com/documentation/web-api/concepts/quota-modes).
 
 So NeedleDropper ships without any Spotify key. You register a private app for yourself, you are its
 only user, and the Spotify connection belongs to you alone. NeedleDropper runs no server: it talks
@@ -77,7 +81,7 @@ to Spotify directly from your PC.
 ### Step 1: Create your developer app
 
 1. Open **<https://developer.spotify.com/dashboard>** and log in with the Spotify account you listen
-   with. The first time, accept the Spotify Developer Terms (and confirm your email address if
+   with; it must have Premium. The first time, accept the Spotify Developer Terms (and confirm your email address if
    Spotify asks).
 2. Click **Create app** and fill in the form:
    - **App name:** anything, for example `NeedleDropper for me`.
@@ -86,11 +90,15 @@ to Spotify directly from your PC.
    - **Redirect URIs:** type exactly **`http://127.0.0.1:8321/callback`** and click **Add**.
      (The Spotify card on the Connect page and the game's Music services dialog show this address,
      ready to copy.) It must be `127.0.0.1`, not `localhost`; `http`, not `https`; and no `/` at the
-     end.
+     end. Spotify requires an explicit loopback address for this local callback
+     ([redirect URI rules](https://developer.spotify.com/documentation/web-api/concepts/redirect_uri)).
    - **Which API/SDKs are you planning to use?** Tick **Web API** and **Web Playback SDK**.
 3. Tick the box to agree to Spotify's terms and click **Save**.
 4. On your app's page (open **Settings** if you don't see it), copy the **Client ID**: a 32-character
    code of digits and the letters a to f. You don't need the *Client secret*; never share it.
+
+If **Create app** is unavailable, check your Premium subscription and whether you already have a
+developer app. You can use YouTube independently while resolving Spotify access.
 
 Made your app for an older NeedleDropper, with only **Web API** ticked? Open it → **Settings** →
 **Edit**, tick **Web Playback SDK** as well and **Save**.
@@ -115,12 +123,15 @@ Spotify's consent page shows the app name you chose and asks for these permissio
 | Your email address (`user-read-email`) | Spotify's player requires it. NeedleDropper never reads, keeps or shows the address |
 | Your account's subscription and country (`user-read-private`) | The Premium check, and searching the songs available where you live |
 
-Click **Agree**. The browser tab says you can close it. The Spotify card now shows your account, its
-**Premium** check (for example *✓ Yes: this account has Spotify Premium.*), its **Country** and
-**Play on**, the device that plays. A Windows notification confirms it too. In game, press **Refresh
-status** (it reloads the interface): the Music services rows then say *Spotify: connected as …
-(Premium)*, and the window's footer, for example, *App seen 2 min before login · Spotify: Alex
-(Premium)*.
+Click **Agree**. The browser tab says you can close it. A sign-in you started on the Connect page shows
+there: the Spotify card now shows your account and **Play on**, the device that plays. The
+**Premium** and **Country** fields show what Spotify returns; newer development apps may not receive
+these profile fields ([Spotify's API changes](https://developer.spotify.com/documentation/web-api/references/changes/february-2026)).
+Use **Test Spotify** to check playback. A sign-in you started in
+game is confirmed by a Windows notification (*Spotify connected as …*), and the Connect page's card shows
+it too. In game, press **Refresh status** (it reloads the interface): the Music services rows then say
+*Spotify: connected as … (Premium)*, and the window's footer, for example, *App seen 2 min before login ·
+Spotify: Alex (Premium)*.
 
 **Signed in with NeedleDropper 1.2.0 or 1.1?** Sign in once more: in-app playback needs the
 `streaming` and `user-read-email` permissions, which older versions didn't ask for. Until then the
@@ -153,17 +164,16 @@ since February 2026).
 
 **Play on**, on the Connect page's Spotify card, picks what plays the songs:
 
-- **NeedleDropper (this app)**, the default: the app's own hidden player. While the app runs, the
+- **NeedleDropper (this app)**, the recommended default: the app's own hidden player. While the app runs, the
   Spotify app on your phone or PC lists it among your devices as **NeedleDropper**. You don't have to
   do anything with it; if you pick it there yourself, your own music plays through the app.
 - **The Spotify app on this PC (automatic)**, or one of your other **Spotify Connect** devices: how
   NeedleDropper 1.2.0 played Spotify, by remote-controlling that device. It plays on the device you
   picked, otherwise the Spotify app on this PC, otherwise the device that is currently active or the
   first available one. If no device is online, NeedleDropper starts the Spotify app on this PC (never
-  while the game is in front) and waits up to 10 seconds for it. Be aware that on the test PC,
-  Spotify's own Windows app accepted every song from NeedleDropper and never started one (see
-  [Spotify problems](#spotify-problems)); phones, speakers and TVs that don't allow remote volume
-  control start and stop without fading.
+  while the game is in front) and waits up to 10 seconds for it. This choice does not use the
+  hidden in-app player; automatic selection skips devices named **NeedleDropper**. Phones,
+  speakers and TVs that don't allow remote volume control start and stop without fading.
 
 In `config.json` the choice is `spotify.device` (`app` or `connect`) and, for a named device,
 `spotify.deviceName`.
@@ -175,10 +185,9 @@ playback to NeedleDropper's player, so whatever you were listening to stops ther
 the Spotify app) for the length of the drop. Approaching a place only looks the song up; nothing is
 taken over until the drop really starts. With **Resume my Spotify music afterwards** (on by default,
 in game), your music comes back afterwards on the device it played on, at the same track and position.
-Turn it off and NeedleDropper simply pauses at the end of the drop. One catch: on the test PC,
-Spotify's Windows app accepted songs sent to it from other apps without starting them, and a public
-report says the same of Spotify on Android, so music you were playing there may not come back by
-itself.
+Turn it off and NeedleDropper simply pauses at the end of the drop. A remote device can accept a
+resume command without starting; if your own music does not come back, resume it in Spotify and
+include the device and the app's log in your report.
 
 ### How the app finds a song
 
@@ -204,7 +213,9 @@ itself.
   or change your music when the drop's time is up.
 - If the app's player doesn't start a song within about 3 seconds, the drop plays on YouTube instead
   (if it has a video), a notification says *Spotify didn't start*, and YouTube plays first for the rest
-  of the session. The app checks its player again by itself, at most once a minute.
+  of the session until a verified player recovers. The app reloads its player page at most once
+  a minute and checks that Spotify lists the new device before using it. A page reload waits
+  while a song is playing there.
 
 ### Spotify problems
 
@@ -214,13 +225,14 @@ itself.
 | Spotify's page says **INVALID_CLIENT: Invalid client** | The Client ID is wrong (often the Client secret was copied instead) or the app was deleted | Copy the Client ID again from the dashboard and paste it on the Spotify card or in the Music services dialog |
 | **Sign in again** on the Spotify card; *Spotify: sign in again* in game; the notification *Sign in to Spotify again* | The sign-in comes from NeedleDropper 1.2.0 or older and lacks the permissions in-app playback needs. Meanwhile Spotify songs play on YouTube | Click **Sign in again** and approve |
 | *Spotify can't play in NeedleDropper's player: install Google Chrome, or wait a minute for Chrome's Widevine component* (in game: *Spotify needs Google Chrome*) | The app's player needs Google Chrome. On a fresh Chrome, its Widevine component may still be downloading | Install Google Chrome. If it is installed, start it once, wait a minute, then quit and restart the NeedleDropper app |
-| *NeedleDropper's player isn't running yet: it starts by itself when World of Warcraft isn't the window in front* | The app makes its player window only while the game is not in front, because a new window takes the focus for a moment | Start the app before the game, or switch away from the game for a moment |
-| *Spotify's player could not load (offline, or blocked by a firewall)* | Chrome couldn't load Spotify's player from `sdk.scdn.co` | Check the internet connection; allow Chrome through your firewall or filter |
-| Notification *Spotify didn't start*; in game *Spotify: a song didn't start in NeedleDropper's player* | Spotify accepted the song, but the app's player didn't start it within 3 seconds. That drop played on YouTube, and YouTube plays first for the rest of the session | **Test Spotify** checks it. If it keeps happening, quit the app (tray → **Quit**) and start it again |
-| **Premium needed**, or error **403** | The account isn't Premium (the card's **Premium** line names its plan), or the app's owner lost Premium | Use a Premium account |
+| *NeedleDropper's Spotify player didn't get ready (it tries again by itself)…* (in game: *Spotify player not ready*) | Chrome and its Widevine component are there, but Spotify's player never connected (often the internet connection, or Widevine still downloading on a fresh Chrome) | Check the internet connection and wait a minute: the app connects its player again by itself. If it stays, quit the app (tray → **Quit**) and start it again |
+| *NeedleDropper's player isn't running yet: it starts by itself when World of Warcraft isn't the window in front* (in game: *Spotify player not started yet*) | The app makes its player window only while the game is not in front, because a new window takes the focus for a moment | Start the app before the game, or switch away from the game for a moment |
+| *Spotify's player could not load (offline, or blocked by a firewall)* (in game: *Spotify player didn't load*) | Chrome couldn't load Spotify's player from `sdk.scdn.co` | Check the internet connection; allow Chrome through your firewall or filter |
+| Notification *Spotify didn't start*; in game *Spotify: a song didn't start in NeedleDropper's player* | Spotify accepted the song, but the app's player did not start it. Needle drops can use YouTube until recovery, if they have a video and your settings allow it. Test Spotify never tries YouTube | Quit NeedleDropper (tray → **Quit**), restart it from the desktop and try **Test Spotify** again |
+| **Premium needed**, or a Premium-related error **403** | Spotify refused playback because of the account subscription; profile fields alone may not report the plan | Check that the signed-in account and developer-app owner have Premium |
 | **Account not allowed** | The account isn't on your app's User Management list | Add it under [User Management](#signing-in-with-a-different-spotify-account-user-management) |
-| Notification: *Spotify isn't starting songs — restart the Spotify app* | Only when **Play on** is another device: Spotify accepted the song but didn't start it (the app's buttons often look greyed out). On the test PC, Spotify's Windows app did this with every song, in both its Microsoft Store and its spotify.com version. That drop played on YouTube, if it has a video, and YouTube plays first for the rest of the session | Pick **NeedleDropper (this app)** under **Play on**. Or quit the Spotify app completely, start it again, and play and pause any song once |
-| Error **404** / "no active device" | With **Play on** set to another device: no Spotify device is online right now. With **NeedleDropper (this app)**: the app's player went offline for a moment; it reconnects by itself, and that drop plays on YouTube | Another device: open the Spotify app on it, play and pause any song once, then pick it under **Play on** |
+| Notification asking you to restart the Spotify app | Only when **Play on** is another device: Spotify accepted the song but did not start it | Pick **NeedleDropper (this app)** under **Play on**. To keep using the separate Spotify app, restart that app and play and pause a song once |
+| Error **404**, **Device not found**, or the player **went offline** | In app mode, the device reported by the player is not reachable. NeedleDropper reloads the page, checks the replacement against Spotify's device list and retries once. In Connect mode, the chosen device may be offline | In app mode, if recovery fails, quit NeedleDropper from its tray and restart it from the desktop, then Test Spotify. In Connect mode, open Spotify on the chosen device, play and pause a song, then select it again |
 | Error **429** / "rate limited" | Too many requests in a short time; Spotify may also report `QUOTA_EXCEEDED` | Wait a few minutes and try again; NeedleDropper already waits when Spotify asks it to |
 | **Sign in** never finishes | The consent page wasn't completed in time (the sign-in link expires after a few minutes), or another program uses port 8321 | Click **Sign in** again and finish the consent page; close other apps that might use port 8321 |
 | Notification: Spotify sign-in expired | Spotify ended the login | Click the notification and **Sign in** again |

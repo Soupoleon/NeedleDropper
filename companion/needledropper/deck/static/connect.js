@@ -441,7 +441,7 @@
     // the hint follows the saved choice, also while the list still has the focus after a change
     setText($("sp-device-hint"), value === "app"
       ? "NeedleDropper plays Spotify itself: no Spotify app has to be open (it needs Google Chrome)."
-      : "Open Spotify on the device you want to hear it on, then Refresh.");
+      : "Remote-controls a separate Spotify app. Open Spotify on that device, then Refresh. For playback here, choose NeedleDropper (this app, recommended).");
     if (document.activeElement === sel) return;
     if (![...sel.options].some((o) => o.value === value)) {
       addOption(sel, value, value === "connect:" ? "The Spotify app on this PC (automatic)" : `${name} (not open right now)`);
@@ -457,7 +457,7 @@
       const r = await api("/api/spotify/devices");
       const devices = (r.devices || []).filter((d) => d.name !== APP_DEVICE);
       sel.textContent = "";
-      addOption(sel, "app", "NeedleDropper (this app)");
+      addOption(sel, "app", "NeedleDropper (this app, recommended)");
       addOption(sel, "connect:", "The Spotify app on this PC (automatic)");
       devices.forEach((d) => {
         addOption(sel, `connect:${d.name}`,

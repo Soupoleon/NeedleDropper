@@ -544,6 +544,32 @@ def construct_engine(cls: Any, providers: list, deck: Any, kwargs: dict[str, Any
     return cls(providers, deck, **accepted)
 
 
+def _engine_idle(eng: Any) -> bool:
+    """True when ``eng`` plays nothing: no drop starting, playing or stopping (``wait_idle(0)``; an engine
+    without it, by ``current_provider()``). No engine, or one that can't say, counts as idle."""
+    if eng is None:
+        return True
+    idle = getattr(eng, "wait_idle", None)
+    try:
+        if callable(idle):
+            return bool(idle(0))
+        current = getattr(eng, "current_provider", None)
+        return not callable(current) or current() is None
+    except Exception:  # noqa: BLE001 - an engine that can't say: it has no drop
+        return True
+
+
+def _retire(provider: Any) -> None:
+    """Tell a provider the companion took it out of its chain while a drop goes on (``retire()``, when it has
+    one: an in-app Spotify provider then never takes the player back; review RAPP-2)."""
+    retire = getattr(provider, "retire", None)
+    if callable(retire):
+        try:
+            retire()
+        except Exception:  # noqa: BLE001
+            log.debug("could not retire the %s provider", getattr(provider, "name", "?"), exc_info=True)
+
+
 def _notice_kind(value: Any) -> Optional[str]:
     key = re.sub(r"[^a-z]", "", str(value or "").lower())
     if not key:
@@ -633,6 +659,9 @@ class Companion:
         self._engine_kwargs = dict(engine_kwargs or {})
         self.autostart_winreg = autostart_winreg
         self.notifier = notifier or tray.Notifier()
+        self.deck.on_stale_player = lambda text: self.notifier.notify(
+            tray.NOTE_FAULT, text, title="Old player window", key="stale-player", level="warning",
+            action=self.open_logs)
         self._update_fetch = update_fetch
         self._guard_threads = guard_threads
         self._hk_interval = float(housekeeping_s)
@@ -644,6 +673,9 @@ class Companion:
         self._rebuild_lock = threading.RLock()  # serialises provider / transport / engine rebuilds
         self.engine: Any = None
         self.providers: list = []
+        #: providers a rebuild took out of the chain while the drop they play went on: closed once the engine
+        #: no longer plays with them (review RCOMP-10; see _close_retired)
+        self._retired: list = []
         self.transports: list = []
         self._side_spotify: Any = None
         self._login: Any = None
@@ -819,8 +851,10 @@ class Companion:
                 self.deck.on_player_status = None
             transports, self.transports = self.transports, []
             engine, self.engine = self.engine, None
-            providers = list(self.providers) + ([self._side_spotify] if self._side_spotify else [])
+            retired = list(getattr(self, "_retired", None) or [])  # shutting down: no drop plays on any more
+            providers = list(self.providers) + ([self._side_spotify] if self._side_spotify else []) + retired
             self._side_spotify = None
+            self._retired = []
             self._started = False
         cli._stop_all(transports)
         music = getattr(self, "music", None)
@@ -933,12 +967,20 @@ class Companion:
         d = self.cfg.get("deck") or {}
         configure = getattr(self.deck, "configure_player", None)
         if configure is not None:
+            pixel = (self.cfg.get("transport") or {}).get("pixel") or {}
             configure(auto_open=str(d.get("autoOpen") or "youtube"), browser=str(d.get("browser") or "edge"),
                       position=parse_position(d.get("playerPosition")),
                       clear_position=parse_position(d.get("playerPosition")) is None,
                       profile_dir=self.paths.app_dir / "deck-browser",
                       corner=str(d.get("playerCorner") or "topright"),
-                      browser_log=self.paths.logs_dir / "browser.log")
+                      browser_log=self.paths.logs_dir / "browser.log",
+                      beacon_corner=str(pixel.get("corner") or "TOPLEFT"))
+
+    def _keep_player_parked(self) -> None:
+        """The parked player window stays off every monitor after a display change (housekeeping)."""
+        keep = getattr(self.deck, "keep_player_parked", None)
+        if callable(keep):
+            keep()
 
     def _make_update_checker(self) -> UpdateChecker:
         up = self.cfg.get("updates") or {}
@@ -947,7 +989,8 @@ class Companion:
 
     def rebuild_providers(self) -> None:
         """Rebuild the provider chain from the current config. An engine that can swap providers
-        live keeps its drop; otherwise the engine is replaced."""
+        live keeps its drop; otherwise the engine is replaced. While that drop plays, the old
+        providers are closed once it ends (:meth:`_close_retired`): closing one now could cut the song."""
         replace = False
         with self._rebuild_lock:
             with self._lock:
@@ -955,9 +998,21 @@ class Companion:
                 eng = self.engine
                 swap = getattr(eng, "set_providers", None) if eng is not None else None
                 if callable(swap):
-                    in_use = eng.current_provider() if callable(getattr(eng, "current_provider", None)) else None
                     old = swap(new) or list(self.providers)
-                    stale = [p for p in old if p is not in_use and p not in new]
+                    gone = [p for p in old if not any(p is q for q in new)]
+                    # Asked after the swap, not before: the engine names a drop's provider only once its play()
+                    # returned, and the swap waits for that (a switch during an in-app start). And every old
+                    # provider waits while a drop plays, not only the one playing it: after Play on went away,
+                    # back and away again, the one built on the way back owns the in-app player that song
+                    # plays in, and its close disconnected it (review RAPP-1).
+                    if _engine_idle(eng):
+                        stale = gone
+                    else:
+                        stale = []
+                        for p in gone:
+                            if not any(p is r for r in self._retired):
+                                self._retired.append(p)
+                                _retire(p)
                 else:
                     stale = list(self.providers)
                     replace = eng is not None
@@ -972,13 +1027,42 @@ class Companion:
                     p.close()
                 except Exception:  # noqa: BLE001
                     pass
+        self._close_retired()
+
+    def _close_retired(self) -> None:
+        """Close the providers :meth:`rebuild_providers` took out of the chain while a drop played, once the
+        engine is idle (review RCOMP-10, RAPP-1). For in-app Spotify -- Play on switched away from the app on
+        the Connect page mid-song -- that disconnects the player from Spotify (the close of whichever old
+        provider owns it), the token endpoint refuses again and the player window no longer needs Chrome; a
+        provider of the chain that owns the player again (switched back) keeps it connected. Run by the
+        housekeeping loop, which the engine's notes wake (:meth:`on_engine_status`), and after each rebuild.
+        Only while the engine is idle: it lets go of a drop before it stops it (the in-app fade-out, a failed
+        provider's clean-up), and a provider closed then would cut that."""
+        with self._lock:
+            if not self._retired:
+                return
+            eng = self.engine
+            current = eng.current_provider() if eng is not None and callable(
+                getattr(eng, "current_provider", None)) else None
+            if not _engine_idle(eng):
+                return  # a drop is starting or stopping; its "stopped" note wakes this again
+            done = [p for p in self._retired if p is not current]
+            self._retired = [p for p in self._retired if p is current]
+        for p in done:
+            log.info("closing an old %s provider (the settings changed while a drop played)",
+                     getattr(p, "name", "?"))
+            try:
+                p.close()
+            except Exception:  # noqa: BLE001
+                pass
 
     def _rebuild_engine(self) -> None:
         """New providers and a new engine (after the WoW folder changed)."""
         with self._rebuild_lock:
             with self._lock:
-                old = list(self.providers) + ([self._side_spotify] if self._side_spotify else [])
+                old = list(self.providers) + ([self._side_spotify] if self._side_spotify else []) + self._retired
                 self._side_spotify = None
+                self._retired = []
                 self.providers = self._build_providers()
             self._replace_engine()
             for p in old:
@@ -1035,6 +1119,10 @@ class Companion:
         self._link_tick(frame, str(transport or ""))
 
     def _link_tick(self, event: Any, transport_name: str) -> None:
+        kind = _event_type_name(event)
+        drop_id = getattr(event, "drop_id", None) or getattr(event, "id", None)
+        if kind != "PING" and not (kind == "FIRE" and drop_id == "test"):
+            return
         now = self._clock()
         key = (getattr(event, "seq", None), _event_type_name(event), _event_flags(event),
                getattr(event, "place_key", None) or getattr(event, "n", None))
@@ -1411,6 +1499,7 @@ class Companion:
         """Sign out: forget the stored login (the Client ID stays)."""
         from .providers.spotify_auth import TokenStore
 
+        log.info("Spotify: signing out; forgetting the saved login")
         login, self._login = self._login, None
         with self._lock:
             self._account = None
@@ -1607,6 +1696,8 @@ class Companion:
         change = args[0].get("change") if args and isinstance(args[0], dict) else kwargs.get("change")
         if isinstance(change, dict):
             self.music.on_engine_note(change)  # a test the game (or the Connect page) asked for
+        if self._retired:
+            self._hk_wake.set()  # a drop may have ended: close its retired provider now (never on this thread)
         kind, info = parse_engine_notice(args, kwargs)
         if kind == tray.NOTE_NOT_FOUND:
             self._song_not_found(info)
@@ -1638,9 +1729,10 @@ class Companion:
             title, text = notice() if callable(notice) else ("Spotify isn't starting songs", f"{STUCK_MESSAGE}.")
         except Exception:  # noqa: BLE001
             title, text = "Spotify isn't starting songs", f"{STUCK_MESSAGE}."
-        # Real-client #10: say once what happens now -- YouTube plays until Spotify works again.
-        self.notifier.notify(tray.NOTE_SPOTIFY_STUCK, f"{text}{what} YouTube plays NeedleDropper's songs "
-                             "until Spotify works again.", title=title,
+        # The provider distinguishes future needle-drop fallback from service-only tests.
+        if info.get("test"):
+            what += " YouTube wasn't tried; Test Spotify checks only Spotify."
+        self.notifier.notify(tray.NOTE_SPOTIFY_STUCK, f"{text}{what}", title=title,
                              level="warning", action=self.open_logs)
         self._push_game_status()  # the game keeps YouTube ids in its frames (fit rule step 7)
         self._nudge("spotify")
@@ -1732,7 +1824,8 @@ class Companion:
             if self._hk_stop.is_set():
                 return
             now = self._clock()
-            for step in (self._do_restarts, lambda: self._watch_spotify(now), self._watch_game,
+            for step in (self._close_retired, self._keep_player_parked, self._do_restarts,
+                         lambda: self._watch_spotify(now), self._watch_game,
                          self.push_game_data, self._watch_savedvars,
                          self._maybe_check_updates, lambda: self._watch_player(now)):
                 if self._hk_stop.is_set():
@@ -1872,7 +1965,7 @@ class Companion:
         cid = str(sp_cfg.get("clientId") or "").strip().lower()
         st = self._spotify_status() if st is None else st
         state = st.get("state")
-        from .providers.spotify import MUSIC_STATES
+        from .providers.spotify import MUSIC_STATES, NO_PLAYER_PROBLEMS
 
         if state not in MUSIC_STATES:
             state = {"connected": "connected", "premium": "premium-required", "allowlist": "error",
@@ -1889,8 +1982,13 @@ class Companion:
                    "product": product if isinstance(product, str) and re.fullmatch(r"[a-z]{1,16}", product) else None,
                    "state": state,
                    "mode": st.get("mode") if st.get("mode") in SPOTIFY_DEVICE_MODES else (sp_cfg.get("device") or "app")}
+        # Always written, None (removed from Data.lua) without a cause: a field left out stays in the file, so an
+        # old cause outlived its state, also across restarts (review RG-1).
+        spotify["problem"] = None
         if st.get("problem") == "allowlist" and state == "error":
             spotify["problem"] = "allowlist"  # the game says "add the account under User Management" (ON-3)
+        elif state == "no-player" and st.get("problem") in NO_PLAYER_PROBLEMS:
+            spotify["problem"] = st["problem"]  # the game names the cause, not always "install Chrome" (ON-9)
         youtube = {"enabled": "youtube" in (self.cfg.get("providers") or []) and provider_enabled(self.cfg, "youtube"),
                    "player": self.player_browser()}
         return {"spotify": spotify, "youtube": youtube, "prefs": music_choices(self.cfg)}

@@ -49,7 +49,9 @@ more**: in-app playback needs two more Spotify permissions.
 - Windows notifications for the requests you send from the game (connected, a test result, signed
   out, …), and one *Sign in to Spotify again* notification after the update.
 - The in-game status lines (window footer, add-on compartment, `/needle status`) say more about
-  Spotify: connected as which account, *sign in again*, *needs Google Chrome*, or *didn't start*.
+  Spotify: connected as which account, *sign in again*, *didn't start*, or why the app's Spotify player
+  can't play: *needs Google Chrome*, *not ready*, *not started yet* (the app starts it when the game isn't
+  in front), *switched off* or *didn't load* (no internet, or a firewall).
 
 ### Changed
 
@@ -85,6 +87,21 @@ more**: in-app playback needs two more Spotify permissions.
 
 ### Fixed
 
+- Switching Spotify away from **NeedleDropper (this app)** and back no longer builds a second
+  Spotify player inside the same page. Reconnection uses a fresh page and checks that Spotify
+  lists its device before playing; a **Device not found** response gets one recovery attempt.
+  Repeated recovery is limited to once a minute, and a page reload waits for a song playing there.
+- Signing in again, signing out or changing the Spotify Client ID refreshes the player session.
+  Automatic selection for **The Spotify app on this PC** skips the in-app **NeedleDropper** device.
+- The app checks for a browser holding its player profile before launch, preventing an old
+  player browser from silently taking over a new app's session.
+- Music service tests last 15 seconds from playback starting. A failed **Test Spotify** clearly
+  says YouTube was not tried; **Send a test signal** and `/needle test` explain that they play
+  nothing. Testing or replaying a drop no longer shows the link-test notification.
+- The recommended **Play on** choice and recovery advice distinguish NeedleDropper's own player
+  from a separate Spotify app. The beta installation guide now uses public GitHub downloads and
+  each tester's own Spotify developer app.
+
 Found in a review of the beacon protocol:
 
 - A damaged beacon strip could, rarely, read as a valid frame with different contents, for example
@@ -119,7 +136,8 @@ Found in the release checks and a second review (1.2.1 beta builds before these 
   can't be embedded, or no internet), for the whole song that played instead. It now hides at once.
 - **The YouTube box in the top-left corner covered the beacon**, so the app read nothing (such as
   `/needle stop`) until the song ended. It now sits below the beacon, and changing the corner moves
-  an open box at once.
+  an open box at once. With the beacon moved to another corner (the advanced `beaconCorner`, and the
+  app's `transport.pixel.corner`), the box keeps clear of it there too.
 - **Back-to-back Spotify drops** no longer lose your own music: it comes back once, after the last
   drop, instead of restarting for a moment between them and then staying off.
 - A short hiccup of Spotify's player connection no longer reads as *install Google Chrome*, and no
@@ -146,11 +164,34 @@ Found in the release checks and a second review (1.2.1 beta builds before these 
   in-game file then couldn't play, the app could still play the song).
 - A Spotify account that isn't on your developer app's User Management list now shows *Account not
   allowed* at once (it showed *Connected* until the first song), and the game says to add it under
-  User Management instead of *sign in again*.
+  User Management instead of *sign in again* (and stops saying so once that no longer applies, also
+  after a restart of the app).
 - An addon older than 1.2.1 with this app: the Connect page now says *Addon too old* (it said
   *Ready*), and the tray tooltip says to update the addon.
 - The player window's focus hand-back goes to the game when you clicked into it while the window was
   being made (it went to the window that was in front before).
+- In game, a Spotify player that isn't ready no longer always says *install Google Chrome*: the Music
+  services line, the footer and the *Spotify account* row name the cause the app reports (Chrome or its
+  Widevine component missing, a player that didn't get ready, no player window yet, the player switched
+  off, Spotify's player not loading), and only a missing Chrome says to install it. `/needle report`
+  names the cause too, and a cause no longer lingers once it's gone. The Connect page no longer says
+  *install Google Chrome* for a player that runs in Chrome but never got ready.
+- A request sent again from the game within 10 seconds is now refused in game (*Just sent: give it a
+  moment.*), as the app does; it was 5 seconds, so a second **Test YouTube** 5 to 10 seconds after the
+  first said *Sent* and the app ignored it. The app now counts those 10 seconds from your click, as the
+  game does, so a request sent as soon as its button comes back is never ignored.
+- Switching **Play on** away from *NeedleDropper (this app)* on the Connect page while a Spotify song
+  plays lets the song finish (also when you switch back and forth during it, or as it starts), and
+  then disconnects the app's own Spotify player: it no longer stays a Spotify device until the app
+  restarts. Switching back connects it again.
+- The player window, waiting off screen between songs, could end up on a monitor after a display change
+  (a monitor added above or to the left, a new resolution or scaling). The app checks every few
+  seconds and moves it off screen again, without ever activating it.
+- The browser tab after Spotify's sign-in page no longer sends you to the old control panel: it says to
+  press **Refresh status** in the game's Music services (or look at the Connect page), and after an error
+  how to try again from either place.
+- A damaged NeedleDropper_Companion file with a date far in the future no longer breaks the Music
+  services status, the dialog, `/needle music status` or `/needle report`.
 - The Spotify setup texts in game, on the Connect page and in the app say to tick both **Web API** and
   **Web Playback SDK**; signing in again after the update shows how to add the second box to your
   1.2.0 developer app.
@@ -166,6 +207,9 @@ Found in the release checks and a second review (1.2.1 beta builds before these 
   YouTube sign-in). No signal carries a web address or free text; the app builds every address
   itself. **Disconnect** only works when the signal names the app's own Client ID. Requests are
   accepted only while fresh (up to 45 seconds), once each, and rate-limited.
+- Every playback report from the player page (YouTube, local files and Spotify's player alike) needs
+  the player window's launch key, not just the token any local program can read from the player's
+  address; a page without it closes itself.
 - Only the player window the app opened is its player: a page another website opens at the player's
   address gets nothing, and a copy without the launch key is told to close. The app also listens on
   the IPv6 loopback (`[::1]`), where `localhost` goes first, so no other program can stand in for the
@@ -179,13 +223,20 @@ Found in the release checks and a second review (1.2.1 beta builds before these 
   card.
 - Microsoft Edge can't run Spotify's player (it never became ready in testing); in-app Spotify needs
   Google Chrome.
-- *Resume my Spotify music afterwards* may not restart the Spotify **desktop app** when your music was
-  playing there: on the test PC it accepted songs from other apps without starting them.
+- *Resume my Spotify music afterwards* depends on the previous device accepting the resume command.
+  If it does not resume, press Play in Spotify and report which device was involved.
+- If the in-app Spotify player still says it **went offline**, quit NeedleDropper from its tray and
+  restart it from the desktop. The beta's reconnect fixes still need wider field testing.
+- Windows may show SmartScreen for the unsigned app (**More info → Run anyway**).
+  Compare downloads with `SHA256SUMS.txt`. The app's update check reports stable releases only;
+  testers get new beta links directly from the owner.
 
 ### Not yet verified on a live client
 
-- The Music services rows and dialog on the game client (their texts change with the app's status),
-  and the dialog with a gamepad: `docs/FIRST-TEST.md`, section *Music services (1.2.1)*.
+- The reconnect and **Play on** switch regression on the game client after these fixes, and the
+  Music services dialog with a gamepad: `docs/FIRST-TEST.md`, section *Music services (1.2.1)*.
+  The pre-fix clean-start test on November 6 played four Spotify songs and the YouTube test
+  without taking focus from the game; that does not verify recovery after a reconnect.
 - The fade-in of in-app Spotify by ear (the live checks played at volume 0), the YouTube sign-in page
   and whether a signed-in YouTube Premium account removes the ads in the box.
 - Measured on the test PC with the released app (`NeedleDropper.exe` 1.2.1): the player window

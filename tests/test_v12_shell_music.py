@@ -506,6 +506,7 @@ def test_test_failures_say_why(rig, note, needle):
     rig.music.drain()
     r = rig.results()[-1]
     assert r["result"] == "failed" and needle in r["text"]
+    assert "YouTube wasn't tried" in r["text"]
 
 
 def test_a_youtube_test_the_video_refuses(rig):

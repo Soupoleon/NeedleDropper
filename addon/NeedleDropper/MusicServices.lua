@@ -53,7 +53,9 @@ MS.ACTIONS = ns.MUSIC_ACTIONS or { "connect-spotify", "disconnect-spotify", "tes
                                    "youtube-sign-in" }
 -- Setting key -> PREFS field.
 MS.KEYS = { musicOrder = "order", youtubeCorner = "corner", musicFade = "fade", resumeMyMusic = "resume" }
-MS.SEND_GAP = 5            -- seconds: the same request is refused (and its button disabled) this long
+-- Seconds: the same request is refused (and its button disabled) this long. The app's own limit
+-- (music_config.ACTION_INTERVAL_S), so the game never announces a request the app turns away (INGAME-8).
+MS.SEND_GAP = 10
 MS.DEBOUNCE = 1.0          -- seconds after the last music setting change: the PREFS-only CONFIG
 MS.CONNECT_WAIT = 300      -- seconds a connect may wait for the browser sign-in
 MS.LATE_REPORT = 30        -- a report written this long after a request should already list it
@@ -108,8 +110,16 @@ end
 local function now() return GetTime() end
 local function wall() return time() end
 
+-- date() for a time stamp, or "?": it gives nil (or may raise) for a time it can't show -- a corrupt
+-- report (review INGAME-7; Companion's checker leaves out times after 2100 anyway).
+local function safeDate(fmt, t)
+  local ok, s = pcall(date, fmt, t)
+  if ok and type(s) == "string" then return s end
+  return "?"
+end
+
 local function hm(t)
-  return date("%H:%M", t)
+  return safeDate("%H:%M", t)
 end
 
 local function companion()
@@ -530,7 +540,7 @@ function MS.Send(action, opts)
   if not opts.quiet then ns.Print("%s %s", copy, L[MS.NO_ANSWER]) end
   ns.Fire("ND_MUSIC", "sent", action, at, copy)
   if C_Timer and C_Timer.After then
-    -- Buttons come back once the 5 s are over.
+    -- Buttons come back once SEND_GAP is over.
     C_Timer.After(MS.SEND_GAP + 0.05, function() ns.Fire("ND_MUSIC", "ready", action) end)
   end
   return ev, copy
@@ -597,8 +607,12 @@ function MS.SpotifyButton()
     return L["Needs Premium" .. ELLIPSIS], "open"
   end
   if not MS.CanSendActions() then return L["Set up Spotify" .. ELLIPSIS], "open" end
-  -- D17: a missing Chrome or a start that didn't progress isn't fixed by signing in again.
-  if state == "no-player" then return L["Needs Chrome" .. ELLIPSIS], "open" end
+  -- D17: a missing Chrome or a start that didn't progress isn't fixed by signing in again. Only the app's
+  -- "no-chrome" names Chrome (review ON-9): the other causes, and an app that names none, "Check Spotify…".
+  if state == "no-player" then
+    if app.problem == "no-chrome" then return L["Needs Chrome" .. ELLIPSIS], "open" end
+    return L["Check Spotify" .. ELLIPSIS], "open"
+  end
   if state == "stuck" then return L["Check Spotify" .. ELLIPSIS], "open" end
   -- Not on the developer app's User Management list (ON-3): signing in again does not fix that.
   if state == "error" and app.problem == "allowlist" then return L["Check Spotify" .. ELLIPSIS], "open" end
@@ -653,6 +667,18 @@ function MS.AppLine(app)
     hm(app.written), ageText(age))
 end
 
+-- The Spotify line for state "no-player", by the cause the app names (music.spotify.problem, review ON-9).
+-- An app that names none (older builds) or a cause this addon doesn't know gets the neutral line; only
+-- "no-chrome" says to install Google Chrome.
+MS.NO_PLAYER_LINE = "Spotify: NeedleDropper's player isn't ready (the app's Connect page says why)."
+MS.NO_PLAYER_LINES = {
+  ["no-chrome"] = "Spotify: install Google Chrome to play Spotify in NeedleDropper (if it is installed, wait a minute for its Widevine component).",
+  ["not-ready"] = "Spotify: NeedleDropper's player didn't get ready. The app tries again by itself (its Connect page says more).",
+  ["no-window"] = "Spotify: NeedleDropper's player isn't running yet. The app starts it when World of Warcraft isn't the window in front (start the app before the game).",
+  ["window-never"] = "Spotify: NeedleDropper's player is switched off (deck.autoOpen is \"never\" in the app's config.json).",
+  ["sdk-load"] = "Spotify: Spotify's player didn't load in NeedleDropper (no internet, or a firewall blocks it).",
+}
+
 local function notUsed(app, service)
   local order = MS.Order()
   if order == "none" then return DOT .. L["not used: Play music with is Neither"] end
@@ -684,7 +710,7 @@ function MS.SpotifyLine(app)
   elseif state == "needs-relogin" then
     line = L["Spotify: sign in again to allow in-app playback (NeedleDropper's Music services)."]
   elseif state == "no-player" then
-    line = L["Spotify: install Google Chrome to play Spotify in NeedleDropper (if it is installed, wait a minute for its Widevine component)."]
+    line = L[MS.NO_PLAYER_LINES[app.problem] or MS.NO_PLAYER_LINE]
   elseif state == "stuck" then
     line = L["Spotify: a song didn't start in NeedleDropper's player, so drops play YouTube until it works again (Test Spotify checks it)."]
   elseif state == "error" and app.problem == "allowlist" then
@@ -715,7 +741,7 @@ function MS.YouTubeLine(app)
     if b then line = line .. format(L[" (%s)"], b) end
   end
   if type(app.signInOpened) == "number" and app.signInOpened > 0 then
-    line = line .. DOT .. format(L["sign-in page opened %s"], date("%d %b", app.signInOpened))
+    line = line .. DOT .. format(L["sign-in page opened %s"], safeDate("%d %b", app.signInOpened))
   end
   return line .. notUsed(app, "youtube")
 end

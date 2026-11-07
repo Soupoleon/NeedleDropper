@@ -222,12 +222,17 @@ def _page(heading: str, body_html: str, ok: bool) -> bytes:
                         accent="#1ed760" if ok else "#ff6b6b").encode("utf-8")
 
 
-#: Where the user goes back to after the browser step: (back-to text, retry instruction).
+#: Where the user goes back to after the browser step: (back-to text, retry instruction); HTML. "panel": the
+#: app's sign-in, started in game (Music services) or on the Connect page -- the page can't tell which, so it
+#: names both (review ON-7: the v1.1 control panel and its Connect Spotify button are gone).
 _CONTEXT_TEXT = {
     "terminal": ("You can close this tab and return to the terminal.",
                  "Return to the terminal and run <code>needledropper spotify-login</code> to try again."),
-    "panel": ("You can close this tab and go back to the NeedleDropper control panel.",
-              "Go back to the NeedleDropper control panel and click <b>Connect Spotify</b> to try again."),
+    "panel": ("You can close this tab. In World of Warcraft, press <b>Refresh status</b> in Music services to see "
+              "it there; NeedleDropper's Connect page shows it too.",
+              "To try again, press <b>Connect Spotify</b> in the game's Music services (Options &rarr; AddOns "
+              "&rarr; NeedleDropper), or <b>Sign in</b> on NeedleDropper's Connect page (its tray icon &rarr; "
+              "<b>Open setup&hellip;</b>)."),
 }
 
 
@@ -645,6 +650,8 @@ class TokenManager:
         new = refresh(client_id, tokens["refresh_token"], http=self._http, now=self._now)
         if not new.get("scope"):
             new["scope"] = tokens.get("scope", "")
+        if set(str(new.get("scope") or "").split()) != set(str(tokens.get("scope") or "").split()):
+            log.info("Spotify granted scopes changed: %s", " ".join(sorted(str(new.get("scope") or "").split())))
         try:
             self.store.save(new)  # keeps the rotated tokens in memory when the disk refuses them
         except Exception as exc:  # noqa: BLE001 - a broken store must never cost the fresh token
@@ -1015,6 +1022,7 @@ def start_login(spotify_cfg: dict[str, Any], paths: Any, *, http: Optional[HttpF
             text = f"Connected as {who}." if who else "Connected."
             session._finish(LOGIN_CONNECTED, text)
             log.info("Spotify login complete%s", f" ({who})" if who else "")
+            log.info("Spotify granted scopes: %s", " ".join(sorted(str(tokens.get("scope") or "").split())))
         except Exception as exc:  # noqa: BLE001 - never leave the session hanging in "waiting"
             log.exception("Spotify login failed")
             session._finish(LOGIN_ERROR, f"Spotify login failed: {exc}", error="internal")

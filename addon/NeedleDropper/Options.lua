@@ -188,7 +188,7 @@ end
 
 local function addSignalButton()
   return addButton("signal button", L["Check the link"], L["Send a test signal"], O.SignalClicked,
-    L["Sends a test signal through the beacon (and the chat log when it is on). Your NeedleDropper app shows a notification within 2 seconds if it can see the game."])
+    L["Checks only the link and plays no music. Your NeedleDropper app shows a notification within 2 seconds if it can see the game."])
 end
 
 -- ------------------------------------------------------ Music services rows --
@@ -206,8 +206,12 @@ end
 -- Calls MusicServices.<name>(...), or returns `fallback` when it is missing or fails.
 local function ms(name, fallback, ...)
   local MS = music()
-  if not (MS and type(MS[name]) == "function") then return fallback end
+  if not (MS and type(MS[name]) == "function") then
+    if fallback == nil then ns.Print(L["Music services could not open. Type /reload and try again."]) end
+    return fallback
+  end
   local ok, v = pcall(MS[name], ...)
+  if not ok then ns.Print(L["Music services could not complete this request. Type /reload and try again."]) end
   if ok and v ~= nil then return v end
   return fallback
 end

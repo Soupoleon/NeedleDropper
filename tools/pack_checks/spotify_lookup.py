@@ -22,7 +22,8 @@ Commands
   candidates --pack FILE [--pack FILE] --out FILE    several searches per drop, ranked candidates
   serve [--port 0]                                   lookup server (Ctrl+C or kill to stop)
 
-Environment: ``ND_POC_DIR`` overrides the scratch player folder.
+Environment: ``ND_POC_DIR`` selects the scratch player folder; the default is
+``needledropper-poc`` under the current user's temporary directory.
 """
 from __future__ import annotations
 
@@ -42,8 +43,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
-DEFAULT_POC_DIR = (r"C:\Users\<user>\AppData\Local\Temp\claude\ad490dc250b63cb0"
-                   r"\2f09d338-c3d1-4f2b-9a09-39854eb1d4ef\scratchpad\poc")
+DEFAULT_POC_DIR = str(Path(tempfile.gettempdir()) / "needledropper-poc")
 LOCK_FILE = Path(tempfile.gettempdir()) / "nd-spotify-lookup.lock"
 PORT_FILE = Path(tempfile.gettempdir()) / "nd-spotify-lookup.port"
 MIN_INTERVAL_S = 0.5
@@ -422,7 +422,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--server", help="lookup server URL; 'none' forces direct access (default: auto)")
-    ap.add_argument("--poc-dir", help="scratch player folder (default: ND_POC_DIR or the known path)")
+    ap.add_argument("--poc-dir", help="scratch player folder (default: ND_POC_DIR or temp/needledropper-poc)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("search")
     s.add_argument("query")

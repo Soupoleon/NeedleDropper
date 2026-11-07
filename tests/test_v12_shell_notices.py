@@ -52,7 +52,7 @@ def test_a_stuck_in_app_spotify_names_no_spotify_app(shell):
                                            "title": "Africa", "detail": "no progress within 3 s"}})
     note = [n for n in shell.app.notifier.history if n.kind == tray.NOTE_SPOTIFY_STUCK][-1]
     assert note.title == "Spotify didn't start" and "NeedleDropper's player" in note.text
-    assert "restart" not in note.text.lower() and "YouTube plays" in note.text
+    assert "restart the Spotify app" not in note.text and "your needle drops play on YouTube" in note.text
 
 
 def _stuck_spotify_app_reported_once(shell):
@@ -65,6 +65,21 @@ def _stuck_spotify_app_reported_once(shell):
     assert len(notes) == 1
     assert notes[0].title == "Spotify isn't starting songs" and STUCK_MESSAGE in notes[0].text
     assert "Toto – Africa" in notes[0].text
+
+
+def test_service_only_failure_does_not_claim_youtube_was_tried(shell):
+    shell.engines.current.on_status({"change": {"kind": "spotifyStuck", "provider": "spotify",
+                                               "test": True, "dropId": "test-spotify"}})
+    note = [n for n in shell.app.notifier.history if n.kind == tray.NOTE_SPOTIFY_STUCK][-1]
+    assert "YouTube wasn't tried; Test Spotify checks only Spotify." in note.text
+
+
+def test_repeated_old_player_pages_show_one_actionable_notice(shell):
+    shell.deck._note_stale_player()
+    shell.deck._note_stale_player()
+    shell.deck._note_stale_player()
+    notes = [n for n in shell.app.notifier.history if n.title == "Old player window"]
+    assert len(notes) == 1 and "close it" in notes[0].text
 
 
 def test_search_failed_because_spotify_is_unusable_rechecks_spotify_now(shell):

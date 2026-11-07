@@ -1464,7 +1464,7 @@ def default_icon_path(paused: bool = False) -> Path:
 #: The companion's notification kinds. DESIGN-v1.2 1.4 lists the only events that may
 #: interrupt the player; the last two are the crash-safe thread wrapper and the update check.
 NOTE_LINKED = "linked"  # the first frame from World of Warcraft this session
-NOTE_TEST = "test"  # a TEST-flagged frame (/needle test, Settings > Send a test signal, Test / Replay)
+NOTE_TEST = "test"  # a link test (/needle test, Settings > Send a test signal)
 NOTE_SPOTIFY_EXPIRED = "spotify-expired"  # the stored Spotify sign-in stopped working
 NOTE_NOT_FOUND = "spotify-not-found"  # a search-only drop has no match on Spotify
 NOTE_NOT_EMBEDDABLE = "youtube-not-embeddable"  # the video's owner does not allow embedding

@@ -41,6 +41,10 @@ log = logging.getLogger("needledropper.deck.window")
 
 CORNERS = ("topright", "topleft", "bottomright", "bottomleft")
 DEFAULT_CORNER = "topright"
+#: Where the beacon is: the addon's advanced beaconCorner setting, which the app's transport.pixel.corner
+#: must match ("TOPLEFT", ...). The box keeps clear of the beacon at that corner (DESIGN-v1.2.1 3.9).
+BEACON_CORNERS = ("topleft", "topright", "bottomleft", "bottomright")
+DEFAULT_BEACON_CORNER = "topleft"
 CHROME_CLASS = "Chrome_WidgetWin_1"
 TITLE_SUFFIX = "NeedleDropper"     # player.html's <title>, and every title player.js gives itself
 MARGIN_PX = 16                     # from the monitor's edges, at 96 dpi (scaled with the monitor)
@@ -76,14 +80,22 @@ def normalize_corner(value: Any) -> str:
     return v if v in CORNERS else DEFAULT_CORNER
 
 
+def normalize_beacon_corner(value: Any) -> str:
+    """``transport.pixel.corner`` ("TOPLEFT", "BOTTOMRIGHT", ...) as a corner name; top left by default."""
+    v = str(value or "").strip().lower().replace("-", "").replace(" ", "").replace("_", "")
+    return v if v in BEACON_CORNERS else DEFAULT_BEACON_CORNER
+
+
 def corner_position(corner: str, monitor: tuple[int, int, int, int], size: tuple[int, int],
-                    margin: int = MARGIN_PX, beacon: Optional[tuple[int, int]] = None) -> tuple[int, int]:
+                    margin: int = MARGIN_PX, beacon: Optional[tuple[int, int]] = None,
+                    beacon_corner: str = DEFAULT_BEACON_CORNER) -> tuple[int, int]:
     """Top-left (x, y) of a window of ``size`` at ``corner`` of ``monitor`` = (left, top, right,
     bottom), ``margin`` pixels from its edges (pure; physical pixels).
 
-    ``beacon`` (width, height): the beacon's capture rectangle at the area's top-left corner. A box that
-    would overlap it moves down to ``margin`` below it (DESIGN-v1.2.1 3.9): always for a top-left box at
-    100 %, and for a top-right one when the area is narrower than the box plus the rectangle."""
+    ``beacon`` (width, height): the beacon's capture rectangle at the area's ``beacon_corner``. A box that
+    would overlap it moves ``margin`` past it, away from the area's edge (DESIGN-v1.2.1 3.9): below a beacon
+    at the top, above one at the bottom. For the default top-left beacon that is always a top-left box at
+    100 %, and a top-right one when the area is narrower than the box plus the rectangle."""
     left, top, right, bottom = monitor
     w, h = size
     corner = normalize_corner(corner)
@@ -91,8 +103,11 @@ def corner_position(corner: str, monitor: tuple[int, int, int, int], size: tuple
     y = bottom - margin - h if corner.startswith("bottom") else top + margin
     if beacon is not None:
         bw, bh = beacon
-        if x < left + bw and x + w > left and y < top + bh and y + h > top:
-            y = top + bh + margin
+        at = normalize_beacon_corner(beacon_corner)
+        bx = left if at.endswith("left") else right - bw
+        by = top if at.startswith("top") else bottom - bh
+        if x < bx + bw and x + w > bx and y < by + bh and y + h > by:
+            y = by + bh + margin if at.startswith("top") else by - margin - h
     return int(x), int(y)
 
 
@@ -207,6 +222,13 @@ class Win32:
             return (0, 0)
         return (r.right - r.left, r.bottom - r.top)
 
+    def window_rect(self, hwnd: int) -> Optional[tuple[int, int, int, int]]:
+        """(left, top, right, bottom) of ``hwnd`` on the screen, or None."""
+        r = self.wt.RECT()
+        if not self._GetWindowRect(hwnd, self.ctypes.byref(r)):
+            return None
+        return (r.left, r.top, r.right, r.bottom)
+
     def get_exstyle(self, hwnd: int) -> int:
         return int(self._GetWindowLongPtrW(hwnd, GWL_EXSTYLE))
 
@@ -281,11 +303,16 @@ class PlayerWindow:
         self.win32 = win32
         self.corner = normalize_corner(corner)
         self.position: Optional[tuple[int, int]] = None   # deck.playerPosition overrides the corner
+        self.beacon_corner = DEFAULT_BEACON_CORNER          # the box keeps clear of the beacon there
         self.game_window = game_window
         self.clock, self.sleep = clock, sleep
         self.hwnd: Optional[int] = None
         self.shown = False
         self._lock = threading.Lock()
+        #: serialises placing the window (show / park / reposition / the hide timer / keep_parked), so a
+        #: park decided a moment ago never lands on a box a YouTube song just showed
+        self._place_lock = threading.RLock()
+        self._parked_at: Optional[tuple[int, int]] = None  # where park() last put it (None: never parked)
         self._hide_gen = 0
         #: whether creating the window ever took the foreground (None: not watched), and whether the
         #: foreground went back to the window that had it before the launch
@@ -301,7 +328,8 @@ class PlayerWindow:
         except Exception:  # noqa: BLE001
             return set()
 
-    def _candidates(self, pids: set[int], ignore: Optional[set[int]] = None) -> list[tuple[int, int]]:
+    def _candidates(self, pids: set[int], ignore: Optional[set[int]] = None,
+                    accept_handoff: Optional[Callable[[int], bool]] = None) -> list[tuple[int, int]]:
         found = []
         for hwnd, pid, cls, title, visible, owned in self.win32.top_windows():
             if cls != CHROME_CLASS or owned:
@@ -312,6 +340,8 @@ class PlayerWindow:
                 continue
             ours = pid in pids
             named = title.strip().endswith(TITLE_SUFFIX)
+            if not ours and named and visible and accept_handoff is not None and not accept_handoff(pid):
+                continue
             if ours and (visible or named) or (named and visible):
                 score = (2 if ours else 0) + (1 if named else 0)
                 found.append((score, hwnd))
@@ -355,7 +385,8 @@ class PlayerWindow:
             return False
 
     def adopt(self, pid: Optional[int], timeout: float = ADOPT_TIMEOUT_S, *,
-              prev_foreground: Optional[int] = None, ignore: Optional[set[int]] = None) -> bool:
+              prev_foreground: Optional[int] = None, ignore: Optional[set[int]] = None,
+              accept_handoff: Optional[Callable[[int], bool]] = None) -> bool:
         """Wait for the launched browser's window, restyle it and hide it. A browser that handed the
         window to an instance already running (same profile) is found by the page's title.
 
@@ -380,7 +411,11 @@ class PlayerWindow:
                     took = True
                 elif fg and not took:
                     back_to = fg
-            for _score, hwnd in self._candidates(pids, ignore):
+            for _score, hwnd in self._candidates(pids, ignore, accept_handoff):
+                owner = next((p for h, p, *_rest in self.win32.top_windows() if h == hwnd), None)
+                if owner is not None and owner not in pids:
+                    log.warning("player launch handed off to browser pid %s", owner)
+                    pids.add(owner)
                 self._take(hwnd)
                 if watch:
                     self._hand_back(back_to, pids, took)
@@ -457,33 +492,35 @@ class PlayerWindow:
             beacon = BEACON_RECT_PX
         size = self.win32.window_size(hwnd)
         margin = int(round(MARGIN_PX * self.win32.dpi_scale(hwnd)))
-        return corner_position(self.corner, area, size, margin, beacon)
+        return corner_position(self.corner, area, size, margin, beacon, self.beacon_corner)
 
     def reposition(self) -> bool:
         """A corner (or position) change while the box is on screen moves it at once, never activating it
         (DESIGN-v1.2.1 3.9). False when it is not shown."""
-        if not (self.shown and self.alive()):
-            return False
-        pos = self.target()
-        if pos is None:
-            return False
-        return bool(self.win32.set_pos(self.hwnd, 0, pos[0], pos[1], 0, 0,
-                                       SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER))
+        with self._place_lock:
+            if not (self.shown and self.alive()):
+                return False
+            pos = self.target()
+            if pos is None:
+                return False
+            return bool(self.win32.set_pos(self.hwnd, 0, pos[0], pos[1], 0, 0,
+                                           SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER))
 
     def show(self) -> bool:
         """Always on top at the chosen corner, without ever activating it."""
-        if not self.alive():
-            return False
-        with self._lock:
-            self._hide_gen += 1
-        pos = self.target()
-        if pos is None:
-            return False
-        ok = self.win32.set_pos(self.hwnd, HWND_TOPMOST, pos[0], pos[1], 0, 0,
-                                SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOOWNERZORDER)
-        with self._lock:
-            self.shown = bool(ok) or self.shown
-        return bool(ok)
+        with self._place_lock:
+            if not self.alive():
+                return False
+            with self._lock:
+                self._hide_gen += 1
+            pos = self.target()
+            if pos is None:
+                return False
+            ok = self.win32.set_pos(self.hwnd, HWND_TOPMOST, pos[0], pos[1], 0, 0,
+                                    SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOOWNERZORDER)
+            with self._lock:
+                self.shown = bool(ok) or self.shown
+            return bool(ok)
 
     def parking_spot(self) -> tuple[int, int]:
         """A top-left position where the window touches no monitor: up and left of the virtual screen."""
@@ -499,15 +536,46 @@ class PlayerWindow:
     def park(self) -> bool:
         """Between songs (D14): shown, but off every monitor and not topmost, never activated -- the Web
         Playback SDK plays nothing in a hidden window. No taskbar entry or Alt-Tab (WS_EX_TOOLWINDOW)."""
-        if not self.alive():
+        with self._place_lock:
+            if not self.alive():
+                return False
+            x, y = self.parking_spot()
+            ok = self.win32.set_pos(self.hwnd, HWND_NOTOPMOST, x, y, 0, 0,
+                                    SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOOWNERZORDER)
+            with self._lock:
+                if ok:
+                    self.shown = False
+                    self._parked_at = (x, y)
+            return bool(ok)
+
+    def _on_a_monitor(self) -> bool:
+        """The window overlaps the virtual screen (some monitor may show it); False when unknown."""
+        rect_fn = getattr(self.win32, "window_rect", None)
+        vs_fn = getattr(self.win32, "virtual_screen", None)
+        if not (callable(rect_fn) and callable(vs_fn) and self.hwnd):
             return False
-        x, y = self.parking_spot()
-        ok = self.win32.set_pos(self.hwnd, HWND_NOTOPMOST, x, y, 0, 0,
-                                SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_NOSIZE | SWP_NOOWNERZORDER)
-        with self._lock:
-            if ok:
-                self.shown = False
-        return bool(ok)
+        try:
+            rect = rect_fn(self.hwnd)
+            left, top, width, height = vs_fn()
+        except Exception:  # noqa: BLE001
+            return False
+        if not rect:
+            return False
+        return rect[0] < left + width and rect[2] > left and rect[1] < top + height and rect[3] > top
+
+    def keep_parked(self) -> bool:
+        """Between songs the window must stay off every monitor (D14). A display change while it is parked --
+        a monitor added above or to the left of the others, a resolution or scaling change -- moves the
+        virtual screen, and Windows may bring the window onto a monitor. A light check, every few seconds
+        (the app's housekeeping): when the parking spot moved, or the window overlaps the virtual screen, it
+        is parked again, never activated. Nothing while a YouTube song shows it. True when it parked it."""
+        with self._place_lock:
+            if self.shown or self._parked_at is None or not self.alive():
+                return False
+            if self.parking_spot() == self._parked_at and not self._on_a_monitor():
+                return False
+            log.info("the display changed while the player window was parked: parking it off screen again")
+            return self.park()
 
     def hide(self) -> bool:
         """Off the screen between songs: :meth:`park` (never ``SWP_HIDEWINDOW``, see the module doc)."""
@@ -521,10 +589,11 @@ class PlayerWindow:
 
         def run() -> None:
             self.sleep(max(0.0, delay_s))
-            with self._lock:
-                stale = gen != self._hide_gen
-            if not stale:
-                self.hide()
+            with self._place_lock:  # a show() in between makes this stale before it can park the box
+                with self._lock:
+                    stale = gen != self._hide_gen
+                if not stale:
+                    self.hide()
 
         threading.Thread(target=run, name="needledropper-player-hide", daemon=True).start()
 
@@ -557,5 +626,5 @@ def make_player_window(corner: str = DEFAULT_CORNER) -> Optional[PlayerWindow]:
         return None
 
 
-__all__ = ["CORNERS", "DEFAULT_CORNER", "PlayerWindow", "Win32", "corner_position", "make_player_window",
-           "normalize_corner"]
+__all__ = ["BEACON_CORNERS", "CORNERS", "DEFAULT_BEACON_CORNER", "DEFAULT_CORNER", "PlayerWindow", "Win32",
+           "corner_position", "make_player_window", "normalize_beacon_corner", "normalize_corner"]

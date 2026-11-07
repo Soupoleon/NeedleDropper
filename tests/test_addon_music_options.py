@@ -176,6 +176,17 @@ def test_refresh_status_reloads_once_inside_pcall():
     assert int(h.lua("return SHIM.ui.reloads")) == 1
 
 
+def test_a_broken_music_action_prints_recovery_instead_of_failing_silently():
+    h = make(app())
+    h.ns.MusicServices.Send = h.rt.eval('function() error("broken action") end')
+    music_buttons(h)["Test Spotify"].click()
+    assert any("could not complete this request" in line and "/reload" in line for line in h.prints())
+    h.ns.MusicServices.Send = None
+    music_buttons(h)["Test Spotify"].click()
+    assert any("could not open" in line and "/reload" in line for line in h.prints())
+    h.check_errors()
+
+
 def test_settings_rows_change_the_choices():
     h = make(app())
     order = h.shim.settings.settings["NeedleDropper_musicOrder"]

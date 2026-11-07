@@ -384,10 +384,11 @@ def test_connect_needs_some_client_id_and_disconnect_the_apps():
     assert fr.action.name == "connect-spotify" and fr.client_id is None
 
 
-def test_the_same_request_waits_five_seconds():
+def test_the_same_request_waits_ten_seconds():
+    # v1.2.1 review INGAME-8: the app's own limit (music_config.ACTION_INTERVAL_S = 10 s), not 5 s
     h = make(app(block=music()))
     assert h.call1("MusicServices.Send", "test-youtube") is not None
-    h.advance(4.9)
+    h.advance(9.9)
     assert h.call("MusicServices.Send", "test-youtube")[1] == "Just sent: give it a moment."
     assert h.call1("MusicServices.Send", "test-spotify") is not None   # per request, not any send
     h.advance(0.2)
@@ -531,9 +532,9 @@ def test_status_lines_for_a_connected_app():
 @pytest.mark.parametrize("state, legacy, line, button", [
     ("needs-relogin", "error",
      "Spotify: sign in again to allow in-app playback (NeedleDropper's Music services).", ("Sign in again", "connect")),
+    # v1.2.1 review ON-9: no-player without a cause (an older app) is worded neutrally, not "install Chrome"
     ("no-player", "error",
-     "Spotify: install Google Chrome to play Spotify in NeedleDropper (if it is installed, wait a minute for its "
-     "Widevine component).", ("Needs Chrome…", "open")),
+     "Spotify: NeedleDropper's player isn't ready (the app's Connect page says why).", ("Check Spotify…", "open")),
     ("stuck", "error",
      "Spotify: a song didn't start in NeedleDropper's player, so drops play YouTube until it works again (Test "
      "Spotify checks it).", ("Check Spotify…", "open")),
@@ -661,8 +662,9 @@ def test_status_line_names_the_account_and_youtube():
     h = make(app(block=music()))
     assert h.call1("Companion.StatusLine") == "App seen 2 min before login · Spotify: Ethan (Premium) · YouTube ready"
     h = make(app(spotify="error", block=music(spotify={"state": "no-player"}, youtube={"enabled": True, "player": "none"})))
+    # v1.2.1 review ON-9: no-player without a cause is "not ready"; only the cause "no-chrome" names Chrome
     assert h.call1("Companion.StatusLine") == \
-        "App seen 2 min before login · Spotify needs Google Chrome · YouTube: no player browser"
+        "App seen 2 min before login · Spotify player not ready · YouTube: no player browser"
     h = make(app(youtube=False))
     assert h.call1("Companion.StatusLine").endswith(" · YouTube off")
 

@@ -41,7 +41,7 @@ function S.Signal()
   local forced = not (ns.settings and ns.settings.beacon)
   if ns.Beacon and ns.Beacon.ForceShow then ns.Beacon.ForceShow(SIGNAL_SECONDS) end
   local ev = ns.Emit(P.EV.PING, nil, P.FLAG.TEST)
-  ns.Print(L["test signal sent (seq %d)%s. Your NeedleDropper app shows a notification within 2 seconds if it can see the game."],
+  ns.Print(L["test signal sent (seq %d)%s: link check only, no music plays. Your NeedleDropper app shows a notification within 2 seconds if it can see the game."],
     ev and ev.seq or 0, forced and L[" (the beacon is off: shown for a few seconds anyway)"] or "")
   return ev
 end
@@ -245,6 +245,14 @@ S.REPORT_JOURNAL = 5
 
 local function onOffWord(v) return v and "on" or "off" end
 
+-- date() for a time stamp, or "?": it gives nil (or may raise) for a time it can't show, and the report
+-- must never fail on a corrupt one (review INGAME-7).
+local function safeDate(fmt, t)
+  local ok, s = pcall(date, fmt, t)
+  if ok and type(s) == "string" then return s end
+  return "?"
+end
+
 local function setting(key)
   local s = ns.settings or {}
   return ns.FormatSettingValue and ns.FormatSettingValue(key, s[key]) or tostring(s[key])
@@ -267,13 +275,16 @@ local function appLines(out)
   local age = C.ReportAge and C.ReportAge()
   local when = "no report written yet"
   if age then
-    when = string.format("report written %s (%s before login)", date("%Y-%m-%d %H:%M", st.written),
+    when = string.format("report written %s (%s before login)", safeDate("%Y-%m-%d %H:%M", st.written),
       ns.FormatSeconds and ns.FormatSeconds(age) or tostring(age))
   end
   out[#out + 1] = string.format("App: %s, %s", version, when)
   local sp = tostring(app.state or st.spotify or "unknown")
   if app.mode then sp = sp .. ", mode " .. app.mode end
   if app.product then sp = sp .. ", plan " .. app.product end
+  -- The cause the app named (music.spotify.problem): one of Companion's fixed codes, so never an account
+  -- name, a Client ID or a "|" (review RG-3).
+  if app.problem then sp = sp .. ", cause " .. tostring(app.problem) end
   if app.clientId or (MS and MS.StoredClientId and MS.StoredClientId()) then sp = sp .. ", Client ID set" end
   local yt = st.youtube and "on" or "off"
   if app.ytEnabled == false then yt = "switched off" end
@@ -286,7 +297,7 @@ local function appLines(out)
     for _, e in ipairs(app.actions or {}) do
       if e.id == r.at and e.action == r.action then result = e.result end
     end
-    out[#out + 1] = string.format("  Last request: %s at %s: %s", r.action, date("%H:%M", r.at), result)
+    out[#out + 1] = string.format("  Last request: %s at %s: %s", r.action, safeDate("%H:%M", r.at), result)
   end
 end
 
@@ -323,7 +334,7 @@ end
 -- The report as plain text (lines joined with "\n"; no "|" anywhere, so the box shows it as is).
 function S.ReportText()
   local out = {}
-  out[#out + 1] = "NeedleDropper report, " .. date("%Y-%m-%d %H:%M")
+  out[#out + 1] = "NeedleDropper report, " .. safeDate("%Y-%m-%d %H:%M")
   local version, build, _, toc = "?", "?", nil, "?"
   if type(GetBuildInfo) == "function" then
     local ok, v, b, d, t = pcall(GetBuildInfo)
@@ -352,7 +363,7 @@ function S.ReportText()
     out[#out + 1] = string.format("Journal (last %d of %d):", math.min(S.REPORT_JOURNAL, #j), #j)
     for i = math.max(1, #j - S.REPORT_JOURNAL + 1), #j do
       local e = j[i]
-      local when = (type(e.t) == "number" and e.t > 0) and date("%Y-%m-%d %H:%M", e.t) or "?"
+      local when = (type(e.t) == "number" and e.t > 0) and safeDate("%Y-%m-%d %H:%M", e.t) or "?"
       local via = e.spotify and "Spotify" or (e.youtube and "YouTube" or (e.file and "file" or "search"))
       out[#out + 1] = string.format("  %s  %s  %s - %s (%s)", when, tostring(e.id), tostring(e.artist or "?"),
         tostring(e.title or "?"), via)
@@ -360,7 +371,7 @@ function S.ReportText()
   end
   local err = ns.lastError
   if type(err) == "table" then
-    out[#out + 1] = string.format("Last error (%s): %s", date("%H:%M", err.at), tostring(err.text))
+    out[#out + 1] = string.format("Last error (%s): %s", safeDate("%H:%M", err.at), tostring(err.text))
   else
     out[#out + 1] = "Last error: none this session"
   end

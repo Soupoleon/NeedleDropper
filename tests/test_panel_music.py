@@ -234,7 +234,8 @@ def test_a_request_from_the_game_is_written_for_the_game_and_notified(ns):
     assert ns.app.music.wait_idle(5)
     acts = music_data(ns)["actions"]
     assert acts == [{"id": 1_762_380_000, "action": "test-spotify", "result": "failed",
-                     "text": "Spotify test failed: no device.", "at": 1_762_380_000}]
+                     "text": "Spotify test failed: no device. YouTube wasn't tried; Test Spotify checks only Spotify.",
+                     "at": 1_762_380_000}]
     notes = [n for n in ns.app.notifier.history if n.kind == tray.NOTE_MUSIC]
     assert notes[-1].title == "Spotify test" and notes[-1].key == "test-spotify:1762380000:result"
 

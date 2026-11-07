@@ -411,7 +411,7 @@
   var sp = {
     want: false, name: "NeedleDropper", player: null, loading: false, loaded: false, ready: false, deviceId: "",
     volume: 0, fadeTimer: null, endTimer: null, pending: null, current: null, tickTimer: null, fastUntil: 0,
-    eme: null, emeTimer: null, emeTries: 0
+    eme: null, emeTimer: null, emeTries: 0, created: false, reloadTimer: null
   };
   var SP_TICK_FAST_MS = 250, SP_TICK_MS = 2000, SP_FAST_WINDOW_MS = 6000;
 
@@ -481,6 +481,8 @@
 
   function spCreate() {
     if (!sp.want || sp.player || !window.Spotify || !window.Spotify.Player) return;
+    if (sp.created) { spReload(); return; }
+    sp.created = true; // Spotify's hidden iframe registers only the first Player in a page.
     var p = new window.Spotify.Player({ name: sp.name, volume: 0, getOAuthToken: spToken });
     sp.player = p;
     sp.volume = 0;
@@ -520,6 +522,25 @@
     spCancelFade();
     if (sp.tickTimer) { clearTimeout(sp.tickTimer); sp.tickTimer = null; }
     if (p) { try { p.disconnect(); } catch (e) { /* gone already */ } }
+  }
+
+  function spReload() {
+    if (sp.reloadTimer) return;
+    var run = function () {
+      sp.reloadTimer = null;
+      // Never cut a song already playing in this shared page. A pending Spotify start is not
+      // playback (the 404 recovery must be able to reload before anything was loaded).
+      var last = 0, key = "nd-spotify-reload:" + location.hash;
+      try { last = Number(sessionStorage.getItem(key)) || 0; } catch (e) {}
+      var remaining = 60000 - (Date.now() - last);
+      if (current || fades.audio || fades.yt || sp.current || remaining > 0) {
+        sp.reloadTimer = setTimeout(run, Math.max(250, remaining));
+        return;
+      }
+      try { sessionStorage.setItem(key, String(Date.now())); } catch (e) {}
+      location.reload(); // keeps the launch key fragment; the app replays the desired state
+    };
+    run();
   }
 
   function spTrack(s) {
@@ -626,20 +647,19 @@
         if (cmd.name) sp.name = String(cmd.name);
         // The app replays "connect" whenever this page's event stream (re)connects: a player that is
         // ready already says so again (the app forgot it while the stream was down).
-        if (sp.player && sp.ready && sp.deviceId) spPost("ready", { deviceId: sp.deviceId, again: true });
+        if (cmd.replay && sp.player) {
+          if (sp.ready && sp.deviceId) spPost("ready", { deviceId: sp.deviceId, again: true });
+        } else if (sp.created) spReload();
         else spStartSdk();
         break;
       case "disconnect":
         sp.want = false;
         if (sp.emeTimer) { clearTimeout(sp.emeTimer); sp.emeTimer = null; }
-        spDrop();
+        if (sp.created) spReload();
         break;
       case "reconnect":
-        sp.want = true;
-        if (cmd.name) sp.name = String(cmd.name);
-        spDrop();
-        sp.emeTries = 0;
-        spStartSdk();
+      case "reload":
+        spReload();
         break;
       case "start": spBegin(cmd); break;
       case "fade": spFade((Number(cmd.volume) || 0) / 100, cmd.ms | 0, null); break;

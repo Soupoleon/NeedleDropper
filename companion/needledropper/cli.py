@@ -375,12 +375,14 @@ def _start_deck(ctx: Ctx, *, out: Out = say, allow_fallback: bool = False):
                 f"Another program uses this port. Close it, or change \"deck\": {{\"port\": ...}} in {config_path()}.")
             return None
     dcfg = ctx.cfg.get("deck") or {}
+    pixel = (ctx.cfg.get("transport") or {}).get("pixel") or {}
     attach_player_window(deck)
     deck.configure_player(auto_open=str(dcfg.get("autoOpen") or "youtube"), browser=str(dcfg.get("browser") or "edge"),
                           position=parse_position(dcfg.get("playerPosition")),
                           profile_dir=ctx.paths.app_dir / "deck-browser",
                           corner=str(dcfg.get("playerCorner") or "topright"),
-                          browser_log=ctx.paths.logs_dir / "browser.log")
+                          browser_log=ctx.paths.logs_dir / "browser.log",
+                          beacon_corner=str(pixel.get("corner") or "TOPLEFT"))
     return deck
 
 

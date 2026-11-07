@@ -310,16 +310,16 @@ def test_local_playback_shows_and_logs_only():
     assert not r.engine.is_playing and r.deck.cmds("hide")
 
 
-def test_test_fire_plays_records_nothing_and_checks_the_link():
+def test_test_fire_plays_records_nothing_without_a_link_notice():
     r = Rig()
     fr = r.send(ET.FIRE, "chatlog", flags=Flags.DROP_ACTIVE | Flags.TEST, youtube=YT_ID, artist="Toto",
                 title="Africa", drop_id="area:87")
     assert r.sp.of("play")[0][2] == f"spotify:track:{SP_MATCH}"  # searched and played ...
     assert r.records == []  # ... but nothing is recorded for the game
-    assert len(r.links) == 1 and r.links[0][1] == "chatlog" and r.links[0][0] == fr
+    assert r.links == []
     assert r.deck.cmds("show")[-1]["test"] is True
     assert r.engine.status()["playing"]["test"] is True
-    assert r.engine.status()["linkChecks"] == 1
+    assert r.engine.status()["linkChecks"] == 0
 
 
 def test_needle_test_carries_no_song_and_never_touches_playback():
@@ -339,12 +339,15 @@ def test_ping_checks_the_link_and_is_never_played():
     assert len(r.links) == 1 and any("PING" in m and "via chatlog" in m for m in r.logs)
 
 
-def test_every_test_flagged_frame_calls_on_link_check():
+def test_only_link_tests_call_on_link_check():
     r = Rig()
     r.send(ET.HELLO, flags=Flags.TEST)
     r.send(ET.CANCEL, flags=Flags.TEST, drop_id="area:87")
     r.send(ET.HELLO)
-    assert [fr.type for fr, _t in r.links] == [ET.HELLO, ET.CANCEL]
+    assert r.links == []
+    r.send(ET.FIRE, flags=Flags.TEST, drop_id="test")
+    r.send(ET.PING)
+    assert [fr.type for fr, _t in r.links] == [ET.FIRE, ET.PING]
 
 
 # ----------------------------------------------------------------- ARM cache --

@@ -88,13 +88,33 @@ class PageDeck:
         self.spotify = SpotifySdk(self)
         self.auto_stop = True  # answer "stop" with "stopped", as player.js does after its fade
         self._ready = ready
+        self.generation = 1
+        self.created = False
+        self.registered: set[str] = set()
+
+    def reload(self):
+        self.spotify.page_gone()
+        self.generation += 1
+        self.created = False
+        self.registered.clear()
+        self.spotify.page_connected()
+        for cmd in self.spotify.replay():
+            self.send(cmd)
 
     def send(self, cmd: dict) -> int:
         self.sent.append(dict(cmd))
         if cmd.get("cmd") == "spotify":
             op = cmd.get("op")
-            if op in ("connect", "reconnect") and self._ready:
-                self.report("ready", deviceId=SDK_DEVICE)
+            if op in ("reload", "disconnect"):
+                self.reload()
+            elif op in ("connect", "reconnect") and self._ready:
+                device = "sdk-device-" + str(self.generation)
+                if self.created and not cmd.get("replay"):
+                    device += "-unlisted"  # Spotify only registers the first Player in this page
+                else:
+                    self.registered.add(device)
+                self.created = True
+                self.report("ready", deviceId=device)
             if op == "stop" and self.auto_stop:
                 self.report("stopped", playId=cmd.get("playId"))
             if self.on_command is not None:
@@ -120,6 +140,7 @@ class PageDeck:
 def fast(monkeypatch):
     """Short in-app waits (the logic is the same; the tests stay quick)."""
     monkeypatch.setattr(sp, "APP_READY_WAIT_S", 0.3)
+    monkeypatch.setattr(sp, "APP_REGISTRATION_WAIT_S", 0.3)
     monkeypatch.setattr(sp, "APP_START_TIMEOUT_S", 0.5)
     monkeypatch.setattr(sp, "APP_API_CHECK_S", 0.2)
     monkeypatch.setattr(sp, "APP_STOP_SLACK_S", 0.3)
@@ -134,11 +155,16 @@ def make_app_rig(tmp_path: Path, *, page: PageDeck | None = None, cfg: dict | No
             save_tokens(tmp_path, scope=scope)
     page = page or PageDeck()
     fake = http or FakeHTTP()
+    if ("GET", "/v1/me/player/devices") not in fake.routes:
+        fake.add("GET", "/v1/me/player/devices", lambda call: (200, {"devices": [
+            {"id": dev, "name": "NeedleDropper", "type": "Computer"} for dev in page.registered]}))
     clock = FakeClock()
     conf = {"clientId": "cid", "device": "app", "fade": True, "restorePrevious": True}
     conf.update(cfg or {})
     provider = SpotifyProvider(conf, SimpleNamespace(app_dir=tmp_path), http=fake, sleep=clock.sleep, clock=clock,
                                deck=page)
+    if tokens:
+        provider._wait_registered(0)
     return SimpleNamespace(provider=provider, page=page, http=fake, clock=clock)
 
 
@@ -163,7 +189,8 @@ def test_the_player_opens_on_localhost_and_everything_else_stays_on_127(deck):
     payload = json.dumps({"state": "ready", "browser": "chrome"}).encode()
     local = {"Host": f"localhost:{deck.port}", "Origin": f"http://localhost:{deck.port}",
              "Sec-Fetch-Site": "same-origin", "Content-Type": "application/json", "Content-Length": str(len(payload))}
-    assert request(deck, "POST", "/status", {**local, "X-ND-Token": deck.token}, payload)[0] == 204
+    assert request(deck, "POST", "/status", {**local, "X-ND-Token": deck.token, "X-ND-Key": deck.player_key},
+                   payload)[0] == 204  # v1.2.1 polish: every player report carries the launch key
     assert request(deck, "POST", "/status", {**local, "X-ND-Token": "nope"}, payload)[0] == 401
     assert request(deck, "POST", "/status", {**local, "Origin": "http://localhost:1", "X-ND-Token": deck.token},
                    payload)[0] == 403
@@ -233,6 +260,8 @@ def test_sdk_reports_reach_the_sdk_state_and_never_the_youtube_status(deck):
     events: list = []
     deck.spotify.enable(lambda: "T", listener=lambda ev, rec: events.append(ev))
     assert post_status(deck, {"state": "spotify", "event": "ready", "deviceId": "dev-A"}) == 204
+    assert deck.spotify.wait_ready(0) is None  # an SDK ready alone is not routable
+    deck.spotify.verify_device("dev-A", deck.spotify.ready_seq, listed=True)
     assert deck.spotify.wait_ready(0) == "dev-A"
     post_status(deck, {"state": "spotify", "event": "tick", "active": True, "paused": False, "position": 5000,
                        "uri": DROP_URI, "playId": "p1"})
@@ -241,6 +270,7 @@ def test_sdk_reports_reach_the_sdk_state_and_never_the_youtube_status(deck):
     post_status(deck, {"state": "spotify", "event": "not_ready", "deviceId": "dev-A"})
     assert deck.spotify.wait_ready(0) is None
     post_status(deck, {"state": "spotify", "event": "ready", "deviceId": "dev-B"})  # the device id can change
+    deck.spotify.verify_device("dev-B", deck.spotify.ready_seq, listed=True)
     assert deck.spotify.wait_ready(0) == "dev-B"
     post_status(deck, {"state": "spotify", "event": "error", "kind": "account_error", "message": "Premium"})
     assert deck.spotify.snapshot()["error"]["kind"] == "account_error"
@@ -279,6 +309,7 @@ def test_a_connecting_player_page_is_told_to_connect_and_starts_unready(deck):
         assert first.get("replay") is True
         assert deck.spotify.wait_ready(0) is None   # the new page's SDK is not ready yet (new device id)
         post_status(deck, {"state": "spotify", "event": "ready", "deviceId": "new-page"})
+        deck.spotify.verify_device("new-page", deck.spotify.ready_seq, listed=True)
         assert deck.spotify.wait_ready(0) == "new-page"
     finally:
         page.close()
@@ -421,8 +452,9 @@ def test_a_start_that_never_progresses_falls_back_and_parks_the_song(tmp_path, f
     rig.provider.stop(exc.cleanup)
     restore = rig.http.find("PUT", "/v1/me/player/play")[-1]
     assert restore.query == {"device_id": PHONE["id"]} and restore.json["uris"] == [PREV["uri"]]
-    # a later "ready" (the player connected again) clears the verdict
+    # A later ready clears the verdict only after the Web API confirms its registration.
     rig.page.report("ready", deviceId=SDK_DEVICE)
+    rig.provider._wait_registered(0)
     assert not rig.provider.stuck()
 
 
@@ -437,14 +469,15 @@ def test_an_sdk_error_during_the_start_fails_at_once(tmp_path, fast):
     assert time.monotonic() - t0 < 0.45
 
 
-def test_a_stale_device_id_reconnects_the_player(tmp_path, fast):
+def test_a_second_404_fails_after_one_reload_without_pausing_an_empty_player(tmp_path, fast):
     rig = make_app_rig(tmp_path)
     rig.http.add("GET", "/v1/me/player", (204, None))
     rig.http.add("PUT", "/v1/me/player/play", (404, {"error": {"status": 404, "message": "Device not found"}}))
-    with pytest.raises(ProviderError, match="reconnecting") as ei:
+    with pytest.raises(ProviderError) as ei:
         rig.provider.play(make_drop(), fade_in_ms=0)
     assert not isinstance(ei.value, SpotifyStuckError)
-    assert rig.page.ops()[-3:] == ["start", "pause", "reconnect"]
+    assert rig.page.ops()[-4:] == ["start", "reload", "connect", "start"]
+    assert len(rig.http.find("PUT", "/v1/me/player/play")) == 2
 
 
 def test_a_player_that_is_not_ready_sends_no_play(tmp_path, fast):
@@ -567,9 +600,9 @@ def test_authentication_errors_get_one_fresh_token_then_are_an_error(tmp_path):
     page._ready = False                                       # from now on the SDK refuses every token
     page.report("error", kind="authentication_error", message="Authentication failed")
     deadline = time.monotonic() + 3
-    while "reconnect" not in page.ops() and time.monotonic() < deadline:
+    while "reload" not in page.ops() and time.monotonic() < deadline:
         time.sleep(0.02)
-    assert page.ops()[-1] == "reconnect" and len(fake.find("POST", "/api/token")) == 1
+    assert "reload" in page.ops() and len(fake.find("POST", "/api/token")) == 1
     assert p.music_state() == "connected"                    # connecting again with the fresh token
     page.report("error", kind="authentication_error", message="Authentication failed")
     assert p.music_state() == "error" and p.status_dict()["badge"] == "error"
@@ -584,13 +617,16 @@ def test_no_player_states_say_why(tmp_path, monkeypatch):
     p = rig.provider
     assert p.music_state() == "connected"                     # connecting: give it time
     monkeypatch.setattr(sp, "SDK_READY_GRACE_S", -1.0)        # ... time is up
-    assert p.music_state() == "no-player" and p.sdk_problem()[1] == sp.NO_PLAYER_MESSAGE
+    # v1.2.1 review ON-9: a page in Chrome that never got ready is not "install Google Chrome"
+    assert p.music_state() == "no-player" and p.sdk_problem()[1] == sp.NOT_READY_MESSAGE
+    assert p.sdk_problem_detail()[2] == "not-ready" and p.status_dict()["problem"] == "not-ready"
     page.page_open = False                                     # no player window at all
-    assert p.sdk_problem()[1] == sp.NO_WINDOW_MESSAGE
+    assert p.sdk_problem()[1] == sp.NO_WINDOW_MESSAGE and p.sdk_problem_detail()[2] == "no-window"
     page.chrome = False
     assert p.sdk_problem()[1] == sp.NO_PLAYER_MESSAGE         # nothing to open it in: install Chrome
+    assert p.sdk_problem_detail()[2] == "no-chrome"
     page.auto_open = "never"
-    assert p.sdk_problem()[1] == sp.NO_WINDOW_NEVER_MESSAGE
+    assert p.sdk_problem()[1] == sp.NO_WINDOW_NEVER_MESSAGE and p.sdk_problem_detail()[2] == "window-never"
     page.page_open, page.auto_open, page.player_opening = True, "youtube", False
     page.page_browser = "edge"                                 # D11: the SDK never works in Edge
     monkeypatch.setattr(sp, "SDK_READY_GRACE_S", 30.0)
@@ -606,13 +642,13 @@ def test_a_player_that_never_got_ready_is_connected_again_by_sync(tmp_path, monk
     monkeypatch.setattr(sp, "SDK_READY_GRACE_S", -1.0)
     assert not rig.provider.available()       # no-player: the engine never prepares it (the app's
     rig.provider.sync_sdk()                   # housekeeping calls sync_sdk: test_panel_spotify.py)
-    assert page.ops() == ["connect", "reconnect"]
+    assert page.ops() == ["connect", "reload", "connect"]
     rig.provider.sync_sdk()                   # at most once a minute
-    assert page.ops() == ["connect", "reconnect"]
+    assert page.ops() == ["connect", "reload", "connect"]
     page.page_browser = "edge"                # never for a page in Edge (it would never work)
     rig.provider._last_recheck = -1e9
     rig.provider.sync_sdk()
-    assert page.ops() == ["connect", "reconnect"]
+    assert page.ops() == ["connect", "reload", "connect"]
 
 
 def test_a_short_offline_blip_is_not_a_failure(tmp_path, fast, monkeypatch):

@@ -74,6 +74,13 @@ MODES = (MODE_APP, MODE_CONNECT)
 #: keeps its four values (:func:`legacy_status`).
 MUSIC_STATES = ("connected", "not-connected", "needs-relogin", "premium-required", "no-player", "stuck", "error")
 LEGACY_STATES = ("connected", "not-connected", "premium-required", "error")
+#: Why in-app Spotify has no player (state "no-player"; ``status_dict()["problem"]``, the game's
+#: ``music.spotify.problem``, review ON-9), so the game names the right fix: no Google Chrome or no Widevine
+#: in it yet, a player page that never got ready, no player window yet (none is made while the game is in
+#: front), the player switched off (``deck.autoOpen`` "never"), Spotify's player script not loaded.
+NO_PLAYER_PROBLEMS = ("no-chrome", "not-ready", "no-window", "window-never", "sdk-load")
+#: Every ``music.spotify.problem``: "allowlist" goes with state "error" (review ON-3), the others with "no-player".
+MUSIC_PROBLEMS = ("allowlist",) + NO_PLAYER_PROBLEMS
 #: The Connect device name the player page registers as (deck/server.py SPOTIFY_DEVICE_NAME).
 APP_DEVICE_NAME = "NeedleDropper"
 
@@ -91,7 +98,7 @@ ALLOWLIST_MESSAGE = ("Spotify refused this account for your Spotify app: add its
 SCOPE_MESSAGE = ("Spotify asks for one more permission (search with your country's catalogue, the Premium "
                  "check): open the Connect page and sign in to Spotify again")
 #: The desktop app accepted play but never started the song (seen on a real PC on 2026-11-05).
-STUCK_MESSAGE = "Spotify isn't starting songs — restart the Spotify app"
+STUCK_MESSAGE = "Spotify isn't starting songs — choose NeedleDropper (this app) under Play on"
 #: ``ProviderError.notice`` for the engine / tray when Spotify accepted a song but did not start it.
 NOTICE_STUCK = "spotifyStuck"
 NOT_CONFIGURED_MESSAGE = ("Spotify is not set up: no spotify.clientId in the config. "
@@ -112,10 +119,15 @@ NO_WINDOW_NEVER_MESSAGE = ("NeedleDropper's player is switched off (deck.autoOpe
                            "so Spotify can't play in the app.")
 #: The SDK's script did not load (offline, or blocked).
 SDK_LOAD_MESSAGE = "Spotify's player could not load (offline, or blocked by a firewall)."
+#: The player page runs in Chrome with Widevine, but its SDK never became ready (review ON-9: not "install Chrome").
+NOT_READY_MESSAGE = ("NeedleDropper's Spotify player didn't get ready (it tries again by itself). Check the internet "
+                     "connection, or wait a minute for Chrome's Widevine component.")
 #: D10: authentication_error again after a fresh access token.
 SDK_AUTH_MESSAGE = ("Spotify refused NeedleDropper's player even with a fresh sign-in. Sign in to Spotify again "
                     "on the Connect page.")
 APP_NOT_READY_MESSAGE = "NeedleDropper's Spotify player isn't ready yet"
+#: play() on a provider the companion closed (its settings changed; the new chain plays the next song).
+CLOSED_MESSAGE = "Spotify's settings changed: the next song plays with the new ones"
 #: An in-app start that did not progress (D8): the engine plays YouTube for the rest of the session.
 APP_STUCK_MESSAGE = "Spotify didn't start in NeedleDropper's player"
 NOTICE_NO_PLAYER = "spotifyNoPlayer"
@@ -141,6 +153,7 @@ RECOVER_DELAYS_S = (0.5, 1.0, 1.0)  # after "transfer playback + play again" (th
 SEARCH_LIMIT = 10            # Development-mode maximum
 # In-app Spotify (the Web Playback SDK in the player page)
 APP_READY_WAIT_S = 1.5       # at FIRE, wait this long for an SDK that is still connecting
+APP_REGISTRATION_WAIT_S = 6.0  # ready can precede Web API registration by several seconds
 APP_START_TIMEOUT_S = 3.0    # "started" = the position advances within this (D8)
 APP_API_CHECK_S = 1.5        # no progress in the page's ticks this long: ask GET /me/player too
 APP_PROGRESS_MS = 150        # a position this far past the start is progress
@@ -277,23 +290,28 @@ def largest_image(images: Any) -> Optional[str]:
 
 def pick_device(devices: Iterable[dict], preferred_name: str = "") -> Optional[dict]:
     """Choose a device: configured name > type Computer > active > first non-restricted."""
-    usable = [d for d in devices or [] if isinstance(d, dict) and d.get("id") and not d.get("is_restricted")]
+    want = (preferred_name or "").strip().casefold()
+    usable = [d for d in devices or [] if isinstance(d, dict) and d.get("id") and not d.get("is_restricted")
+              and (str(d.get("name") or "").casefold() != APP_DEVICE_NAME.casefold()
+                   or want == APP_DEVICE_NAME.casefold())]
     if not usable:
         return None
-    want = (preferred_name or "").strip().casefold()
+    def chosen(device: dict) -> dict:
+        log.info("Spotify Connect: selected device %r (%.8s)", device.get("name"), str(device.get("id") or ""))
+        return device
     if want:
         for d in usable:
             if str(d.get("name") or "").casefold() == want:
-                return d
+                return chosen(d)
         for d in usable:
             if want in str(d.get("name") or "").casefold():
-                return d
+                return chosen(d)
         log.info("Spotify device %r not found (have: %s); choosing another one", preferred_name,
                  ", ".join(str(d.get("name")) for d in usable))
     computers = [d for d in usable if str(d.get("type") or "").casefold() == "computer"]
     if computers:
-        return next((d for d in computers if d.get("is_active")), computers[0])
-    return next((d for d in usable if d.get("is_active")), usable[0])
+        return chosen(next((d for d in computers if d.get("is_active")), computers[0]))
+    return chosen(next((d for d in usable if d.get("is_active")), usable[0]))
 
 
 def _item_matches(state: Optional[dict], uri: str) -> bool:
@@ -720,7 +738,10 @@ class SpotifyProvider(Provider):
         self._sessions: list[_Session] = []
         self._wake_thread: Optional[threading.Thread] = None
         self._stuck: Optional[str] = None  # session health memory (real-client #8 / #10): why, or None
-        self._stuck_real: Optional[float] = None  # time.monotonic() of the stuck verdict (vs SDK readyAt)
+        #: the in-app player's report seq at the stuck verdict: a "ready" with a higher seq came after it. A
+        #: sequence, not a time: Windows' monotonic clock before Python 3.13 ticks in 15.6 ms steps, so a
+        #: "ready" right after the verdict had the same time stamp and never cleared it (CI on 3.10 / 3.12).
+        self._stuck_seq: Optional[int] = None
         self._interrupted = threading.Event()  # the app is quitting: waits end at once (interrupt())
         # in-app Spotify (app mode)
         self._sdk_auth_retried = False  # authentication_error: one fresh token and a reconnect were tried
@@ -730,7 +751,17 @@ class SpotifyProvider(Provider):
         self._arm_snapshot: Optional[tuple[Optional[dict], float, Optional[_Session]]] = None
         self._handover: Optional[_Session] = None  # a stopped drop whose restore waits for the next one
         self._last_recheck = -math.inf
+        self._last_registration_check = -math.inf
+        self._registration_thread: Optional[threading.Thread] = None
+        self._registration_timer: Optional[threading.Timer] = None
+        self._sdk_verdict: Optional[bool] = None
         self.last_start_ms: Optional[int] = None  # FIRE (play()) to the first progress, in-app (diagnostics)
+        #: retire() / close(): out of the companion's chain, so it never connects, disconnects or reconnects the
+        #: in-app player again -- the chain's provider owns it (review RAPP-2). _sdk_gate orders that against a
+        #: sync_sdk() running on another thread (an ARM pre-warm, a health check, the SDK listener).
+        self._sdk_gate = threading.Lock()
+        self._out_of_chain = False
+        self._closed = False
         self.sync_sdk()
 
     # ------------------------------------------------------------ status --
@@ -824,11 +855,23 @@ class SpotifyProvider(Provider):
         with self._lock:
             return self._stuck
 
+    def _sdk_report_seq(self) -> int:
+        """The in-app player's newest report seq (0 without one). Read outside :attr:`_lock`: the
+        player's own lock is never taken inside the provider's."""
+        sdk = self._sdk()
+        if sdk is None:
+            return 0
+        try:
+            return int(sdk.seq)
+        except Exception:  # noqa: BLE001 - an SDK stand-in without a seq
+            return 0
+
     def _mark_stuck(self, reason: str) -> None:
+        seq = self._sdk_report_seq()
         with self._lock:
             first = self._stuck is None
             self._stuck = reason
-            self._stuck_real = time.monotonic()
+            self._stuck_seq = seq
         if first:
             what = APP_STUCK_MESSAGE if self._mode == MODE_APP else STUCK_MESSAGE
             log.warning("Spotify: %s -- YouTube plays instead until Spotify works again (%s)", what, reason)
@@ -837,15 +880,16 @@ class SpotifyProvider(Provider):
         with self._lock:
             was = self._stuck
             self._stuck = None
-            self._stuck_real = None
+            self._stuck_seq = None
         if was is not None:
             log.info("Spotify works again%s; trying it first from now on", f" ({why})" if why else "")
 
     def stuck_notice(self) -> tuple[str, str]:
         """(title, text) for the "Spotify isn't starting songs" notification, per mode."""
         if self._mode == MODE_APP:
-            return ("Spotify didn't start", f"{APP_STUCK_MESSAGE}.")
-        return ("Spotify isn't starting songs", f"{STUCK_MESSAGE}.")
+            return ("Spotify didn't start", f"{APP_STUCK_MESSAGE}; your needle drops play on YouTube until "
+                    "Spotify reconnects. If it stays unavailable, quit NeedleDropper from the tray and start it again.")
+        return ("Spotify isn't starting songs", f"{STUCK_MESSAGE}; your needle drops play on YouTube until Spotify works again.")
 
     def check_health(self) -> Optional[bool]:
         """One cheap read of ``GET /v1/me/player`` (on ARM, before any song is sent): False when it
@@ -855,7 +899,13 @@ class SpotifyProvider(Provider):
 
         App mode (D8): the desktop app's stuck signature never applies to the SDK device. True when
         the in-app player is ready; a stuck in-app player is re-checked in the background by
-        reconnecting it (at most every minute), and its next ``ready`` clears the verdict."""
+        reconnecting it (at most every minute), and its next ``ready`` clears the verdict.
+
+        None at once for a provider out of the chain (:meth:`retire`, :meth:`close`; an ARM pre-warm queued
+        before a rebuild): no drop is routed to it any more, and its re-check would reconnect the chain's
+        in-app player (review RAPP-2)."""
+        if self._out_of_chain:
+            return None
         if self._mode == MODE_APP:
             try:
                 return self._app_check_health()
@@ -918,8 +968,8 @@ class SpotifyProvider(Provider):
             return self._call("GET", path, params=params)
 
     def needs_relogin(self) -> bool:
-        """App mode: the stored sign-in is known to lack ``streaming`` or ``user-read-email`` (signed in
-        before in-app Spotify), so the SDK cannot use it; signing in again grants them (D9). A sign-in
+        """App mode: the stored sign-in is known to lack ``streaming`` or ``user-read-email``, so the
+        SDK cannot use it. A refresh may add previously granted scopes; otherwise sign in again. A sign-in
         whose scopes the store does not record is assumed fine (the SDK would say otherwise)."""
         if self._mode != MODE_APP:
             return False
@@ -936,8 +986,9 @@ class SpotifyProvider(Provider):
     # ------------------------------------------------------ in-app player --
 
     def _sdk(self) -> Any:
-        """The deck's in-app player (``deck.spotify``) in app mode, else None."""
-        if self._mode != MODE_APP or self._deck is None:
+        """The deck's in-app player (``deck.spotify``) in app mode, else None (also once :meth:`close` ran:
+        a closed provider never touches the player again)."""
+        if self._mode != MODE_APP or self._deck is None or self._closed:
             return None
         sdk = getattr(self._deck, "spotify", None)
         return sdk if sdk is not None and callable(getattr(sdk, "enable", None)) else None
@@ -954,18 +1005,27 @@ class SpotifyProvider(Provider):
         """Connect the in-app player as soon as there is a sign-in that allows it (app mode), and keep
         it disconnected otherwise (:meth:`SpotifySdk.standby`: the player still opens in Chrome).
         Cheap (no network); called at construction, on ARM, at FIRE and after a sign-in
-        (:meth:`reset_session`). Never raises; a passive instance never touches the player."""
+        (:meth:`reset_session`). Never raises; a passive instance never touches the player, nor does one
+        out of the chain (:meth:`retire`, :meth:`close`): an ARM pre-warm queued before Play on was switched
+        ran this on the old provider and connected the player again under it (review RAPP-2)."""
         sdk = self._sdk()
         if sdk is None or self._passive:
             return
-        try:
-            if self._sdk_allowed():
-                if not sdk.enable(self._sdk_token, owner=self, listener=self._on_sdk_event):
-                    self._recheck_player(sdk)
-            else:
-                sdk.standby(owner=self)
-        except Exception:  # noqa: BLE001 - the player then reports itself
-            log.exception("in-app Spotify: could not update the player")
+        with self._sdk_gate:
+            if self._out_of_chain:
+                return
+            try:
+                allowed = self._sdk_allowed()
+                if allowed != self._sdk_verdict:
+                    log.info("in-app Spotify: sign-in %s", "allows playback" if allowed else "standby")
+                    self._sdk_verdict = allowed
+                if allowed:
+                    if not sdk.enable(self._sdk_token, owner=self, listener=self._on_sdk_event):
+                        self._recheck_player(sdk)
+                else:
+                    sdk.standby(owner=self)
+            except Exception:  # noqa: BLE001 - the player then reports itself
+                log.exception("in-app Spotify: could not update the player")
 
     def _recheck_player(self, sdk: Any) -> None:
         """A player page whose SDK never became ready, or failed to start (offline at the app's start,
@@ -1010,9 +1070,7 @@ class SpotifyProvider(Provider):
                 self._sdk_auth_retried = False
                 self._sdk_auth_failed = False
                 self._sdk_scope_missing = False
-                stuck_at = self._stuck_real
-            if stuck_at is not None and float(rec.get("t") or 0) > stuck_at:
-                self.clear_stuck("NeedleDropper's player connected again")
+            self._schedule_registration_check()
             return
         if event != "error":
             return
@@ -1051,8 +1109,78 @@ class SpotifyProvider(Provider):
         except Exception as exc:  # noqa: BLE001 - network
             log.info("in-app Spotify: could not refresh the sign-in (%s)", exc)
             return
-        if sdk is not None:
+        if sdk is not None and not self._out_of_chain:  # out of the chain meanwhile: not its player any more
             sdk.reconnect()
+
+    def _schedule_registration_check(self) -> None:
+        """A ready is only a candidate. Check it off the request thread, at most once per 30 s."""
+        with self._lock:
+            if self._out_of_chain or self._closed:
+                return
+            delay = max(0.0, 30 - (time.monotonic() - self._last_registration_check))
+            if self._registration_thread is not None and self._registration_thread.is_alive():
+                delay = max(0.25, delay)
+            if delay > 0:
+                if self._registration_timer is None:
+                    def later() -> None:
+                        with self._lock:
+                            self._registration_timer = None
+                        self._schedule_registration_check()
+                    self._registration_timer = threading.Timer(delay, later)
+                    self._registration_timer.daemon = True
+                    self._registration_timer.start()
+                return
+            self._last_registration_check = time.monotonic()
+            self._registration_thread = threading.Thread(target=self._check_registration,
+                                                        name="needledropper-spotify-device", daemon=True)
+            self._registration_thread.start()
+
+    def _check_registration(self) -> None:
+        sdk = self._sdk()
+        if sdk is None:
+            return
+        candidate = sdk.snapshot()
+        try:
+            if self._wait_registered(APP_REGISTRATION_WAIT_S) is None and candidate.get("ready"):
+                log.warning("in-app Spotify: device %.8s is not listed; reloading the page",
+                            sdk.snapshot().get("deviceId") or "none")
+                with self._sdk_gate:
+                    if not self._out_of_chain:
+                        sdk.reconnect(expected_device=candidate.get("deviceId"),
+                                      expected_ready_seq=_int(candidate.get("readySeq")))
+        except ProviderError as exc:
+            log.warning("in-app Spotify: device registration check failed (%s)", exc)
+
+    def _wait_registered(self, timeout: float, *, force: bool = False,
+                         exclude_id: Optional[str] = None) -> Optional[str]:
+        """Wait for an SDK ready whose exact id is in GET /me/player/devices. Never substitute a
+        similarly named device. Registration can trail ready by several seconds."""
+        sdk = self._sdk()
+        if sdk is None:
+            return None
+        deadline = time.monotonic() + max(0.0, timeout)
+        poll_delay = 0.25
+        while not self._interrupted.is_set() and not self._out_of_chain and not self._closed:
+            snap = sdk.snapshot()
+            device_id = snap.get("deviceId")
+            if snap.get("ready") and device_id and device_id != exclude_id:
+                if not force:
+                    verified = sdk.wait_ready(0)
+                    if verified and verified != exclude_id:
+                        return verified
+                listed = any(d.get("id") == device_id for d in self._get_devices())
+                if sdk.verify_device(device_id, _int(snap.get("readySeq")), listed=listed):
+                    with self._lock:
+                        stuck_seq = self._stuck_seq
+                    if stuck_seq is not None and _int(snap.get("readySeq")) > stuck_seq:
+                        self.clear_stuck("NeedleDropper's player is registered again")
+                    return device_id
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not snap.get("wanted"):
+                return None
+            self._interrupted.wait(min(poll_delay, remaining))
+            poll_delay = min(1.0, poll_delay * 2)
+        return None
 
     def sdk_problem(self, snap: Optional[dict[str, Any]] = None) -> Optional[tuple[str, str]]:
         """Why the in-app player cannot play now: ``(D17 state, user-facing message)``, or None (ready,
@@ -1063,7 +1191,16 @@ class SpotifyProvider(Provider):
         * ``initialization_error``, Widevine unusable, the page in Edge, or no "ready" within
           :data:`SDK_READY_GRACE_S` of the page connecting: no-player (D10 / D11);
         * no player page at all (none could be made yet, e.g. the game was in front when the app
-          started): no-player after the same grace, with its own message."""
+          started): no-player after the same grace, with its own message.
+
+        :meth:`sdk_problem_detail` adds the no-player cause for the game."""
+        detail = self.sdk_problem_detail(snap)
+        return None if detail is None else (detail[0], detail[1])
+
+    def sdk_problem_detail(self, snap: Optional[dict[str, Any]] = None) -> Optional[tuple[str, str, Optional[str]]]:
+        """:meth:`sdk_problem` plus its cause: ``(state, message, problem)``, where ``problem`` is one of
+        :data:`NO_PLAYER_PROBLEMS` for state "no-player" (the game's ``music.spotify.problem``, review ON-9)
+        and None otherwise."""
         sdk = self._sdk()
         if sdk is None:
             return None
@@ -1075,28 +1212,28 @@ class SpotifyProvider(Provider):
         with self._lock:
             auth_failed, scope_missing = self._sdk_auth_failed, self._sdk_scope_missing
         if scope_missing:
-            return ("needs-relogin", RELOGIN_MESSAGE)
+            return ("needs-relogin", RELOGIN_MESSAGE, None)
         if auth_failed:
-            return ("error", SDK_AUTH_MESSAGE)
+            return ("error", SDK_AUTH_MESSAGE, None)
         err = snap.get("error") if isinstance(snap.get("error"), dict) else None
         ready = bool(snap.get("ready"))
         if err and not _int(snap.get("readySeq")) > _int(err.get("seq")):
             kind = err.get("kind")
             if kind == "account_error":
-                return ("premium-required", PREMIUM_MESSAGE)
+                return ("premium-required", PREMIUM_MESSAGE, None)
             if kind in ("initialization_error", "browser"):
-                return ("no-player", NO_PLAYER_MESSAGE)
+                return ("no-player", NO_PLAYER_MESSAGE, "no-chrome")  # no EME / Widevine, or not Chrome
             if kind == "load":
-                return ("no-player", SDK_LOAD_MESSAGE)
+                return ("no-player", SDK_LOAD_MESSAGE, "sdk-load")
         if not snap.get("wanted"):
             return None
         page = bool(snap.get("pageOpen"))
         if page and snap.get("browser") in ("edge", "other"):
-            return ("no-player", NO_PLAYER_MESSAGE)  # D11: the SDK needs Chrome
+            return ("no-player", NO_PLAYER_MESSAGE, "no-chrome")  # D11: the SDK needs Chrome
         if ready:
             return None
         if snap.get("eme") is False:
-            return ("no-player", NO_PLAYER_MESSAGE)  # no Widevine (yet)
+            return ("no-player", NO_PLAYER_MESSAGE, "no-chrome")  # no Widevine (yet)
         now = snap.get("now")
         offline, ready_at, since_page = snap.get("offlineAt"), snap.get("readyAt"), snap.get("pageSince")
         if page and all(isinstance(t, (int, float)) for t in (offline, ready_at, now))                 and (not isinstance(since_page, (int, float)) or ready_at >= since_page)                 and now - offline <= SDK_READY_GRACE_S:
@@ -1104,22 +1241,25 @@ class SpotifyProvider(Provider):
             # blip), so this is not "no player" yet -- and no reason to reconnect it (review RCOMP-5).
             return None
         if page and snap.get("connected") is False:
-            return ("no-player", NO_PLAYER_MESSAGE)  # the SDK's connect() said no: it won't get ready (RCOMP-6)
-        since = [t for t in (snap.get("wantedAt"), snap.get("pageSince") if page else None)
+            # the SDK's connect() said no: it won't get ready (RCOMP-6); Chrome and Widevine are there
+            return ("no-player", NOT_READY_MESSAGE, "not-ready")
+        since = [t for t in (snap.get("wantedAt"), snap.get("pageSince") if page and not snap.get("preserveGrace") else None)
                  if isinstance(t, (int, float))]
         waited = (now - max(since)) if since and isinstance(now, (int, float)) else 0.0
         if waited <= SDK_READY_GRACE_S or snap.get("opening"):
             return None  # still starting
         if page:
-            return ("no-player", NO_PLAYER_MESSAGE)  # the page is there, the SDK never became ready
+            return ("no-player", NOT_READY_MESSAGE, "not-ready")  # the page is there, the SDK never became ready
         if snap.get("autoOpen") == "never":
-            return ("no-player", NO_WINDOW_NEVER_MESSAGE)
+            return ("no-player", NO_WINDOW_NEVER_MESSAGE, "window-never")
         chrome = getattr(self._deck, "chrome_available", None)
         try:
             has_chrome = bool(chrome()) if callable(chrome) else True
         except Exception:  # noqa: BLE001
             has_chrome = True
-        return ("no-player", NO_WINDOW_MESSAGE if has_chrome else NO_PLAYER_MESSAGE)
+        if has_chrome:
+            return ("no-player", NO_WINDOW_MESSAGE, "no-window")
+        return ("no-player", NO_PLAYER_MESSAGE, "no-chrome")
 
     def music_state(self) -> str:
         """The D17 ``music.spotify.state``: connected, not-connected, needs-relogin, premium-required,
@@ -1152,13 +1292,13 @@ class SpotifyProvider(Provider):
         sdk = self._sdk()
         if sdk is None:
             return None
+        self._wait_registered(0, force=True)
         snap = sdk.snapshot()
         if self.stuck():
             with self._lock:
-                stuck_at = self._stuck_real
-            ready_at = snap.get("readyAt")
-            if snap.get("ready") and isinstance(ready_at, (int, float)) and stuck_at is not None \
-                    and ready_at > stuck_at:
+                stuck_seq = self._stuck_seq
+            # by report sequence, not time: a ready in the same clock tick as the verdict still came after it
+            if snap.get("verified") and stuck_seq is not None and _int(snap.get("readySeq")) > stuck_seq:
                 self.clear_stuck("NeedleDropper's player connected again")
                 return True
             now = time.monotonic()
@@ -1170,7 +1310,9 @@ class SpotifyProvider(Provider):
                 log.info("in-app Spotify: reconnecting the player to re-check it (it did not start a song)")
                 sdk.reconnect()
             return None
-        return True if snap.get("ready") else None
+        if not snap.get("verified"):
+            self._schedule_registration_check()
+        return True if snap.get("verified") else None
 
     # -------------------------------------------------------------- HTTP --
 
@@ -1212,6 +1354,8 @@ class SpotifyProvider(Provider):
             headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
             if data is not None:
                 headers["Content-Type"] = "application/json"
+            if method == "PUT" and path.startswith("/me/player"):
+                log.info("Spotify PUT %s: device %.8s", path, str((params or {}).get("device_id") or "active"))
             try:
                 status, rheaders, raw = self._http(method, url, headers, data)
             except Exception as exc:  # noqa: BLE001 - any transport failure is a ProviderError
@@ -1221,6 +1365,11 @@ class SpotifyProvider(Provider):
             log.debug("Spotify %s %s -> %s", method, path, status)
             if 200 <= status < 300:
                 return _Resp(status, payload, rh)
+            if method in ("PUT", "POST") and path.startswith("/me/player"):
+                failure = SpotifyApiError.from_response(method, path, status, payload)
+                log.warning("Spotify %s %s device %.8s: HTTP %s %s", method, path,
+                            str((params or {}).get("device_id") or "active"), status,
+                            failure.api_message or failure.reason or "command failed")
             if status == 401 and not refreshed:
                 refreshed = True
                 try:
@@ -1506,6 +1655,8 @@ class SpotifyProvider(Provider):
         engine thread is not blocked for the up-to-10 s device poll; play() waits
         for that wake instead of starting a second one.
         """
+        if self._out_of_chain:
+            return  # an ARM pre-warm queued before a rebuild: the next drop plays on the new chain
         try:
             if self._mode == MODE_APP:
                 self.sync_sdk()
@@ -1550,6 +1701,8 @@ class SpotifyProvider(Provider):
 
     def play(self, drop: Drop, *, fade_in_ms: int = 0) -> PlayHandle:
         entered = time.monotonic()
+        if self._closed:
+            raise ProviderUnavailable(CLOSED_MESSAGE)
         if self._mode == MODE_APP:
             self.sync_sdk()
         if not self.available():
@@ -1891,9 +2044,13 @@ class SpotifyProvider(Provider):
         10 s early. The player's current playback is read now, for :attr:`restorePrevious` at the end
         (so the FIRE needs no extra request)."""
         sdk = self._sdk()
-        if sdk is not None and not sdk.wait_ready(0):
+        candidate = sdk.snapshot() if sdk is not None else {}
+        if sdk is not None and not self._wait_registered(APP_REGISTRATION_WAIT_S, force=True):
             log.info("in-app Spotify is not ready at ARM yet (it is %s)",
                      "connecting" if sdk.snapshot().get("wanted") else "off")
+            if sdk.snapshot().get("ready"):
+                sdk.reconnect(expected_device=candidate.get("deviceId"),
+                              expected_ready_seq=_int(candidate.get("readySeq")))
         if self._restore_previous:
             try:
                 state = self._get_player()
@@ -1966,7 +2123,7 @@ class SpotifyProvider(Provider):
         sdk = self._sdk()
         if sdk is None:
             raise ProviderUnavailable(NO_PLAYER_MESSAGE)
-        device_id = sdk.wait_ready(APP_READY_WAIT_S)
+        device_id = self._wait_registered(APP_READY_WAIT_S + APP_REGISTRATION_WAIT_S)
         if not device_id:
             raise ProviderError(APP_NOT_READY_MESSAGE)
         snapshot = self._fire_snapshot()
@@ -1977,21 +2134,28 @@ class SpotifyProvider(Provider):
         s = _Session(uri=uri, device_id=device_id, device_name=APP_DEVICE_NAME, start_ms=start_ms, snapshot=snapshot,
                      orig_volume=None, volume_device=device_id, volume_ok=False, target_volume=target,
                      last_pos=start_ms, last_pos_t=self._clock(), app=True, play_id=play_id, sdk_seq=seq0)
-        # Silent until the song plays; the page fades it in then (D7).
-        sdk.command("start", playId=play_id, uri=uri, volume=target, fadeInMs=fade_ms)
         sent = time.monotonic()
-        try:
-            self._call("PUT", "/me/player/play", params={"device_id": device_id},
-                       body={"uris": [uri], "position_ms": int(start_ms)})
-        except SpotifyApiError as exc:
-            sdk.command("pause")
-            if exc.status == 404:  # the SDK's device id went stale (it reconnects with a new one)
+        for attempt in range(2):
+            # Silent until the song plays; repeat the start on the newly loaded page after a 404.
+            s.sdk_seq = sdk.seq
+            sdk.command("start", playId=play_id, uri=uri, volume=target, fadeInMs=fade_ms)
+            log.info("Spotify PUT play: device %.8s", device_id)
+            try:
+                self._call("PUT", "/me/player/play", params={"device_id": device_id},
+                           body={"uris": [uri], "position_ms": int(start_ms)})
+                break
+            except SpotifyApiError as exc:
+                log.warning("Spotify PUT play device %.8s failed: HTTP %s %s", device_id, exc.status,
+                            exc.api_message or str(exc))
+                if exc.status != 404 or attempt:
+                    raise
+                # No pause: a failed PUT loaded nothing, so pause would itself produce an SDK error.
+                stale_id = device_id
                 sdk.reconnect()
-                raise ProviderError("NeedleDropper's Spotify player went offline; it is reconnecting") from exc
-            raise
-        except ProviderError:
-            sdk.command("pause")
-            raise
+                device_id = self._wait_registered(APP_REGISTRATION_WAIT_S, exclude_id=stale_id)
+                if not device_id:
+                    raise ProviderError("NeedleDropper's Spotify player is not registered; its page is reloading") from exc
+                s.device_id = s.volume_device = device_id
         put_ms = int((time.monotonic() - sent) * 1000)
         state, why = self._app_verify(sdk, s)
         if state is None:
@@ -2465,7 +2629,29 @@ class SpotifyProvider(Provider):
                 log.info("Could not resume your previous Spotify playback: %s", exc)
                 return
 
+    def retire(self) -> None:
+        """The companion took this provider out of its chain while a drop goes on (Play on switched on the
+        Connect page mid-song, review RCOMP-10): a song it plays still plays, fades and stops here, but it
+        never connects, stands by or reconnects the in-app player again -- an ARM pre-warm queued before
+        the switch ran :meth:`sync_sdk` on it and took the player from the chain's new in-app provider,
+        whose player its :meth:`close` after the song then disconnected (review RAPP-2). :meth:`close`
+        follows once the engine is idle, and disconnects the player only if this provider still owns it."""
+        with self._sdk_gate:
+            self._out_of_chain = True
+
     def close(self) -> None:
+        """Terminal: the provider never touches the in-app player again (:meth:`_sdk` is None from now on, so a
+        pre-warm, health check or listener that runs later is a no-op; review RAPP-2). Disconnects the
+        player only while this provider owns it. Idempotent."""
+        with self._sdk_gate:
+            if self._closed:
+                return
+            sdk = self._sdk()  # read before the flag: a closed provider has none
+            self._out_of_chain = self._closed = True
+        with self._lock:
+            if self._registration_timer is not None:
+                self._registration_timer.cancel()
+                self._registration_timer = None
         with self._lock:
             sessions = list(self._sessions)
         for s in sessions:
@@ -2473,7 +2659,6 @@ class SpotifyProvider(Provider):
         waiting, self._handover = self._handover, None
         if waiting is not None:
             self._restore_after_handover(waiting)  # the app quits: no next drop takes it over
-        sdk = self._sdk()
         if sdk is not None and not self._passive:
             try:
                 sdk.disable(owner=self)  # only while this provider owns the in-app player
@@ -2516,7 +2701,8 @@ class SpotifyProvider(Provider):
 
         Also ``mode`` (``"app"`` / ``"connect"``), ``state`` (D17: connected, not-connected,
         needs-relogin, premium-required, no-player, stuck, error), ``warning`` (e.g. the in-app player
-        can't run), ``relogin`` (signed in, but without the in-app permissions: sign in again, D9) and
+        can't run), ``problem`` (state no-player: its cause, one of :data:`NO_PLAYER_PROBLEMS`, else None),
+        ``relogin`` (signed in, but without the in-app permissions: sign in again, D9) and
         ``player`` (the in-app player: ready, browser, Widevine, last error kind). In app mode a
         sign-in without the in-app permissions is ``"error"`` with :data:`RELOGIN_MESSAGE`.
         """
@@ -2551,21 +2737,23 @@ class SpotifyProvider(Provider):
         missing = self.missing_scopes() if logged_in else []
         state = self.music_state()
         warning = None
+        cause: Optional[str] = None  # state "no-player": why (NO_PLAYER_PROBLEMS, for the game)
         if self._mode == MODE_APP and badge == "connected":
             if state == "needs-relogin":
                 badge, message = "error", RELOGIN_MESSAGE
             elif state == "premium-required":
                 badge, message = "premium", PREMIUM_MESSAGE
             elif state == "no-player":
-                problem = self.sdk_problem()
-                warning = problem[1] if problem else NO_PLAYER_MESSAGE
+                detail = self.sdk_problem_detail()
+                warning = detail[1] if detail else NO_PLAYER_MESSAGE
+                cause = detail[2] if detail and detail[0] == "no-player" else None
             elif state == "error":
                 problem = self.sdk_problem()
                 badge, message = "error", (problem[1] if problem else message)
         return {"badge": badge, "message": message, "configured": configured, "loggedIn": logged_in,
                 "deviceName": self._device_name, "missingScopes": missing,
                 "scopeMessage": SCOPE_MESSAGE if missing else None, "saveError": self._store.save_error,
-                "stuck": self.stuck(), "mode": self._mode, "state": state, "warning": warning,
+                "stuck": self.stuck(), "mode": self._mode, "state": state, "warning": warning, "problem": cause,
                 "relogin": self._mode == MODE_APP and logged_in and self.needs_relogin(),
                 "player": self._player_summary()}
 
@@ -2586,6 +2774,8 @@ class SpotifyProvider(Provider):
     def reset_session(self) -> None:
         """Forget session-wide verdicts (Premium refusal, revoked login, missing permission, device
         and no-match caches), e.g. after the user connected again in the panel."""
+        sdk = self._sdk()
+        was_wanted = sdk is not None and sdk.snapshot().get("wanted")
         with self._lock:
             self._unavailable = None
             self._unavailable_kind = ""
@@ -2593,11 +2783,13 @@ class SpotifyProvider(Provider):
             self._device_cache = None
             self._no_match.clear()
             self._stuck = None
-            self._stuck_real = None
+            self._stuck_seq = None
             self._sdk_auth_retried = False
             self._sdk_auth_failed = False
             self._sdk_scope_missing = False
         self.sync_sdk()  # a fresh sign-in may allow the in-app player now
+        if was_wanted and sdk is not None and sdk.snapshot().get("wanted"):
+            sdk.reconnect()  # a new login must register the page under the new account/token
 
 
 def _retry_after(headers: dict[str, str]) -> float:

@@ -1,8 +1,8 @@
 # Testing the NeedleDropper beta
 
-Hi Andrew, and anyone else trying NeedleDropper before it goes public: thank you! This guide takes you
-from nothing to your first needle drop in about half an hour, without any programming tools. Then it
-shows what to look out for and how to tell us what you found.
+This guide takes you from a clean Windows PC to your first needle drop, without any programming
+tools. Download both parts from the public GitHub release while CurseForge reviews the addon.
+Then follow the checks below and tell us what you found.
 
 > **What is NeedleDropper?** The first time your character arrives somewhere new in World of Warcraft:
 > Forever, the zone music fades, one hand-picked song starts, and a quiet title card drifts in at the
@@ -32,9 +32,8 @@ NeedleDropper has two parts:
 ## What you need
 
 - A **Windows 10 or 11** PC (64-bit) with **World of Warcraft: Forever**.
-- A free **GitHub account** (<https://github.com/signup>). The beta lives in a private GitHub
-  repository: send the owner your GitHub user name, then accept the invitation. It arrives by email
-  and on <https://github.com/notifications>.
+- No GitHub account or invitation is needed to download the beta. A GitHub account is needed only
+  if you want to file an issue yourself.
 - Something to play the music, one of:
   - **Spotify Premium** and **Google Chrome** (<https://www.google.com/chrome/>). The app plays
     Spotify songs itself, in a hidden Chrome window; you don't need the Spotify desktop app. A free
@@ -45,21 +44,19 @@ NeedleDropper has two parts:
 
 ## 1. Download the beta
 
-1. Sign in to GitHub and open the **Releases** page:
-   <https://github.com/Soupoleon/NeedleDropper/releases>. (Until you have accepted the invitation it
-   shows "404 Not Found".)
+1. Open [NeedleDropper 1.2.1 beta 1](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.1),
+   or the [Releases page](https://github.com/Soupoleon/NeedleDropper/releases) for a newer beta.
 2. Pick the newest release marked **Pre-release**, for example *NeedleDropper 1.2.1 beta 1*. Note its
    tag, `v1.2.1-beta.1`: the bug report form asks for it.
 3. Under **Assets**, download:
 
    | File | What it is |
    |---|---|
-   | `NeedleDropper-<version>-addon.zip` | The addon |
-   | `NeedleDropper-<version>-win64.zip` | The app, for Spotify and YouTube (skip it if you only want title cards) |
+   | `NeedleDropper-1.2.1-addon.zip` | The addon |
+   | `NeedleDropper.exe` or `NeedleDropper-1.2.1-win64.zip` | The app, for Spotify and YouTube (skip it if you only want title cards) |
 
-   The release has three more files: `NeedleDropper.exe` (the same app without the zip),
-   `NeedleDropper-<version>-win64-folder.zip` (the same app as a folder, see
-   [step 3](#3-start-the-app)) and `SHA256SUMS.txt`.
+   The release also has `NeedleDropper-1.2.1-win64-folder.zip` (the same app as a folder, see
+   [step 3](#3-start-the-app)) and `SHA256SUMS.txt`: five assets in total.
 4. *Optional, for the careful:* `SHA256SUMS.txt` lists each file's fingerprint. In PowerShell, run
    `Get-FileHash .\NeedleDropper-1.2.1-win64.zip` in your Downloads folder and compare the long code
    with the matching line (upper or lower case doesn't matter).
@@ -89,17 +86,21 @@ an addon and an app of the same version: a 1.2.1 app can't read a 1.2.0 addon's 
 
 Skip this step if you only want to try the title cards.
 
-Tried an earlier beta? Quit it first (right-click its tray icon → **Quit**), close its player window
-if one stays open (a small window titled *NeedleDropper*; 1.2.0 left it running), then put the new
+Tried an earlier beta? Quit it first (right-click its tray icon → **Quit**), then close its player window
+if one stays open (a small window titled *NeedleDropper*; 1.2.0 left it running). Keep that order:
+closing the window while 1.2.0 still runs makes it reopen. Then put the new
 `NeedleDropper.exe` in the same place. Your settings are kept, but **sign in to Spotify again** after
 updating from 1.2.0 (step 4): the new Spotify player needs two more permissions. In your Spotify
 developer app (dashboard → your app → **Settings** → **Edit**) tick **Web Playback SDK** too and
 **Save**. Update the addon as well: the 1.2.1 app can't read a 1.2.0 addon's signals.
 
-1. Right-click `NeedleDropper-<version>-win64.zip`, choose **Extract All…** and pick a permanent
-   place, for example `Documents\NeedleDropper`. Don't run the app from inside the zip.
-2. **Start the app before the game the first time.** It creates a tiny data addon,
-   `NeedleDropper_Companion`, and the game only notices new addon folders when it starts.
+1. Put `NeedleDropper.exe` somewhere permanent, for example `Documents\NeedleDropper`. If you
+   downloaded `NeedleDropper-1.2.1-win64.zip`, right-click it and choose **Extract All…** first.
+   Don't run the app from inside the zip.
+2. **Start the app before the game the first time, and give it a moment on the desktop.** It never
+   opens its player while WoW is in front. It also creates a tiny data addon,
+   `NeedleDropper_Companion`, which the game only notices when it starts. If WoW is already open,
+   return to the desktop for the player to start, then restart WoW once for the new data addon.
 3. Double-click `NeedleDropper.exe`. Windows will probably show a blue box, **"Windows protected your
    PC"**, because the beta isn't code-signed (that costs money every year). Click **More info**,
    check that it says `NeedleDropper.exe`, then click **Run anyway**. Windows asks once for each new
@@ -131,52 +132,46 @@ Spotify needs **Google Chrome** on the PC (install it first if you don't have it
 Spotify up on the Connect page, as below, or in the game: type `/needle music`, paste the Client ID
 with Ctrl+V into the box of step 3 and click **Connect Spotify**.
 
-### Option A: Spotify, through the owner's developer app
+### Option A: Spotify, through your own developer app
 
-The usual choice if you have Spotify Premium. Spotify only lets an app play music after a developer
-registers it, and each registered app allows at most 5 people, so the owner registered one for the
-beta and adds you to it.
+Use your own Spotify Premium account and developer app; you do not need the project owner's
+Client ID or an invitation from them.
 
-1. Send the owner the **email address of your Spotify account** (it is on your Spotify account page,
-   <https://www.spotify.com/account/>). The owner adds it to their app's *User Management* list.
-2. The owner sends you their app's **Client ID**: a code of 32 digits and letters. (Nobody needs the
-   app's *client secret*, and you should never be sent one.)
-3. Once the owner says you're added: on the Connect page's **Spotify** card, paste the Client ID and
-   click **Sign in**.
-4. Spotify's own page opens. It shows the owner's app name and asks to let it play music in
-   NeedleDropper's player, see and control what plays on your devices, see your email address
-   (Spotify's player requires that; NeedleDropper never reads or keeps it) and your account's
-   subscription and country (to check Premium and pick songs available where you live). Click
-   **Agree**. Your password only ever goes to Spotify.
-5. The card now shows your account, the **Premium** check, your **Country** and **Play on**:
-   *NeedleDropper (this app)*. That is the app's own player: you don't need to open the Spotify
-   desktop app. While NeedleDropper runs, your Spotify device list (on your phone, say) shows a
-   device called **NeedleDropper**. When a drop starts, Spotify moves your playback there for the
-   song; whatever you were listening to comes back afterwards.
-6. Press **Test Spotify** on the card: within a few seconds you hear 15 seconds of Toto's *Africa*,
-   and nothing shows on screen.
-
-If the card says **Account not allowed**, the owner hasn't added your email yet, or added a
-different one. **Premium needed** means Spotify sees no Premium on this account. *Spotify can't play
-in NeedleDropper's player: install Google Chrome…* means what it says (if Chrome is installed, start
-it once, wait a minute, then restart the NeedleDropper app).
-
-### Option B: Spotify, through your own developer app
-
-About 5 minutes, and nobody has to add you.
-
-1. Open <https://developer.spotify.com/dashboard> and log in with the Spotify account you listen
-   with. The first time, accept the Spotify Developer Terms.
-2. Click **Create app**. Any name and description will do. Under **Redirect URIs**, type exactly
+1. Open the [Spotify developer dashboard](https://developer.spotify.com/dashboard) and log in with
+   the Spotify Premium account you listen with. Accept the Developer Terms if asked.
+2. Click **Create app**. Any name and description will do. Under **Redirect URIs**, enter exactly
    `http://127.0.0.1:8321/callback` and click **Add** (`127.0.0.1`, not `localhost`; `http`, not
-   `https`; no `/` at the end). Under *Which API/SDKs are you planning to use?* tick **Web API**
-   and **Web Playback SDK**, agree to the terms and click **Save**.
-3. Copy your app's **Client ID** (on its **Settings** page), then continue with step 3 of Option A.
+   `https`; no `/` at the end). Tick **Web API** and **Web Playback SDK**, agree to the terms and
+   save. If you already have a developer app, add these settings to it: Spotify limits new
+   development access to one Client ID per developer.
+3. Open the app's **Settings** and copy its **Client ID**. Do not copy the Client secret.
+4. On NeedleDropper's Connect page, paste the Client ID into the **Spotify** card and click
+   **Sign in**. Approve the request on Spotify's page, which shows the app name you chose.
+   Your password only goes to Spotify. You can also connect in game through
+   *Options → AddOns → NeedleDropper → Music services* (`/needle music`).
+5. Keep **Play on** set to **NeedleDropper (this app)**, the recommended choice. No Spotify
+   desktop app needs to run. *The Spotify app on this PC* sends commands to a separate Spotify
+   app or Connect device; it does not use NeedleDropper's own player.
+6. In game, open *Options → AddOns → NeedleDropper → Music services* and press **Test Spotify**,
+   then **Test YouTube**. Each plays 15 seconds of Toto's *Africa* using only that service.
+   **Test Spotify never falls back to YouTube.** Spotify shows no player window; YouTube shows
+   the small box. The same buttons are on the Connect page.
 
-The full walk-through, with the error messages you might see:
-[Music services → Spotify Premium](PROVIDERS.md#spotify-premium).
+Spotify requires Premium for development apps and limits them to five authorized users; each
+tester uses their own app here. These are [Spotify's developer access rules](https://developer.spotify.com/blog/2026-02-06-update-on-developer-access-and-platform-security).
+If **Create app** is unavailable, check that the developer account has Premium and whether it
+already owns an app. YouTube can be tested independently while you resolve that.
 
-### Option C: YouTube only
+**Account not allowed**: check that you signed in with the account that owns your developer app;
+if needed, add that account under the app's **Settings → User Management**. **Premium needed**:
+check the Spotify account's subscription. **Install Google Chrome…**: install Chrome, or start
+it once and give it a minute to download its playback component, then restart NeedleDropper.
+If the player says it **went offline**, quit NeedleDropper from its tray and restart it from
+the desktop, then try Test Spotify again. Please report a repeat failure.
+
+The full walk-through: [Music services → Spotify Premium](PROVIDERS.md#spotify-premium).
+
+### Option B: YouTube only
 
 Nothing to set up. When a YouTube song plays, a small player window (Edge, or Chrome) shows the
 video. YouTube's rules say the player must stay visible while it plays, so don't cover it with the
@@ -191,9 +186,9 @@ NeedleDropper*, section **Music services**).
 - The first time, the player may ask you to click once to enable sound.
 - YouTube may show ads (unless you have YouTube Premium). NeedleDropper never blocks or skips them.
 
-With Spotify connected, YouTube is also the backup: if Spotify doesn't start a song, NeedleDropper
-should play it on YouTube instead and tell you with a notification. Please report it whenever that
-happens (or when it doesn't, and you just get silence).
+With **Play music with: Spotify, then YouTube**, YouTube is the backup for needle drops that
+have a YouTube link. The **Test Spotify** button checks Spotify alone and reports a failure
+without trying YouTube.
 
 ## 5. Start the game and check the link
 
@@ -218,7 +213,8 @@ Then:
    *Azeroth Mixtape*.
 4. Type **`/needle test`**. The test title card appears, the app shows a notification, and the
    **Check the link** card on the Connect page gets its tick, normally within 2 seconds. Nothing
-   plays yet: this only checks that the app can see the game.
+   plays: this only checks that the app can see the game. **Send a test signal** in the addon
+   settings does the same link-only check. Use **Test Spotify** and **Test YouTube** to check music.
 
 No tick? Make sure the game isn't minimized, check the display mode and the top-left corner, then see
 [Beacon not detected](TROUBLESHOOTING.md#beacon-not-detected). Note your screen setup for your report:
@@ -315,16 +311,16 @@ Open the repository's **Issues** tab, click **New issue** and choose **Bug repor
 wrong) or **Idea or feature request**. One problem per report, please.
 
 - **Fill in the form.** It asks for your setup: the release tag, the versions, your screen (resolution,
-  Windows scaling, HDR, display mode, UI scale), keyboard or controller, and your music service. On a
-  private repository GitHub doesn't enforce the required fields, so please fill them in anyway.
+  Windows scaling, HDR, display mode, UI scale), keyboard or controller, and your music service.
 - **`/needle report`.** Type it in the game where the problem happened: a window opens with a text
   report, already selected. Press Ctrl+C and paste it into the issue. It has the versions, what the
   app reported, the beacon and your settings, your last 5 drops and the last error, and no account
   names, Client IDs or tokens.
 - **`/needle status`.** Type it there too and attach a screenshot of the chat (WoW can't copy chat
   text).
-- **The app's log.** Right-click the tray icon, choose **Open log folder** and attach
-  `needledropper.log`. If the folder has several log files, zip them.
+- **The app's log.** Right-click the tray icon and choose **Open log folder** to find
+  `needledropper.log`. It names your Spotify account and can contain personal file paths: send it
+  privately to the owner, or remove those details before attaching an excerpt to a public issue.
 - **Screenshots or a short video** help a lot. WoW saves screenshots (Print Screen key) in
   `World of Warcraft\_forever_\Screenshots`.
 - **"NeedleDropper has been blocked from an action"?** Type `/console taintLog 1`, do the same thing
@@ -347,17 +343,16 @@ version is in [Privacy](PRIVACY.md).
 
   Nothing about your game, characters, realm, chat or location is sent anywhere. The app's daily
   update check is off by default.
-- **The owner's Spotify app (Option A).** The owner sees the email address you gave them in their
-  developer dashboard, and Spotify's usage numbers for their app. They never see your password or
-  your login: the login token stays on your PC, encrypted with Windows (DPAPI) so that only your
-  Windows account can read it. **Sign out of Spotify** on the Spotify card deletes it.
+- **Your Spotify developer app.** Its Client ID belongs to you. Your login token stays on your PC,
+  encrypted with Windows (DPAPI) so that only your Windows account can read it.
+  **Sign out of Spotify** on the Spotify card deletes it.
 - **The beacon strip** in the top-left corner shows up in screenshots, recordings and streams. It
-  carries only the needle-drop event (the song, the place, the soundtrack's name and a few flags such
-  as "in combat"), nothing about you. If you stream, crop that corner, and don't broadcast Spotify
+  carries the needle-drop event and your music choices. During a Spotify connection request it
+  also carries your Client ID. If you stream, crop that corner, and don't broadcast Spotify
   music: Spotify is for personal listening only.
-- **Your reports.** Everyone with access to the repository can read your issues and attachments.
+- **Your reports.** Anyone can read this public repository's issues and attachments.
   The app's log never contains passwords or tokens, but file paths in it can show your Windows user
-  name, and it names your Spotify account; edit them out if you like. The `/needle report` text has
+  name, and it names your Spotify account; remove them before posting publicly. The `/needle report` text has
   no account names, Client IDs or tokens.
 - **The chat-log link** (an alternative to the beacon, see [Privacy](PRIVACY.md#the-optional-chat-log-link))
   stays off unless you turn it on. If you do, WoW writes all the chat your game shows to a file on
@@ -376,10 +371,8 @@ version is in [Privacy](PRIVACY.md).
 5. *Optional:* delete the addon's saved data, `NeedleDropper.lua` in
    `World of Warcraft\_forever_\WTF\Account\<account>\SavedVariables\` and in each character's
    `SavedVariables` folder below it.
-6. **Spotify:** remove NeedleDropper's access on <https://www.spotify.com/account/apps/>, and ask the
-   owner to take you off their User Management list (it frees a place for someone else).
-7. **GitHub:** leave the repository under *Settings → Repositories* on github.com, or ask the owner
-   to remove you.
+6. **Spotify:** remove your developer app's access on [your Spotify apps page](https://www.spotify.com/account/apps/).
+   You can delete the developer app from your dashboard too if nothing else uses it.
 
 All the details: [Uninstalling](INSTALL.md#uninstalling).
 
@@ -387,20 +380,10 @@ All the details: [Uninstalling](INSTALL.md#uninstalling).
 
 ## For the owner: getting a tester ready
 
-- [ ] **GitHub:** add the tester to the repository (*Settings → Collaborators*). On a personal
-      account every collaborator can also push; for read-only testers, keep the repository in a free
-      organization and give them the *Read* role.
-- [ ] **While the repository is private:** set the repository variable `ADDON_SITE_UPLOADS` to `off`
-      (*Settings → Secrets and variables → Actions → Variables*). Otherwise a beta tag also uploads the
-      addon to CurseForge, whose page links the app's GitHub releases, which only collaborators can open.
 - [ ] **A release:** push a beta tag (`v1.2.1-beta.N`). The release workflow builds and publishes the
       pre-release with its five files; check that they are there. The addon and the app must come
       from the same release: a 1.2.0 app and a 1.2.1 addon can't read each other.
-- [ ] **Spotify (Option A):** in the developer dashboard, open your app → **Settings** → **User
-      Management**, add the tester's name and the email address of their Spotify account, then send
-      them the Client ID (never the client secret). Spotify allows at most 5 accounts per developer
-      app (you count as one), and the app keeps working only while you, its owner, have Premium.
-      While you're there, check that **Web API** and **Web Playback SDK** are both ticked under
-      *APIs used*.
+- [ ] **Spotify:** point the tester to step 4 to create their own developer app. Never send them
+      the owner's Client ID, tokens or Client secret.
 - [ ] **Send** this guide and the link to the release.
 - [ ] **New beta?** Tell your testers yourself: the app's update check never reports pre-releases.

@@ -9,6 +9,12 @@ the app playing, and taint. Do it once per client patch, and before every releas
 
 ## Before you start WoW
 
+For a downloaded beta, use the addon zip and app from the same
+[GitHub release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.1).
+[BETA-TESTING.md](BETA-TESTING.md) covers a clean PC, including creating your own Spotify developer
+app (Premium, Google Chrome, redirect URI `http://127.0.0.1:8321/callback`, **Web API** and
+**Web Playback SDK**). The source-build commands below are for maintainers.
+
 1. **Install the 1.2.1 addon.** Close WoW first (the deploy script refuses while `Wow.exe` runs),
    then copy the repo's addon in:
 
@@ -26,10 +32,11 @@ the app playing, and taint. Do it once per client patch, and before every releas
    game starts.
 3. **Run one app only.** With two readers on the beacon, every song would play twice: quit the tray
    app (tray icon → **Quit**) before you start another copy, and stop the stand-in player
-   (`scratchpad\poc\poc_player.py`) if it still runs. The 1.2.0 app leaves its player window (a
-   small Chrome window titled *NeedleDropper*) open when it quits: close it before you start 1.2.1.
-   (1.2.1 closes its own when it quits; one left over from an earlier start closes itself.)
-4. **Start the 1.2.1 app before the game**, so the game reads its 1.2.1 status at login:
+   if you started one. The 1.2.0 app leaves its player window (a small Chrome window titled
+   *NeedleDropper*) open when it quits: quit the old app first, then close that window. Closing
+   the window first makes 1.2.0 reopen it. Version 1.2.1 checks for an occupied player profile.
+4. **Start the 1.2.1 app before the game and give it a moment on the desktop.** It never opens
+   its player while WoW is in front. The game reads its 1.2.1 status at login:
 
    ```powershell
    cd D:\NeedleDropper\companion
@@ -39,8 +46,9 @@ the app playing, and taint. Do it once per client patch, and before every releas
    (or `D:\NeedleDropper\dist\NeedleDropper.exe`). It goes to the tray; the Connect page opens on the
    first run (tray icon → **Open setup…** later). To test Spotify, Google Chrome must be installed;
    paste your Client ID on the **Spotify** card and **Sign in**: the card should then show your
-   account, *✓ Yes: this account has Spotify Premium.*, your country and **Play on:** *NeedleDropper
-   (this app)*. A sign-in kept from 1.2.0 or 1.1 shows **Sign in again** instead: click it, because
+   account and **Play on:** *NeedleDropper (this app)* (recommended). Record the Premium and country
+   fields if Spotify supplies them; newer developer apps may receive neither. A sign-in kept from
+   1.2.0 or 1.1 shows **Sign in again** instead: click it, because
    1.2.1 plays Spotify in its own player and asks Spotify for two more permissions (`streaming`,
    `user-read-email`; real-client findings 14 and 15). Before that, in the Spotify dashboard open your
    developer app → **Settings** → **Edit** and tick **Web Playback SDK** too. Within a few seconds the
@@ -119,7 +127,7 @@ music without the app* changes it).
 | 11 | **Instance and file:** inside a dungeon, **Add drop here**, **Test**. Then type `test.mp3` into **In-game file** | The drop's place is the instance (`/needle where` shows `inst:<number>`); the file field says *found* with a tick; **Test** plays the file in game | `/needle where` output; did the file play? |
 | 12 | **Sharing:** Soundtracks tab → My Drops → **Share...** → Ctrl+C. Paste it into a Discord message between two lines of ```` ``` ```` (or let it become `message.txt`), copy it back from Discord, then **Import...** and paste | The preview shows the right name, drop count and places; **Import** adds a copy (*My Drops (2)*) and says *Imported … (off).* with a **Turn on** button: it arrives turned off | The preview text; any error |
 | 13 | **Spotify in the app** (Spotify connected, **Play on:** *NeedleDropper (this app)*): **Test** a drop that has a Spotify link, and open the device list of the Spotify app on your phone meanwhile | The song plays with nothing on screen (no Spotify window, no player box) and the game keeps the focus; the phone shows it playing on the device **NeedleDropper**; music you had playing on the phone stops for the drop and comes back afterwards (*Resume my Spotify music afterwards*). The log says `Spotify (in-app): playing … it started N ms after the FIRE` | N from the log; did your own music come back? |
-| 13b | *Optional, the 1.2.0 way:* pick *The Spotify app on this PC (automatic)* under **Play on**, then **Test** the same drop twice | Either the Spotify app plays it, or within about 2 seconds the song plays on YouTube instead and the tray shows *Spotify isn't starting songs — restart the Spotify app* (once); the second **Test** then plays on YouTube straight away. Put **Play on** back to *NeedleDropper (this app)* afterwards | The notification and the matching lines of `needledropper.log` (tray → **Open log folder**) |
+| 13b | On the Connect page, switch **Play on** to *The Spotify app on this PC (automatic)*, then back to *NeedleDropper (this app)*. In game, press **Test Spotify** | Spotify plays in the hidden player again; no 404 / Device not found loop. This service test never falls back to YouTube. If a reload was just performed, allow up to a minute before retrying | The result and matching `Spotify` lines from `needledropper.log` (send privately) |
 | 14 | **Focus:** start the app while the game is closed (or alt-tab out first); the player window may flash for a moment and hides. Then in game, whenever a YouTube song starts and ends, watch the game window | The player shows on top in the top-right corner of the game's screen while the song plays and hides afterwards; the game keeps the keyboard and mouse the whole time (no alt-tab, no taskbar flash, no browser tab). The log names the browser (`opened the player window (chrome: …)`) and *player window ready* | Did the game lose focus, and when? Seconds from the card to the sound |
 | 14b | **YouTube from `localhost`:** set **Play music with** to *YouTube only*, then `/needle play Durotar` (its video `d_vPJjqWxZM` failed with error 150 in 1.2.0) and `/needle play The Barrens` | Both play in the box; no *can't be embedded* notification (the box's page is `http://localhost:8322/player` now, not `127.0.0.1`) | Anything that failed, with its error number; set **Play music with** back afterwards |
 | 15 | **Taint:** `/console taintLog 1`, then play for a while (open and close the window, a fight, the Escape menu, the gamepad UI), log out, `/console taintLog 0` | `World of Warcraft\_forever_\Logs\taint.log` doesn't mention NeedleDropper | The lines that mention NeedleDropper, if any |
@@ -135,11 +143,13 @@ hidden player, Google Chrome needed); `/needle report` gives a text you can past
 | 1 | *Options → AddOns → NeedleDropper*; type *Spotify*, then *YouTube* in the Settings search box | A **Music services** section between *Needle drops* and *Playback*: NeedleDropper app, Spotify account, YouTube account, Play music with, YouTube box position, Fade, Resume, Test Spotify, Test YouTube, Refresh status. Both searches find its rows | A screenshot of the section |
 | 2 | Click **Spotify account** (or the drum in the window's title bar, or `/needle music`); click each grey address box, press Ctrl+C and paste into your browser; paste your Client ID with Ctrl+V | The **Music services** dialog; both addresses work in the browser; under the Client ID box *That looks like a Client ID.* with a tick | Anything cut off or overlapping |
 | 3 | **Connect Spotify** (or **Sign in again**: a sign-in from 1.2.0 lacks two permissions) | Spotify's page opens in your browser (note whether it came in front of the game), approve it; a Windows notification confirms; **Refresh status (reloads UI)** then shows *Spotify: connected as … (Premium)* | Did the browser come forward? |
-| 4 | **Test Spotify**, then **Test YouTube** | 15 seconds of *Toto – Africa* each: Spotify from the app's own player (no Spotify app needed; nothing shows), YouTube in the small box in your corner. The game keeps the keyboard and mouse (no alt-tab) | Seconds from the click to the sound; did the game lose focus? |
+| 4 | **Test Spotify**, then **Test YouTube** | 15 seconds of *Toto – Africa* each, measured from playback starting: Spotify from the hidden player, YouTube in its box. Each tests only its named service, with no fallback. The game keeps focus | Time from click to sound, audible duration, any focus loss |
+| 4b | **Send a test signal**, then `/needle test`; afterwards use a drop editor **Test** and a Journal **Replay** | The two link checks play nothing and show *Test signal received*. Editor Test and Replay play the drop and do not show that link-test notification | Any unexpected notification or sound |
 | 5 | Change **YouTube box position** between two YouTube songs (**Test YouTube** twice) | The box moves to the new corner (also while it shows), without taking focus; *Top left* sits below the beacon, which stays readable | Screenshot |
 | 6 | **Play music with:** *YouTube only*, then approach a drop that has both links; *Neither*, then approach another | *YouTube only*: it plays on YouTube. *Neither*: only the title card shows and the zone music keeps playing | Which service played |
 | 7 | **Sign in to YouTube…** → **Open sign-in page** | A normal browser window on accounts.google.com, in the player box's own browser profile; after signing in with YouTube Premium a YouTube drop that usually shows an ad plays without one | Did the ad go away? |
 | 8 | **Disconnect…** → **Disconnect**, then **Refresh status**; then **Connect Spotify** again | *Spotify: not connected (Client ID …)*; connecting again works without retyping the ID | |
+| 8b | After reconnecting, **Test Spotify** again; repeat after leaving the player idle for at least 12 minutes | A listed NeedleDropper device plays again without a 404 loop. No extra player window or loss of focus | Result, idle time and the device-id prefixes in the private log |
 | 9 | **Gamepad:** open the dialog with `/needle music`; move with the D-pad, press A on the Client ID box, then B | The cursor reaches every button and box; B leaves the box and closes the dialog; nothing traps the cursor | Anything unreachable |
 | 10 | `/needle report`, then Ctrl+C and paste it somewhere | A window with the report selected; it shows the addon, client and app versions, the beacon and the last 5 drops, and no account name or Client ID | Paste the report into your notes |
 

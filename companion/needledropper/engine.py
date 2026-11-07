@@ -56,7 +56,7 @@ A provider that fails after it had taken over playback may attach ``cleanup`` (a
 the drop, the shell is told (e.g. ``spotifyStuck``: Spotify accepted the song but never started
 it), and the clean-up handle is stopped when the drop ends.
 
-Every frame with the ``TEST`` flag, and every PING, calls ``on_link_check(frame, transport)``;
+The link test (FIRE with id ``test``), and every PING, calls ``on_link_check(frame, transport)``;
 notable changes call ``on_status(status)`` with :meth:`Engine.status` plus a ``change`` entry
 (``{"kind": "addon" | "armed" | "playing" | "local" | "stopped" | "match" | "notFound" |
 "notEmbeddable" | "searchFailed" | "outdatedAddon" | "noSource", ...}``; ``searchFailed`` has
@@ -179,6 +179,7 @@ class _Active:
     map_hash: Optional[int] = None
     local: bool = False  # addon plays it in game; we only show the card
     test: bool = False
+    service_test: bool = False  # a service-only sample runs its full length after startup
     version: int = 1  # protocol of the event that started it (1 also for play_now)
     place_key: Optional[int] = None
     query_key: Optional[str] = None
@@ -670,7 +671,7 @@ class Engine:
             self._stop_current(self.fade_out_ms, "addon reports no active drop")
             return
         if cur.stop_at is not None and now >= cur.stop_at:
-            self._stop_current(self.fade_out_ms if cur.handle else 0, "drop finished")
+            self._stop_current(self.fade_out_ms if cur.handle and not cur.service_test else 0, "drop finished")
             return
         if cur.handle is not None and cur.provider is not None and cur.next_poll_at is not None \
                 and now >= cur.next_poll_at:
@@ -808,7 +809,7 @@ class Engine:
         if now is None:
             return
         self._addon_hash = None
-        if fr.has(Flags.TEST) or fr.type == EventType.PING:
+        if fr.type == EventType.PING or (fr.type == EventType.FIRE and fr.drop_id == "test"):
             self.link_checks += 1
             self._notes.append(("link", (fr, transport)))
         if fr.type == EventType.HELLO:
@@ -1382,7 +1383,7 @@ class Engine:
         if now is None:
             return
         self._addon_hash = ev.hash
-        if ev.has(Flags.TEST) or ev.type == EventType.PING:
+        if ev.type == EventType.PING or (ev.type == EventType.FIRE and ev.id == "test"):
             self.link_checks += 1
             self._notes.append(("link", (ev, transport)))
         if ev.type == EventType.HELLO:
@@ -1499,6 +1500,7 @@ class Engine:
         cur = _Active(drop=drop, started_at=now, origin=origin, map_hash=map_hash, local=local, test=test,
                       version=version, place_key=place_key, query_key=qkey, frame_drop_id=frame_drop_id,
                       fire_seq=fire_seq, late=late)
+        cur.service_test = bool(test and only in ("spotify", "youtube") and drop.kind == "test")
         if routes is None:
             routes = [_Route(p, drop) for p in self.providers]
         if only:
@@ -1575,11 +1577,15 @@ class Engine:
                 reasons.append(f"{p.name}: {exc!r}")
                 continue
             cur.handle, cur.provider, cur.route = handle, p, route
+            # Service checks promise a full sample after the provider has started it. Connection
+            # time and a configured fade-out must not shorten that sample to FIRE + 12 seconds.
+            if cur.service_test:
+                now = self.clock()
             cur.play_started_at = now
             cur.next_poll_at = now + self.poll_interval
             if drop.durationMs:
                 cur.end_at = now + drop.durationMs / 1000.0
-                fade_s = self.fade_out_ms / 1000.0
+                fade_s = 0.0 if cur.service_test else self.fade_out_ms / 1000.0
                 cur.stop_at = max(now + drop.durationMs / 2000.0, cur.end_at - fade_s)
             else:
                 cur.end_at = cur.stop_at = None  # rely on provider.poll() / the addon's HELLO

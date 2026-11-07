@@ -141,11 +141,16 @@ def test_the_engines_own_change_notices(shell):
     assert shell.engines.current.extra.get("addons_dir") == shell.app.paths.addons_dir  # tracks recorded there
 
 
+
+def KEYED(deck):  # noqa: N802 - v1.2.1 polish: every player report carries the launch key
+    return {"X-ND-Key": deck.player_key}
+
+
 def test_youtube_embedding_errors_from_the_player_are_notified(shell):
     deck = shell.deck
     deck.send({"cmd": "show", "dropId": "area:87", "label": "Goldshire", "title": "Africa", "artist": "Toto"})
     deck.send({"cmd": "play", "playId": "p1", "source": "youtube", "videoId": "abcdefghijk", "dropId": "area:87"})
-    http_call(deck.port, "POST", "/status", {"state": "error", "playId": "p1", "code": 101}, token=deck.token)
+    http_call(deck.port, "POST", "/status", {"state": "error", "playId": "p1", "code": 101}, token=deck.token, headers=KEYED(deck))
     assert wait_for(lambda: tray.NOTE_NOT_EMBEDDABLE in shell.app.notifier.kinds())
     note = shell.app.notifier.history[-1]
     assert note.title == "YouTube video can't be played here" and "Toto – Africa" in note.text
@@ -154,10 +159,10 @@ def test_youtube_embedding_errors_from_the_player_are_notified(shell):
     assert shell.app.notifier.kinds().count(tray.NOTE_NOT_EMBEDDABLE) == 1
     # other player errors (a local file, autoplay, YouTube's "invalid id") are not this notification
     deck.send({"cmd": "play", "playId": "p2", "source": "local", "url": "u", "dropId": "zone:1"})
-    http_call(deck.port, "POST", "/status", {"state": "error", "playId": "p2", "code": 150}, token=deck.token)
+    http_call(deck.port, "POST", "/status", {"state": "error", "playId": "p2", "code": 150}, token=deck.token, headers=KEYED(deck))
     deck.send({"cmd": "play", "playId": "p3", "source": "youtube", "videoId": "zzzzzzzzzzz", "dropId": "zone:2"})
-    http_call(deck.port, "POST", "/status", {"state": "error", "playId": "p3", "code": 2}, token=deck.token)
-    http_call(deck.port, "POST", "/status", {"state": "autoplay-blocked", "playId": "p3"}, token=deck.token)
+    http_call(deck.port, "POST", "/status", {"state": "error", "playId": "p3", "code": 2}, token=deck.token, headers=KEYED(deck))
+    http_call(deck.port, "POST", "/status", {"state": "autoplay-blocked", "playId": "p3"}, token=deck.token, headers=KEYED(deck))
     assert shell.app.notifier.kinds().count(tray.NOTE_NOT_EMBEDDABLE) == 1
 
 
@@ -165,7 +170,7 @@ def test_a_stale_title_card_never_names_the_wrong_song(shell):
     deck = shell.deck
     deck.send({"cmd": "show", "dropId": "zone:1", "label": "Old place", "title": "Old song", "artist": "Old"})
     deck.send({"cmd": "play", "playId": "p9", "source": "youtube", "videoId": "qqqqqqqqqqq", "dropId": "zone:2"})
-    http_call(deck.port, "POST", "/status", {"state": "error", "playId": "p9", "code": 150}, token=deck.token)
+    http_call(deck.port, "POST", "/status", {"state": "error", "playId": "p9", "code": 150}, token=deck.token, headers=KEYED(deck))
     assert wait_for(lambda: tray.NOTE_NOT_EMBEDDABLE in shell.app.notifier.kinds())
     text = shell.app.notifier.history[-1].text
     assert "Old song" not in text and "qqqqqqqqqqq" in text

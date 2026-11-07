@@ -1,11 +1,29 @@
 # Putting NeedleDropper on CurseForge
 
-A click-by-click guide: create the CurseForge project, then upload the first **Beta** file by hand.
-After that, every version tag uploads by itself through the Release workflow. Wago Addons is optional
-and comes at the end. This is Phase 1 (public beta) of [RELEASING.md](../RELEASING.md).
+NeedleDropper's project is created. The **Release** workflow will publish the GitHub pre-release
+and upload the first **Beta** file to CurseForge when `v1.2.1-beta.1` is pushed after green CI.
+Testers use [GitHub Releases](https://github.com/Soupoleon/NeedleDropper/releases) for both the addon
+and the app while CurseForge reviews the project. This is Phase 1 of [RELEASING.md](../RELEASING.md).
 
-You do every step on the websites yourself: the account, the project, the API token and the GitHub
-secret are yours. Nothing in this repository uploads anything until you add that token.
+## Recorded status, 2026-11-06
+
+- **Project 1786392:** created, status **New**, unlisted pending first-file review.
+- **Description:** LISTING.md's long description, using Markdown.
+- **Categories:** Audio & Video, Miscellaneous and Roleplay.
+- **License:** MIT. **Third-party distribution:** allowed.
+- **Issues:** External, `https://github.com/Soupoleon/NeedleDropper/issues`.
+- **Image:** the featured Razor Hill screenshot is uploaded.
+- **Summary and logo:** the owner's existing choices; keep them.
+- **Automation:** `CF_API_KEY` is configured in GitHub Actions; the addon TOC contains
+  `## X-Curse-Project-ID: 1786392` and `## Version: 1.2.1`.
+- **GitHub:** the repository is public for beta.1.
+- **Still pending:** publish and verify beta.1, and set the **Source** link.
+  Now that GitHub is public, open [CurseForge Authors](https://authors.curseforge.com) →
+  NeedleDropper → **Source** → **GitHub**, set `https://github.com/Soupoleon/NeedleDropper`,
+  then **Save**. CurseForge refused this link while the repository was private.
+
+The setup instructions below are reference material. Do not recreate the project, replace the
+owner's summary/logo, or manually upload beta.1 after the workflow already uploaded it.
 
 Values marked *(verify)* weren't confirmed on the live site yet. Check them on screen as you go.
 
@@ -24,7 +42,7 @@ Values marked *(verify)* weren't confirmed on the live site yet. Check them on s
 1. **Make the GitHub repository public** (*Settings → General → Danger Zone → Change repository
    visibility*). The listing links to the source, the issues and the app download, and moderators
    click those links.
-2. **Build a fresh addon zip.** The one in `dist\` is older than the latest addon changes. In
+2. **Build a fresh addon zip.** Build from the tested release commit. In
    PowerShell, in the repository folder:
 
    ```powershell
@@ -45,11 +63,11 @@ Values marked *(verify)* weren't confirmed on the live site yet. Check them on s
 | Field | Value |
 |---|---|
 | Name | `NeedleDropper` |
-| Summary | `One hand-picked song and a cinematic title card, the first time you arrive somewhere new.` (89 characters; the field's limit *(verify)*. If LISTING.md's summary has changed since, use that one.) |
+| Summary | Keep the owner's existing summary |
 | Main category | **Audio & Video** |
-| Additional categories | Optional (up to 4). **Roleplay** fits, because NeedleDropper is about immersion. Leave out anything that doesn't really fit: moderators send projects back for unrelated categories. |
+| Additional categories | **Miscellaneous** and **Roleplay** (already set) |
 | License | **MIT License** |
-| Logo | `assets/logo/needledropper-logo-400.png` |
+| Logo | Keep the owner's existing logo |
 | Description | The **Long description** box in [LISTING.md](LISTING.md) (pick Markdown if the editor asks). Replace `{{CURSEFORGE_URL}}` with the project's address, probably `https://www.curseforge.com/wow/addons/needledropper` *(verify)*, and delete the Wago line unless you set up Wago. |
 | Source | `https://github.com/Soupoleon/NeedleDropper` |
 | Issues | `https://github.com/Soupoleon/NeedleDropper/issues` |
@@ -67,7 +85,13 @@ In the project, open **Images** (or **Gallery**) *(verify)* and upload:
 - **Description:** `The first time you arrive somewhere, the zone music fades, a song starts and the title card drifts in.`
 - Tick **Featured** if the form offers it, so this picture leads the page.
 
-## 3. Upload the first Beta file (by hand)
+## 3. First Beta upload
+
+The normal path is the **Release** workflow in step 5, including beta.1. Check its **addon-sites**
+job for the CurseForge file ID and confirm the file is **Beta** on the project. The GitHub release
+must contain the addon zip, Windows zip, Windows folder zip, `NeedleDropper.exe` and `SHA256SUMS.txt`.
+
+Use this manual form only if the automated upload failed and you have confirmed it created no file:
 
 In the project, open **Files** → **Upload file**:
 
@@ -102,7 +126,10 @@ That can take a few days *(verify)*. If they ask for changes, they'll message yo
 > testers download the zip from the project's **Files** tab (or from GitHub). The first Release
 > file (`v1.2.1`, or whichever version is first released) brings the project into the app.
 
-## 4. After approval: connect the Release workflow
+## 4. Release workflow setup (already completed)
+
+The project's ID and `CF_API_KEY` are configured. These steps are retained for maintenance; the
+first automated upload does not need to wait for project approval.
 
 1. **Project ID.** The **About Project** box on the project page shows **Project ID**, a number. It
    may show up before approval too *(verify)*. The TOC already has NeedleDropper's
@@ -141,15 +168,15 @@ git tag -a v1.2.1-beta.2 -m "NeedleDropper 1.2.1 beta 2"
 git push origin v1.2.1-beta.2
 ```
 
-- **Start at beta.2.** You uploaded beta.1 by hand, so tagging it again would put it on CurseForge
-  twice.
+- **Beta.1 uses this workflow too.** After it succeeds, the next new tag is beta.2. Do not recreate
+  an existing tag or upload the same beta manually.
 - The workflow checks the tag against `__version__` in `companion/needledropper/__init__.py` and the
   TOC's `## Version:`, and says what to fix when they don't match.
 - It builds the app and the GitHub release first. Then the BigWigs packager zips the addon and
   uploads it. The packager reads the game version from the TOC's `## Interface: 16001`; check that
   the first automatic file lands on WoW: Forever 1.60.x *(verify)*. The changelog it sends is the
   whole of CHANGELOG.md.
-- The run's **Summary** page has a table. *CurseForge: upload to project 123456 (beta)* means the
+- The run's **Summary** page has a table. *CurseForge: upload to project 1786392 (beta)* means the
   upload is on. *skipped: no CF_API_KEY secret* or *skipped: no ## X-Curse-Project-ID in the TOC*
   tells you what's missing. A skipped site doesn't fail the run.
 - To keep tags GitHub-only for a while (a friends-only build, say), add the repository **variable**

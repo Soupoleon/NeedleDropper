@@ -15,7 +15,8 @@ separate data addon that sets one global:
     imports = { { code = "!NeedleDropper:1!...!", active = bool }, ... },   -- one-time migration
     music = {                                                     -- 1.2.1 (DESIGN-v1.2.1 3.10, D17)
       spotify = { clientId = "<32 lowercase hex>", redirectUri = "http://127.0.0.1:8321/callback",
-                  account = "Ethan", product = "premium", state = "connected", mode = "app" },
+                  account = "Ethan", product = "premium", state = "connected", mode = "app",
+                  problem = nil | "allowlist" | "no-chrome" | ... (C.SPOTIFY_PROBLEMS) },
       youtube = { enabled = true, player = "chrome" | "edge" | "none", signInOpened = <unix time> },
       prefs   = { order = "spotify-youtube", corner = "topright", fade = true, resume = true, fromGame = true },
       actions = { { id = <issuedAt>, action = "connect-spotify", result = "connected", text = "...", at = <time> } },
@@ -68,6 +69,10 @@ C.MAX_ACTIONS = 8          -- music.actions entries kept (newest last)
 C.MAX_ACTION_TEXT = 300    -- characters of an action's text
 C.MAX_ACCOUNT = 64         -- characters of the Spotify display name
 C.MAX_UINT32 = 4294967295
+-- 2100-01-01 00:00 UTC: later time stamps (written, signInOpened, an action's at) are left out. date() gives
+-- nothing for a time past the client's calendar (year 3000 on Windows), and a corrupt report must not break
+-- the status lines, the dialog or /needle report (review INGAME-7; gamedata.MAX_TIME is the same).
+C.MAX_TIME = 4102444800
 
 local SPOTIFY_STATES = { connected = true, ["not-connected"] = true, ["premium-required"] = true, error = true }
 -- music.spotify.state (D17): the four v1.2 values plus needs-relogin, no-player and stuck, which
@@ -75,9 +80,13 @@ local SPOTIFY_STATES = { connected = true, ["not-connected"] = true, ["premium-r
 C.MUSIC_STATES = { "connected", "not-connected", "needs-relogin", "premium-required", "no-player", "stuck", "error" }
 C.MUSIC_MODES = { "app", "connect" }
 C.YOUTUBE_PLAYERS = { "chrome", "edge", "none" }
--- music.spotify.problem (review ON-3): why "error" -- "allowlist": the account is not on the developer app's
--- User Management list.
-C.SPOTIFY_PROBLEMS = { "allowlist" }
+-- music.spotify.problem: what the game can say beyond the state. With "error" (review ON-3): "allowlist", the
+-- account is not on the developer app's User Management list. With "no-player" (review ON-9): "no-chrome"
+-- (no Google Chrome, or its Widevine component not there yet), "not-ready" (the player page never got
+-- ready), "no-window" (no player window yet: none is made while the game is in front), "window-never"
+-- (deck.autoOpen "never"), "sdk-load" (Spotify's player script didn't load: offline or a firewall). An
+-- unknown code is left out; without one the game words the state neutrally.
+C.SPOTIFY_PROBLEMS = { "allowlist", "no-chrome", "not-ready", "no-window", "window-never", "sdk-load" }
 C.ORDERS = { "spotify-youtube", "youtube-spotify", "spotify", "youtube", "none" }
 C.CORNERS = { "topright", "topleft", "bottomright", "bottomleft" }
 C.ACTIONS = { "connect-spotify", "disconnect-spotify", "test-spotify", "test-youtube", "youtube-sign-in" }
@@ -177,7 +186,7 @@ local function checkMusic(raw)
     local y = out.youtube
     y.enabled = bool(yt.enabled)
     if YT_PLAYER[yt.player] then y.player = yt.player end
-    y.signInOpened = uint(yt.signInOpened)
+    y.signInOpened = uint(yt.signInOpened, C.MAX_TIME)
   end
   local pr = raw.prefs
   if type(pr) == "table" then
@@ -193,7 +202,7 @@ local function checkMusic(raw)
       if type(e) == "table" and ACTION[e.action] and uint(e.id, C.MAX_UINT32) and type(e.result) == "string"
          and #e.result <= 24 and find(e.result, "^[a-z][a-z%-]*$") then
         list[#list + 1] = { id = e.id, action = e.action, result = e.result,
-                            text = displayText(e.text, C.MAX_ACTION_TEXT), at = uint(e.at) }
+                            text = displayText(e.text, C.MAX_ACTION_TEXT), at = uint(e.at, C.MAX_TIME) }
       end
     end
     for i = math.max(1, #list - C.MAX_ACTIONS + 1), #list do out.actions[#out.actions + 1] = list[i] end
@@ -213,7 +222,7 @@ local function check(raw)
      and find(raw.appVersion, "^[0-9A-Za-z][0-9A-Za-z%.%+_%-]*$") then
     out.appVersion = raw.appVersion
   end
-  if finite(raw.written) and raw.written >= 0 then out.written = floor(raw.written) end
+  if finite(raw.written) and raw.written >= 0 and raw.written <= C.MAX_TIME then out.written = floor(raw.written) end
   local st = raw.status
   if type(st) == "table" then
     if SPOTIFY_STATES[st.spotify] then out.status.spotify = st.spotify end
@@ -342,9 +351,17 @@ local SPOTIFY_TEXT = {
   ["not-connected"] = "Spotify not connected",
   ["premium-required"] = "Spotify needs Premium",
   ["needs-relogin"] = "Spotify: sign in again",
-  ["no-player"] = "Spotify needs Google Chrome",
+  ["no-player"] = "Spotify player not ready",
   stuck = "Spotify didn't start",
   error = "Spotify needs you to sign in again",
+}
+-- "no-player" by the cause the app names (music.spotify.problem, review ON-9); only "no-chrome" names Chrome.
+local NO_PLAYER_TEXT = {
+  ["no-chrome"] = "Spotify needs Google Chrome",
+  ["not-ready"] = "Spotify player not ready",
+  ["no-window"] = "Spotify player not started yet",
+  ["window-never"] = "Spotify player switched off",
+  ["sdk-load"] = "Spotify player didn't load",
 }
 
 -- "Spotify: Ethan (Premium)" when a 1.2.1 app reported the account, else the state's words.
@@ -358,6 +375,7 @@ local function spotifyPart(d)
     return format(L["Spotify: %s"], sp.account)
   end
   if state == "error" and sp.problem == "allowlist" then return L["Spotify: account not allowed in your Spotify app"] end
+  if state == "no-player" and NO_PLAYER_TEXT[sp.problem] then return L[NO_PLAYER_TEXT[sp.problem]] end
   return SPOTIFY_TEXT[state] and L[SPOTIFY_TEXT[state]] or nil
 end
 

@@ -122,7 +122,7 @@ def test_another_client_id_while_connected_is_explained():
     fb = h.text(d.SpotifyFeedback)
     assert fb.startswith("Sent to the NeedleDropper app (") and fb.endswith("then press Send a test signal.")
     assert not h.enabled(d.ConnectButton) and d.ConnectButton.ndDisabledReason == "Just sent: give it a moment."
-    h.advance(5.2)
+    h.advance(10.2)  # v1.2.1 review INGAME-8: the lock is the app's 10 s (it was 5 s)
     assert h.enabled(d.ConnectButton)
 
 

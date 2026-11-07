@@ -409,9 +409,10 @@ class _Handler(BaseHTTPRequestHandler):
             if not isinstance(data, dict) or not isinstance(data.get("state"), str):
                 self._error(HTTPStatus.BAD_REQUEST, 'expected {"state": ...}')
                 return
-            if data.get("state") == "spotify" and not self.deck.player_key_valid(self.headers.get("X-ND-Key")):
-                # The SDK's reports set the device the app plays to: only from the window the app opened (its
-                # launch key), never from a process that read the X-ND-Token from /player (review RCOMP-3).
+            if not self.deck.player_key_valid(self.headers.get("X-ND-Key")):
+                # Every report comes from the window the app opened (its launch key), never from a process that
+                # read the X-ND-Token from /player: the SDK's set the device the app plays to (review RCOMP-3),
+                # and YouTube / local ones end songs and show the box. A page without the key retires on 401.
                 self._error(HTTPStatus.UNAUTHORIZED, "missing or wrong X-ND-Key")
                 return
             self.deck._on_status(data)
@@ -831,6 +832,8 @@ class SpotifySdk:
         self.ready = False
         self.ready_at: Optional[float] = None
         self.ready_seq = 0
+        self.verified_id: Optional[str] = None
+        self._preserve_grace = False
         #: when the ready SDK went offline (not_ready), until it is ready again (a blip is not "no player")
         self.offline_at: Optional[float] = None
         self.error: Optional[dict[str, Any]] = None
@@ -852,9 +855,11 @@ class SpotifySdk:
             self.app_mode = True
             first = not self.wanted
             if first:
+                self._preserve_grace = False
                 self.wanted = True
                 self.wanted_at = time.monotonic()
                 self.ready, self.device_id, self.error, self.tick = False, None, None, None
+                self.verified_id = None
                 self._cond.notify_all()
         if first:
             log.info("in-app Spotify: connecting NeedleDropper's player to Spotify (device %r)", SPOTIFY_DEVICE_NAME)
@@ -872,6 +877,7 @@ class SpotifySdk:
             self._owner = owner
             self._token_source = self._listener = None
             self.ready, self.device_id, self.tick = False, None, None
+            self.verified_id = None
             self._cond.notify_all()
         if was:
             log.info("in-app Spotify: disconnecting NeedleDropper's player (no Spotify sign-in that allows it)")
@@ -889,6 +895,7 @@ class SpotifySdk:
             self.app_mode = False
             self._token_source = self._owner = self._listener = None
             self.ready, self.device_id, self.tick = False, None, None
+            self.verified_id = None
             self._cond.notify_all()
         if was:
             log.info("in-app Spotify: disconnecting NeedleDropper's player from Spotify")
@@ -905,8 +912,10 @@ class SpotifySdk:
             self.offline_at = None
             if self.wanted:
                 self.ready, self.device_id, self.tick = False, None, None
+                self.verified_id = None
                 self.error, self.connect_ok = None, None
-                self.wanted_at = self.page_since
+                if not self._preserve_grace:
+                    self.wanted_at = self.page_since
             self._cond.notify_all()
 
     def page_gone(self) -> None:
@@ -914,9 +923,11 @@ class SpotifySdk:
         with self._cond:
             self.page_since = None
             self.ready, self.tick = False, None
+            self.verified_id = None
             self._cond.notify_all()
 
-    def reconnect(self, *, restart_grace: bool = True) -> bool:
+    def reconnect(self, *, restart_grace: bool = True, expected_device: Optional[str] = None,
+                  expected_ready_seq: Optional[int] = None) -> bool:
         """Disconnect and connect again (after a token refresh, or to re-check a player that failed).
         ``restart_grace=False`` (the periodic re-check of a player that never got ready): the wait for
         "ready" is not restarted, so such a player stays "no player" instead of counting as connecting
@@ -924,13 +935,18 @@ class SpotifySdk:
         with self._cond:
             if not self.wanted:
                 return False
+            if expected_ready_seq is not None and (self.ready_seq != expected_ready_seq or
+                    self.device_id != expected_device or self.verified_id == self.device_id):
+                return False  # a newer registration superseded the failed check
             self.reconnects += 1
-            self.ready, self.error = False, None
+            previous = self.device_id
+            self.ready, self.error, self.verified_id = False, None, None
+            self._preserve_grace = not restart_grace
             if restart_grace:
                 self.wanted_at = time.monotonic()
             self._cond.notify_all()
-        log.info("in-app Spotify: reconnecting NeedleDropper's player")
-        self.command("reconnect", name=SPOTIFY_DEVICE_NAME)
+        log.info("in-app Spotify: reloading NeedleDropper's player (previous device %.8s)", previous or "none")
+        self.command("reload", name=SPOTIFY_DEVICE_NAME)
         return True
 
     def owned_by(self, owner: Any) -> bool:
@@ -971,18 +987,22 @@ class SpotifySdk:
             rec["seq"], rec["t"] = self._seq, now
             if event == "ready":
                 dev = str(data.get("deviceId") or "")
+                previous = self.device_id
                 changed = bool(self.device_id) and dev != self.device_id
                 if dev:
+                    self._preserve_grace = False
                     self.device_id, self.ready, self.ready_at, self.ready_seq = dev, True, now, self._seq
+                    self.verified_id = None
                     self.offline_at = None
-                msg = f"in-app Spotify ready{' (a new device id)' if changed else ''}"
+                msg = f"in-app Spotify ready: device {dev[:8]} (previous {(previous or 'none')[:8]})"
             elif event == "not_ready":
                 dev = str(data.get("deviceId") or "")
                 if not dev or dev == self.device_id:
                     if self.ready:
                         self.offline_at = now
                     self.ready = False
-                msg = "in-app Spotify went offline (not_ready); the SDK reconnects by itself"
+                    self.verified_id = None
+                msg = f"in-app Spotify not_ready: device {dev[:8]} (previous {(self.device_id or 'none')[:8]})"
             elif event == "error":
                 self.error = {"kind": rec.get("kind") or "error", "message": rec.get("message") or "", "at": now,
                               "seq": self._seq}
@@ -1024,16 +1044,25 @@ class SpotifySdk:
         return self._deck._interrupt.is_set() or self._deck._stopping.is_set()
 
     def wait_ready(self, timeout: float) -> Optional[str]:
-        """The device id once the SDK is ready (now, or within ``timeout``); None otherwise."""
+        """Only a ready id confirmed by Spotify's device list; an SDK ready alone is insufficient."""
         deadline = time.monotonic() + max(0.0, timeout)
         with self._cond:
             while True:
-                if self.ready and self.device_id:
+                if self.ready and self.device_id and self.verified_id == self.device_id:
                     return self.device_id
                 remaining = deadline - time.monotonic()
                 if remaining <= 0 or not self.wanted or self._give_up():
                     return None
                 self._cond.wait(min(remaining, 0.25))
+
+    def verify_device(self, device_id: str, ready_seq: int, *, listed: bool) -> bool:
+        """Apply an API result only to the registration it checked, never a newer ready report."""
+        with self._cond:
+            if not self.wanted or not self.ready or self.device_id != device_id or self.ready_seq != ready_seq:
+                return False
+            self.verified_id = device_id if listed else None
+            self._cond.notify_all()
+            return listed
 
     def wait_for(self, predicate: Callable[[dict[str, Any]], bool], *, after_seq: int = 0,
                  timeout: float = 0.0, cursor: Optional[dict[str, int]] = None) -> Optional[dict[str, Any]]:
@@ -1074,6 +1103,8 @@ class SpotifySdk:
         with self._cond:
             snap: dict[str, Any] = {
                 "wanted": self.wanted, "appMode": self.app_mode, "ready": self.ready, "deviceId": self.device_id,
+                "verified": bool(self.ready and self.device_id and self.verified_id == self.device_id),
+                "preserveGrace": self._preserve_grace,
                 "readyAt": self.ready_at, "readySeq": self.ready_seq, "wantedAt": self.wanted_at,
                 "offlineAt": self.offline_at,
                 "pageSince": self.page_since,
@@ -1115,6 +1146,8 @@ class Deck:
         #: to any server), so only the window this app start launched is its player (ON-1, RCOMP-3).
         self._player_key = secrets.token_urlsafe(18)
         self._stale_noted_at: Optional[float] = None
+        self._stale_page_count = 0
+        self.on_stale_player: Optional[Callable[[str], Any]] = None
         self.api: Optional[ApiHandler] = api
         self.launcher: Launcher = launcher or self._launch
         self.url_opener: Callable[[str], Any] = url_opener or webbrowser.open
@@ -1123,6 +1156,7 @@ class Deck:
         self.browser = "edge"
         self.player_position: Optional[tuple[int, int]] = None
         self.player_corner = "topright"
+        self.beacon_corner = "topleft"  # transport.pixel.corner: the YouTube box keeps clear of the beacon there
         self.profile_dir: Optional[Path] = None
         self.browser_log: Optional[Path] = None   # the browser's stderr (logs\browser.log)
         #: the never-activating window manager (deck/window.py; None: none, the plain window)
@@ -1131,6 +1165,10 @@ class Deck:
         #: Chromium activates a window when it creates it (real-client #8 / #13)
         self.game_in_front: Callable[[], bool] = _game_in_front
         self._player_proc: Any = None
+        self._player_image: Optional[str] = None
+        self._adopted_process: Any = None
+        #: Injectable profile/process guard. The native adapter is created only for a real launch.
+        self.profile_guard: Any = None
         self._player_kind: Optional[str] = None
         self._bad_browsers: set[str] = set()
         self._server: Optional[_Server] = None
@@ -1237,9 +1275,17 @@ class Deck:
         """The browser this app start launched for the player: once its window got WM_CLOSE it exits by
         itself; when it still runs after ``wait_s`` (no window manager, the window never found, or it hangs)
         its process tree is ended. A browser left running holds the player profile, and its page would
-        connect to the next start (review ON-1). Only a process this deck launched (a real ``Popen``)."""
+        connect to the next start (review ON-1). A real ``Popen``, or a profile-singleton handoff whose
+        executable, profile and creation time were verified before its window was adopted."""
         with self._lock:
             proc = self._player_proc
+            adopted = self._adopted_process
+            self._adopted_process = None
+        if adopted is not None and self.profile_guard is not None:
+            try:
+                self.profile_guard.retire(adopted, wait_s=wait_s)
+            except Exception as exc:  # never end an unverified/reused PID
+                log.warning("could not close the handed-off player browser (%s)", type(exc).__name__)
         if not isinstance(proc, subprocess.Popen):
             return
         deadline = time.monotonic() + max(0.0, wait_s)
@@ -1309,12 +1355,22 @@ class Deck:
     def _note_stale_player(self) -> None:
         now = time.monotonic()
         with self._lock:
+            self._stale_page_count += 1
+            notice = self._stale_page_count == 2
             quiet = self._stale_noted_at is not None and now - self._stale_noted_at < 300
             if not quiet:
                 self._stale_noted_at = now
         if not quiet:
             log.info("a player page from an earlier start of NeedleDropper (or opened by hand) connected; it was "
                      "told to close itself")
+        if notice:
+            message = "An old NeedleDropper window is open: close it."
+            log.warning(message)
+            if callable(self.on_stale_player):
+                try:
+                    self.on_stale_player(message)
+                except Exception:  # a notice must not break the stale page's retirement
+                    log.debug("old player window notice could not be shown")
 
     # ---------------------------------------------------------- security ----
     @property
@@ -1691,8 +1747,9 @@ class Deck:
     def configure_player(self, *, auto_open: Optional[str] = None, browser: Optional[str] = None,
                          position: Optional[tuple[int, int]] = None, profile_dir: Any = None,
                          clear_position: bool = False, corner: Optional[str] = None,
-                         browser_log: Any = None) -> None:
-        """Update the player-window policy (from ``deck.*`` config)."""
+                         browser_log: Any = None, beacon_corner: Optional[str] = None) -> None:
+        """Update the player-window policy (from ``deck.*`` config; ``beacon_corner`` from
+        ``transport.pixel.corner``: the box keeps clear of the beacon at that corner)."""
         if auto_open is not None:
             self.auto_open = auto_open if auto_open in AUTO_OPEN_MODES else "youtube"
         if browser is not None:
@@ -1708,11 +1765,16 @@ class Deck:
             self.player_corner = normalize_corner(corner)
         if browser_log is not None:
             self.browser_log = Path(browser_log)
+        if beacon_corner is not None:
+            from .window import normalize_beacon_corner
+            self.beacon_corner = normalize_beacon_corner(beacon_corner)
         win = self.window
         if win is not None:
-            moved = (win.corner, win.position) != (self.player_corner, self.player_position)
+            moved = (win.corner, win.position, getattr(win, "beacon_corner", self.beacon_corner)) != \
+                (self.player_corner, self.player_position, self.beacon_corner)
             win.corner = self.player_corner
             win.position = self.player_position
+            win.beacon_corner = self.beacon_corner
             reposition = getattr(win, "reposition", None)
             if moved and callable(reposition):
                 try:
@@ -1772,7 +1834,7 @@ class Deck:
         try:
             in_front = bool(self.game_in_front())
         except Exception:  # noqa: BLE001
-            in_front = False
+            in_front = True  # unknown foreground is not permission to create a window
         if in_front:
             log.info("not opening the player window while the game is in front (creating it would take the "
                      "focus); it opens once you are out of the game")
@@ -1788,12 +1850,25 @@ class Deck:
                 args.append(f"--window-position={pos[0]},{pos[1]}")
             if self.profile_dir is not None:
                 try:
+                    if self.profile_guard is None and sys.platform == "win32" and \
+                            self.launcher == self._launch and _default_launcher is _REAL_LAUNCHER:
+                        from .profile import ProfileGuard, WindowsProcesses
+                        self.profile_guard = ProfileGuard(WindowsProcesses(getattr(self.window, "win32", None)))
+                    if self.profile_guard is not None:
+                        self.profile_dir = self.profile_guard.select(exe, self.profile_dir)
                     self.profile_dir.mkdir(parents=True, exist_ok=True)
                     args += [f"--user-data-dir={self.profile_dir}", "--no-first-run", "--no-default-browser-check"]
                 except OSError as exc:
-                    log.debug("player profile dir unavailable: %s", exc)
+                    log.warning("player profile dir unavailable: %s", exc)
+                    continue  # never fall back to the user's ordinary browser profile
                 if kind == "chrome":
                     self._copy_widevine()
+            # Profile inspection/retirement can take seconds. Check again immediately before launch.
+            try:
+                if self.game_in_front():
+                    return "none"
+            except Exception:
+                return "none"  # unknown foreground is not permission to create a window
             before = self._foreground()  # Chromium activates the window it creates: hand it back after
             existing = self._windows_now()  # none of these is the new player window (never adopt one)
             try:
@@ -1806,6 +1881,8 @@ class Deck:
                 self._player_opened_at = time.monotonic()
                 self.player_opened += 1
                 self._player_proc = proc
+                self._player_image = exe
+                self._adopted_process = None
                 self._player_kind = kind
             log.info("opened the player window (%s: %s)", kind, exe)
             self._adopt_later(proc, before, existing)
@@ -1852,6 +1929,24 @@ class Deck:
             kw["prev_foreground"] = before
         if existing:
             kw["ignore"] = existing
+        guard, profile, image = self.profile_guard, self.profile_dir, self._player_image
+        if guard is not None and profile is not None and image is not None:
+            def accept_handoff(candidate: int) -> bool:
+                # Chrome's singleton can race the pre-launch inspection. A title alone never
+                # grants ownership: verify the executable, private profile and loopback player.
+                poll = getattr(proc, "poll", None)
+                if not callable(poll) or poll() != 0:
+                    return False
+                identity = guard.identify(candidate, image, profile)
+                if identity is None:
+                    return False
+                with self._lock:
+                    if self._player_proc is not proc or self._stopping.is_set():
+                        return False
+                    self._adopted_process = identity
+                log.warning("player launch handed off to browser pid %s; retaining its checked identity", candidate)
+                return True
+            kw["accept_handoff"] = accept_handoff
         target: Callable[[], Any] = lambda: win.adopt(pid, **kw)  # noqa: E731
         threading.Thread(target=target, name="needledropper-player-window", daemon=True).start()
 
@@ -1934,6 +2029,20 @@ class Deck:
         self._interrupt.set()
         with self._cond:
             self._cond.notify_all()
+
+    def keep_player_parked(self) -> bool:
+        """Between songs the parked player window stays off every monitor, also after a display change while
+        it is parked (deck/window.py ``keep_parked``; the app's housekeeping calls this every few seconds).
+        True when it was parked again. Never raises."""
+        win = self.window
+        keep = getattr(win, "keep_parked", None) if win is not None else None
+        if not callable(keep):
+            return False
+        try:
+            return bool(keep())
+        except Exception as exc:  # noqa: BLE001 - placement only
+            log.debug("player window: %s", exc)
+            return False
 
     def close_player(self) -> bool:
         """Close the player window (the app is quitting). True when the window manager had one to close."""

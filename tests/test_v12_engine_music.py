@@ -117,6 +117,30 @@ def test_tests_from_the_app_ignore_the_order():
     assert r.yt.of("play") == [("play", "test-youtube", YT_ID, 0)]
 
 
+@pytest.mark.parametrize("service", ["spotify", "youtube"])
+def test_service_sample_runs_fifteen_seconds_after_a_slow_start(service):
+    r = rig()
+    provider = r.sp if service == "spotify" else r.yt
+    original = provider.play
+
+    def slow_start(drop, **kwargs):
+        r.clock.advance(1.2)
+        return original(drop, **kwargs)
+
+    provider.play = slow_start
+    drop = Drop(n=0, id="test-" + service, kind="test", title="Africa", artist="Toto", durationMs=15000,
+                spotify=f"spotify:track:{SP_ID}", youtube=YT_ID)
+    r.engine.play_now(drop, test=True, only=service)
+    r.engine.drain()
+    r.clock.advance(14.9)
+    r.engine.tick()
+    assert r.engine.is_playing and provider.of("stop") == []
+    r.clock.advance(0.1)
+    r.engine.tick()
+    assert not r.engine.is_playing
+    assert provider.of("stop") == [("stop", drop.id, 0)]
+
+
 # --------------------------------------------------------------- the pre-warm --
 
 @pytest.mark.parametrize("order, searched, prepared", [

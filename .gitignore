@@ -30,3 +30,6 @@ desktop.ini
 
 # Claude Code session data (worktrees of parallel sessions)
 .claude/
+
+# Private release handoffs, investigation notes, and local verification receipts.
+/handoff/

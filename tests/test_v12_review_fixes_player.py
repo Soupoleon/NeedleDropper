@@ -108,11 +108,12 @@ def test_the_window_is_found_by_the_launched_process_tree_and_made_never_activat
     assert not pw.shown
 
 
-def test_a_window_handed_to_a_running_browser_is_found_by_the_page_title():
+def test_a_window_handed_to_a_running_browser_is_found_by_the_page_title(caplog):
     win32, pw = make_window()
     win32.windows = [(11, 4321, W.CHROME_CLASS, "Elwynn Forest \u2014 NeedleDropper", True, False)]
     win32.alive = {11}
     assert pw.adopt(100, timeout=0.1) and pw.hwnd == 11
+    assert "handed off to browser pid 4321" in caplog.text
 
 
 def test_no_window_means_no_adoption():

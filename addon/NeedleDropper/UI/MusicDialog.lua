@@ -268,7 +268,7 @@ local function build()
   end
   f.SignalButton = W.Button(left, L["Send a test signal"], 150, function()
     if ns.SelfTest and ns.SelfTest.Signal then ns.SelfTest.Signal() end
-  end, L["Send a test signal"], L["Sends a test signal through the beacon (and the chat log when it is on). Your NeedleDropper app shows a notification within 2 seconds if it can see the game."])
+  end, L["Send a test signal"], L["Checks only the link and plays no music. Your NeedleDropper app shows a notification within 2 seconds if it can see the game."])
   f.SignalButton:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -GAP)
   f.RefreshButton = W.Button(left, L["Refresh status (reloads UI)"], 210, function() pcall(ReloadUI) end,
     L["Refresh status (reloads UI)"],

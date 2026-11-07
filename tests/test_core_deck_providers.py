@@ -39,9 +39,9 @@ def get(deck: Deck, path: str, headers: Optional[dict] = None):
 
 
 def post_status(deck: Deck, data: dict, origin: Optional[str] = None, token: Optional[str] = "deck") -> int:
-    """POST /status as the player page does (with the page's X-ND-Token)."""
+    """POST /status as the player page does (with the page's X-ND-Token and its launch key)."""
     conn = http.client.HTTPConnection("127.0.0.1", deck.port, timeout=5)
-    headers = {"Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json", "X-ND-Key": deck.player_key}  # v1.2.1 polish: every player report carries the launch key
     if token:
         headers["X-ND-Token"] = deck.token if token == "deck" else token
     if origin:

@@ -192,6 +192,8 @@ class MusicConfig:
         self._busy = 0
         self._seen: dict[tuple[int, int], float] = {}
         self._last_run: dict[str, float] = {}
+        #: the click time (issuedAt) of the game's requests that ran, per action (see _too_soon)
+        self._game_runs: dict[str, list[int]] = {}
         self._page_opens: deque[float] = deque()
         self._pending: dict[str, _PendingTest] = {}
         self._results: deque[dict[str, Any]] = deque(maxlen=MAX_RESULTS)
@@ -378,14 +380,32 @@ class MusicConfig:
         self._push(flush=False)
 
     # ------------------------------------------------------------ requests --
+    def _too_soon(self, req: _Request, now: float) -> bool:
+        """Each action at most once per :data:`ACTION_INTERVAL_S`. A request from the game is measured by its
+        click (``issuedAt``: the game's ``time()``, the same PC clock), against the clicks of the game's earlier
+        requests of that action that ran. The game's own limit (``MusicServices.SEND_GAP``, the same 10 s)
+        counts from the click too, so a request it sends is never refused here: by the app's clock two clicks
+        10 s apart could arrive 2 s apart, the first read only at the beacon's re-show 8 s later or queued
+        behind another frame (review RG-2). Within ``ACTION_INTERVAL_S`` either way counts, so a request that
+        comes late over the chat log after a newer one ran is still checked. A request from the Connect page is
+        measured by the app's own clock, against any source."""
+        if req.source != "game":
+            last = self._last_run.get(req.action)
+            return last is not None and now - last < ACTION_INTERVAL_S
+        wall = self._wall()
+        # Only clicks a fresh request can still be near (none from before the PC clock was set back).
+        runs = [t for t in self._game_runs.get(req.action, ())
+                if wall - FRESH_AFTER_S - ACTION_INTERVAL_S <= t <= wall + FRESH_BEFORE_S]
+        self._game_runs[req.action] = runs
+        return any(abs(req.issued_at - t) < ACTION_INTERVAL_S for t in runs)
+
     def _run_request(self, req: _Request) -> None:
         now = self._mono()
         self.stats.actions[req.action] = self.stats.actions.get(req.action, 0) + 1
-        last = self._last_run.get(req.action)
         reopen = req.action == "connect-spotify" and self._waiting_login(req) is not None
         while self._page_opens and now - self._page_opens[0] > PAGE_WINDOW_S:
             self._page_opens.popleft()
-        too_soon = last is not None and now - last < ACTION_INTERVAL_S
+        too_soon = self._too_soon(req, now)
         too_many = req.action in _PAGE_ACTIONS and len(self._page_opens) >= PAGE_LIMIT
         if too_soon or too_many:
             log.info("request %s refused: %s", req.action,
@@ -395,6 +415,8 @@ class MusicConfig:
                 self._note(tray.NOTE_MUSIC_BUSY, BUSY_TEXT, title="NeedleDropper", key=None, level="info")
             return
         self._last_run[req.action] = now
+        if req.source == "game":
+            self._game_runs.setdefault(req.action, []).append(int(req.issued_at))
         if req.action in _PAGE_ACTIONS:
             self._page_opens.append(now)
         log.info("request from the %s: %s (issued %d%s)", "game" if req.source == "game" else "Connect page",
@@ -700,6 +722,8 @@ class MusicConfig:
     # -------------------------------------------------------------- results --
     def _result(self, req: _Request, result: str, text: str, *, final: bool = True, notify: bool = True,
                 level: str = "info", action: Optional[Callable[[], Any]] = None) -> None:
+        if req.action == "test-spotify" and result in ("failed", "unavailable"):
+            text = _sentence(text) + " YouTube wasn't tried; Test Spotify checks only Spotify."
         entry = {"id": int(req.issued_at), "action": req.action, "result": result, "text": text,
                  "at": int(self._wall())}
         log.info("request %s@%d: %s - %s", req.action, req.issued_at, result, text)

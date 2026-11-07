@@ -75,13 +75,13 @@ def test_the_same_frame_from_both_transports_and_the_engine_ticks_once(shell):
     assert shell.app.notifier.kinds().count(tray.NOTE_TEST) == 1
 
 
-def test_a_test_from_the_drop_editor_carries_its_song(shell):
+def test_a_test_from_the_drop_editor_plays_without_a_link_notification(shell):
     fire = protocol2.build_frame(EventType.FIRE, seq=12, flags=int(Flags.TEST), drop_id="area:87", artist="Toto",
                                  title="Africa", youtube="dQw4w9WgXcQ", label="Goldshire")
     shell.transports.live("pixel").emit(fire)
     data = link(shell)
-    assert data["heard"] and data["what"] == "FIRE" and data["label"] == "Goldshire"
-    assert data["song"] == "Toto – Africa"
+    assert not data["heard"] and data["count"] == 0
+    assert tray.NOTE_TEST not in shell.app.notifier.kinds()
     assert shell.engines.current.submitted[-1][0] is fire  # and it still plays
 
 

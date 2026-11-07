@@ -154,6 +154,7 @@ __all__ = [
     "MUSIC_CORNERS",
     "MUSIC_ACTIONS",
     "MAX_MUSIC_ACTIONS",
+    "MAX_TIME",
 ]
 
 log = logging.getLogger(__name__)
@@ -202,9 +203,11 @@ _TOP_FIELDS = ("schema", "appVersion", "written", "status", "tracks", "imports",
 MUSIC_SPOTIFY_STATES = ("connected", "not-connected", "needs-relogin", "premium-required", "no-player", "stuck",
                         "error")
 MUSIC_SPOTIFY_MODES = ("app", "connect")
-#: ``music.spotify.problem`` (v1.2.1 review ON-3): why the state is "error" when the game can say more than
-#: "sign in again" -- "allowlist": Spotify refused the account for the player's developer app (User Management).
-MUSIC_SPOTIFY_PROBLEMS = ("allowlist",)
+#: ``music.spotify.problem``: what the game can say beyond the state (providers.spotify.MUSIC_PROBLEMS). With
+#: "error" (v1.2.1 review ON-3): "allowlist", Spotify refused the account for the player's developer app (User
+#: Management). With "no-player" (review ON-9): "no-chrome", "not-ready", "no-window", "window-never" or
+#: "sdk-load" (spotify.NO_PLAYER_PROBLEMS), so the game names the right cause instead of "install Chrome".
+MUSIC_SPOTIFY_PROBLEMS = ("allowlist", "no-chrome", "not-ready", "no-window", "window-never", "sdk-load")
 YOUTUBE_PLAYERS = ("chrome", "edge", "none")
 MUSIC_ORDERS = ("spotify-youtube", "youtube-spotify", "spotify", "youtube", "none")
 MUSIC_CORNERS = ("topright", "topleft", "bottomright", "bottomleft")
@@ -214,6 +217,10 @@ MAX_MUSIC_ACTIONS = 8
 MAX_ACCOUNT_CHARS = 64
 MAX_ACTION_TEXT_CHARS = 300
 _MAX_UINT32 = 0xFFFFFFFF
+#: The latest time stamp the game is given (2100-01-01 00:00 UTC): ``written``, ``music.youtube.signInOpened`` and
+#: an action's ``at`` reach the game's date(), which gives nothing past the client's calendar (year 3000 on
+#: Windows). Companion.lua's checker has the same cap (C.MAX_TIME; review INGAME-7).
+MAX_TIME = 4102444800
 _MUSIC_FIELDS = ("spotify", "youtube", "prefs", "actions")
 _MUSIC_SPOTIFY_FIELDS = ("clientId", "redirectUri", "account", "product", "state", "mode", "problem")
 _MUSIC_YOUTUBE_FIELDS = ("enabled", "player", "signInOpened")
@@ -531,7 +538,7 @@ def _music_youtube(name: str, value: Any) -> Any:
         return _bool(value, what, False)
     if name == "player":
         return _one_of(value, YOUTUBE_PLAYERS, what)
-    return _whole(value, what)  # signInOpened
+    return _whole(value, what, MAX_TIME)  # signInOpened
 
 
 def _music_prefs(name: str, value: Any) -> Any:
@@ -584,7 +591,7 @@ def _music_action(raw: Any, what: str) -> dict[str, Any]:
     text = _plain_text(raw["text"], f"{what}.text", MAX_ACTION_TEXT_CHARS) if raw.get("text") is not None else None
     if text is not None:
         out["text"] = text
-    out["at"] = _whole(raw["at"], f"{what}.at")
+    out["at"] = _whole(raw["at"], f"{what}.at", MAX_TIME)
     return out
 
 
@@ -691,10 +698,12 @@ def normalize_companion_data(data: Optional[Mapping[str, Any]] = None, *, now: O
     written = data.get("written")
     if written is None:
         written = time.time() if now is None else now
+        if isinstance(written, (int, float)) and math.isfinite(written):
+            written = min(int(written), MAX_TIME)  # a PC clock past 2100 must not stop every write
     if isinstance(written, float) and math.isfinite(written):
         written = int(written)
-    if not isinstance(written, int) or isinstance(written, bool) or not 0 <= written <= _MAX_EXACT_INT:
-        raise GameDataError(f"written must be a unix time (whole seconds, 0 or more), not {written!r}")
+    if not isinstance(written, int) or isinstance(written, bool) or not 0 <= written <= MAX_TIME:
+        raise GameDataError(f"written must be a unix time (whole seconds, from 0 to {MAX_TIME}), not {written!r}")
     imports = _imports(data.get("imports"))
     imports_bytes = sum(len(i["code"]) + 48 for i in imports)
     music = _music(data.get("music"))

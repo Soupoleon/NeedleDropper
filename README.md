@@ -112,17 +112,21 @@ flowchart LR
 
 ## Quick start
 
-1. **Install the addon** with your addon manager (search for *NeedleDropper*), or unzip
-   `NeedleDropper-<version>-addon.zip` into `World of Warcraft\_forever_\Interface\AddOns`
+1. **Download [1.2.1 beta 1](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.1)**
+   (or a newer beta from [Releases](https://github.com/Soupoleon/NeedleDropper/releases)). While
+   CurseForge approval is pending, get both parts here. Unzip `NeedleDropper-1.2.1-addon.zip`
+   into `World of Warcraft\_forever_\Interface\AddOns`
    ([how](docs/INSTALL.md#1-install-the-addon)).
-2. **Optional, for Spotify and YouTube: install the app.** Unzip `NeedleDropper-<version>-win64.zip`
-   somewhere permanent and double-click **`NeedleDropper.exe`**. If Windows says *"Windows protected
+2. **Optional, for Spotify and YouTube: install the app.** Download **`NeedleDropper.exe`** or unzip
+   `NeedleDropper-1.2.1-win64.zip` somewhere permanent and run it. If Windows says *"Windows protected
    your PC"*, click **More info → Run anyway** ([why](docs/INSTALL.md#windows-protected-your-pc)).
-   On its **Connect** page, sign in to **Spotify** (Premium and Google Chrome) or simply use
-   **YouTube**, which needs no setup ([music services](docs/PROVIDERS.md)); you can also set up
-   Spotify later in game (`/needle music`). Start the app before the game the first time (or restart
-   the game once): the game finds the app's small data addon only when it starts. Then, in the game,
-   type `/needle test`: the page ticks **Check the link**.
+   For Spotify, create [your own developer app](docs/PROVIDERS.md#step-1-create-your-developer-app),
+   then paste its Client ID on the **Connect** page and sign in (Premium and Google Chrome needed).
+   Keep **Play on: NeedleDropper (this app)**. **YouTube** needs no setup. **Start the app before
+   WoW and give it a moment on the desktop:** it never opens its player while the game is in front,
+   and the game discovers its small data addon at startup. In game, open *Options → AddOns →
+   NeedleDropper → Music services* and use **Test Spotify**, then **Test YouTube**; each tests only
+   its own service. `/needle test` and **Send a test signal** check the link and play nothing.
 3. **Play.** Go somewhere your character has never been. The zone music fades, the title card drifts
    in, and with the app running the song starts. (Without the app you see the title card only; those
    places play their song once the app is installed.)
@@ -131,7 +135,9 @@ flowchart LR
 5. **Share.** On the Soundtracks tab, **Share...** gives you a code to paste into Discord; friends paste
    it into **Import...** ([share codes](docs/PACKS.md#share-codes)).
 
-Full walk-through: [docs/INSTALL.md](docs/INSTALL.md).
+Full walk-through: [Beta testing](docs/BETA-TESTING.md) or [Installation](docs/INSTALL.md).
+The release includes `SHA256SUMS.txt`. New betas are announced to testers directly; the app's
+update check reports stable releases only.
 
 ## In game
 

@@ -131,21 +131,51 @@ def test_api_rejects_bad_host_and_foreign_origin(deck):
     assert http_call(deck.port, "GET", "/api/state", token=tok, headers={"Host": f"localhost:{deck.port}"})[0] == 200
 
 
+def _refused(deck, expected: int, **kw):
+    """A request the deck must refuse: its answer's JSON, or None when Windows reset the connection instead
+    -- the deck answers and closes without reading a body it refuses (the Content-Length -5 one), and a body
+    that reaches the closed socket after that makes Windows reset it, losing the answer for a client that
+    reads late (a loaded machine: WinError 10053 at getresponse). The proof the body was refused is then
+    the API spy, which never sees it."""
+    try:
+        st, data, _h = http_call(deck.port, "POST", "/api/config", token=deck.token, **kw)
+    except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+        return None
+    assert st == expected, (st, data)
+    return data
+
+
+def _one_segment_status(deck, length: str, body: bytes) -> bytes:
+    """The status line for a request sent in one write: the deck's buffered header read takes the body
+    with it, so nothing is left unread and the answer always arrives."""
+    import socket
+
+    s = socket.create_connection(("127.0.0.1", deck.port), timeout=5)
+    try:
+        s.sendall((f"POST /api/config HTTP/1.1\r\nHost: 127.0.0.1:{deck.port}\r\nX-ND-Token: {deck.token}\r\n"
+                   f"Content-Type: application/json\r\nContent-Length: {length}\r\n\r\n").encode() + body)
+        return s.recv(4096).split(b"\r\n", 1)[0]
+    finally:
+        s.close()
+
+
 def test_api_caps_request_bodies(deck):
-    tok = deck.token
+    # v1.2.1 polish: deflaked -- a refused body's answer may be lost to a connection reset under load
+    # (_refused); the server's refusal is checked by the spy and by a one-write request instead.
     spy: ApiSpy = deck.api
     big = b'{"x": "' + b"a" * MAX_BODY_BYTES + b'"}'
-    st, data, _h = http_call(deck.port, "POST", "/api/config", raw=big, token=tok)
-    assert st == 413 and "too large" in data["error"]
+    data = _refused(deck, 413, raw=big)
+    assert data is None or "too large" in data["error"]
     exact = b"{}" + b" " * (MAX_BODY_BYTES - 2)
-    assert http_call(deck.port, "POST", "/api/config", raw=exact, token=tok)[0] == 200
-    assert http_call(deck.port, "POST", "/api/config", raw=b"{not json", token=tok)[0] == 400
-    st, data, _h = http_call(deck.port, "POST", "/api/config", token=tok,
+    assert http_call(deck.port, "POST", "/api/config", raw=exact, token=deck.token)[0] == 200
+    assert http_call(deck.port, "POST", "/api/config", raw=b"{not json", token=deck.token)[0] == 400
+    st, data, _h = http_call(deck.port, "POST", "/api/config", token=deck.token,
                              headers={"Transfer-Encoding": "chunked"})
     assert st == 411
-    st, data, _h = http_call(deck.port, "POST", "/api/config", raw=b"{}", token=tok, headers={"Content-Length": "-5"})
-    assert st == 400
+    _refused(deck, 400, raw=b"{}", headers={"Content-Length": "-5"})
+    assert _one_segment_status(deck, "-5", b"{}") == b"HTTP/1.0 400 Bad Request"
     assert len(spy.calls) == 1  # only the exactly-64-KB body got through
+    assert http_call(deck.port, "GET", "/healthz")[0] == 200  # and the deck still serves
 
 
 def test_api_needs_a_companion(deck):
@@ -428,8 +458,9 @@ def test_the_player_status_hook_hears_reports_with_the_song(deck):
     deck.on_player_status = lambda st, play, card: heard.append((st, play, card))
     deck.send({"cmd": "show", "dropId": "zone:1429", "label": "Elwynn Forest", "title": "T", "artist": "A"})
     deck.send({"cmd": "play", "playId": "p1", "source": "youtube", "videoId": "abcdefghijk", "dropId": "zone:1429"})
+    key = {"X-ND-Key": deck.player_key}  # v1.2.1 polish: every player report carries the launch key
     st, _d, _h = http_call(deck.port, "POST", "/status", {"state": "error", "playId": "p1", "code": 150,
-                                                          "detail": "youtube 150"}, token=deck.token)
+                                                          "detail": "youtube 150"}, token=deck.token, headers=key)
     assert st == 204
     assert wait_for(lambda: len(heard) == 1)
     status, play, card = heard[0]
@@ -441,7 +472,8 @@ def test_the_player_status_hook_hears_reports_with_the_song(deck):
         raise RuntimeError("listener bug")
 
     deck.on_player_status = broken
-    st, _d, _h = http_call(deck.port, "POST", "/status", {"state": "playing", "playId": "zz"}, token=deck.token)
+    st, _d, _h = http_call(deck.port, "POST", "/status", {"state": "playing", "playId": "zz"}, token=deck.token,
+                           headers=key)
     assert st == 204 and deck.last_status["playId"] == "zz"
 
 

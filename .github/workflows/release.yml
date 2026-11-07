@@ -43,7 +43,7 @@ concurrency:
 
 env:
   # The Python that NeedleDropper.exe is built with (and bundles).
-  PYTHON_VERSION: "3.12"
+  PYTHON_VERSION: "3.14"
 
 jobs:
   prepare:
@@ -314,7 +314,7 @@ jobs:
               printf '> **%s build for testers**, not the stable release. How to install it, test it and report what you find: [docs/BETA-TESTING.md](%s/blob/%s/docs/BETA-TESTING.md)\n\n' "${CHANNEL^}" "$repo_url" "$TAG"
             fi
             if [[ "$UPLOAD" == "true" ]]; then
-              printf 'The addon is also published to CurseForge and Wago (%s channel), so addon managers update it by themselves.\n\n' "$CHANNEL"
+              printf 'The addon-site upload runs after this release (%s channel). While CurseForge reviews the project or file, install the addon zip below.\n\n' "$CHANNEL"
             fi
             echo "## Downloads"
             echo

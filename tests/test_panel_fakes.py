@@ -151,7 +151,7 @@ class FakePlayer:
                 if cmd.get("cmd") == "play" and self.answer:
                     http_call(self.deck.port, "POST", "/status", {"state": self.answer, "playId": cmd["playId"],
                                                                    "detail": cmd.get("source", "")},
-                              token=self.deck.token)
+                              token=self.deck.token, headers={"X-ND-Key": key})  # v1.2.1 polish: every player report carries the launch key
         except Exception:
             pass
 

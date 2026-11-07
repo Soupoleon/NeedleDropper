@@ -190,7 +190,7 @@ end
 
 function W.FormatDate(t)
   if type(t) ~= "number" or t <= 0 or not date then return "?" end
-  return date("%Y-%m-%d %H:%M", t)
+  return date("%Y-%m-%d %H:%M", t) or "?"  -- nil for a time the client's calendar can't show (INGAME-7)
 end
 
 local LANGUAGES = {

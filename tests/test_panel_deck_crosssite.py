@@ -76,5 +76,6 @@ def test_same_origin_pages_and_tools_still_connect(deck):
         conn.close()
     assert request(deck, "GET", "/healthz", {"Sec-Fetch-Site": "cross-site"})[0] == 200  # single-instance probe
     assert request(deck, "POST", "/status", {"Sec-Fetch-Site": "same-origin", "X-ND-Token": deck.token,
+                                             "X-ND-Key": deck.player_key,  # v1.2.1 polish: every player report carries the launch key
                                              "Content-Type": "application/json"},
                    json.dumps({"state": "ready"}))[0] == 204

@@ -73,7 +73,8 @@ class World:
         # the hidden player page is up, in Chrome (the YouTube box can open; music.youtube.player = chrome)
         self.player = SSE(self.deck.port, "player", key=self.deck.player_key)  # v1.2.1 ON-1: the launch key
         assert wait_for(lambda: self.deck.page_open)
-        http_call(self.deck.port, "POST", "/status", {"state": "ready", "browser": "chrome"}, token=self.deck.token)
+        http_call(self.deck.port, "POST", "/status", {"state": "ready", "browser": "chrome"}, token=self.deck.token,
+                  headers={"X-ND-Key": self.deck.player_key})  # v1.2.1 polish: every player report carries the launch key
         self.app.push_game_data(flush=True)
         assert self.data()["appVersion"] == "1.2.1"
         # the game starts with the app's NeedleDropper_Companion\Data.lua loaded

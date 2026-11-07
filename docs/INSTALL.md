@@ -41,6 +41,10 @@ You do **not** need Python or any command line.
 
 ## 1. Install the addon
 
+**For 1.2.1 beta 1, use the [GitHub release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.1)
+for both the addon and the app.** CurseForge is reviewing the project; it may not appear in addon
+managers yet. No GitHub account or invitation is needed. See also [Beta testing](BETA-TESTING.md).
+
 ### With an addon manager
 
 If your addon manager supports World of Warcraft: Forever, search for **NeedleDropper** and install
@@ -50,8 +54,8 @@ data addon in `NeedleDropper_Companion`; managers never touch either.
 
 ### From the addon zip
 
-1. Download `NeedleDropper-<version>-addon.zip` from the releases page (or from CurseForge, Wago or
-   WoWInterface).
+1. Close WoW and download `NeedleDropper-1.2.1-addon.zip` from
+   [Releases](https://github.com/Soupoleon/NeedleDropper/releases).
 2. Open your AddOns folder: `World of Warcraft\_forever_\Interface\AddOns`. If `Interface` or
    `AddOns` doesn't exist yet, create it.
 3. Double-click the zip to open it and drag the **NeedleDropper** folder into the AddOns folder.
@@ -88,7 +92,8 @@ back with the app running.
 
 ## 3. Optional: the NeedleDropper app
 
-1. Download **`NeedleDropper-<version>-win64.zip`** from the releases page. (The bare
+1. Download **`NeedleDropper-1.2.1-win64.zip`** from
+   [Releases](https://github.com/Soupoleon/NeedleDropper/releases). (The bare
    `NeedleDropper.exe` is there too; it is the same file.)
 2. Right-click the zip, choose **Extract All…**, and pick a permanent place such as
    `Documents\NeedleDropper`. Don't run the app from inside the zip or from a temporary folder: the
@@ -99,7 +104,9 @@ back with the app running.
 4. Double-click `NeedleDropper.exe`. Its **Connect** page opens in your browser
    ([next step](#4-the-connect-page)).
 
-**Start the app before the game the first time.** On its first run the app creates a small data
+**Start the app before the game the first time, and give it a moment on the desktop.** It never
+opens its player while WoW is in front. If the game is already open, return to the desktop to let
+the player start. On its first run the app also creates a small data
 addon, `NeedleDropper_Companion`, through which it tells the game whether it is connected. WoW only
 discovers new addon folders when it starts, so if the game was already running, restart it once (the
 Connect page's **World of Warcraft** card says *Restart World of Warcraft once* until you do).
@@ -128,7 +135,7 @@ firewall access; if Windows ever asks, you can cancel. It has four cards:
 | Card | What it does |
 |---|---|
 | **World of Warcraft** | Finds your game and shows which addon version is installed. If the addon is missing, it links to CurseForge and offers **Install addon** (close the game first). It doesn't offer to install when an addon manager looks after the addon |
-| **Spotify** | Optional, needs Premium and Google Chrome. Three short steps (open the Spotify developer dashboard, copy the redirect URI, paste your Client ID), then **Sign in**. Afterwards the card shows your account, whether it has Premium, its country, **Play on** (*NeedleDropper (this app)*: the app plays Spotify itself) and **Test Spotify**. You can do the same from the game instead ([Music services in game](#music-services-in-game)). Details: [Music services](PROVIDERS.md#spotify-premium) |
+| **Spotify** | Optional, needs Premium and Google Chrome. Create your own developer app with **Web API** and **Web Playback SDK**, set redirect URI `http://127.0.0.1:8321/callback`, paste its Client ID, then **Sign in**. Afterwards keep **Play on: NeedleDropper (this app)** (recommended) and use **Test Spotify**. The card also shows the account details Spotify supplies. You can connect in game too ([Music services in game](#music-services-in-game)). Full steps: [Music services](PROVIDERS.md#spotify-premium) |
 | **YouTube** | Nothing to set up. A small player window shows on top of the game, in the top-right corner (or the corner you choose in game), while a YouTube song plays, and never takes the focus from the game ([why it must stay visible](PROVIDERS.md#the-player-window-must-stay-visible)). **Test YouTube** plays a test song there; **Sign in to YouTube** is optional (YouTube Premium, no ads) |
 | **Check the link** | *In WoW type /needle test*. A tick appears when the app sees the game, normally within 2 seconds ([next step](#5-check-the-link)) |
 
@@ -144,7 +151,9 @@ World of Warcraft: Forever is running; only then does it start reading the game'
 notification only when something matters (linked to the game, a test signal, the result of a
 request you sent from the game, a Spotify sign-in that expired or needs renewing, Spotify not
 starting songs, a song it couldn't find or play, a new version). When its update check is on, it
-looks for a new version once a day; it never installs anything by itself.
+looks for a new stable version once a day; it never installs anything by itself. It does not report
+pre-releases: check [Releases](https://github.com/Soupoleon/NeedleDropper/releases) or the owner's
+message for the next beta.
 
 The app also works from a command prompt for a few tools (`NeedleDropper.exe --help` lists them):
 it prints into the window you started it from. Windows doesn't wait for it, so in `cmd` type
@@ -175,7 +184,7 @@ Everything the Connect page does for Spotify and YouTube can also be done in the
 | **Play music with** | *Spotify, then YouTube* (the default), *YouTube, then Spotify*, *Spotify only*, *YouTube only* or *Neither* ([more](PROVIDERS.md#which-service-plays-a-drop)) |
 | **YouTube box position** | The corner of the YouTube player box |
 | **Fade songs in and out**, **Resume my Spotify music afterwards** | Fades, and your own Spotify music coming back after a drop |
-| **Test Spotify**, **Test YouTube** | 15 seconds of Toto's *Africa*, played by the app |
+| **Test Spotify**, **Test YouTube** | 15 seconds of Toto's *Africa*, using only the named service. Test Spotify never tries YouTube on failure |
 | **Refresh status** | Reloads the interface, so the rows show the app's latest report |
 
 The **Music services** dialog (`/needle music`, or the drum button in the NeedleDropper window's title
@@ -218,10 +227,10 @@ name into a drop's **In-game file** field. Details: [In-game audio files](PROVID
   app to 1.2.1 to play Spotify and YouTube songs*; with an old addon the Connect page's World of
   Warcraft card says *Addon too old*. Update the addon, quit the app (tray icon → **Quit**), replace
   `NeedleDropper.exe` and start it again ([Updating](#updating)).
-- **Close the old player window.** NeedleDropper 1.2.0 leaves its player window (a small Chrome or
-  Edge window titled *NeedleDropper*) open when it quits. Close it once after quitting 1.2.0, before
-  you start 1.2.1. (1.2.1 closes its own player when it quits, and a player window left over from an
-  earlier start closes itself.)
+- **Quit 1.2.0 first, then close its old player window.** Its small Chrome or Edge window is titled
+  *NeedleDropper*. Closing the window before quitting the old app makes it reopen. Start the new
+  app from the desktop. Version 1.2.1 checks for an occupied player profile before launching, so
+  a leftover browser cannot silently take over the new player.
 - **Sign in to Spotify again, once.** The app now plays Spotify songs itself, and Spotify asks for two
   more permissions for that. Until you sign in again, Spotify songs play on YouTube, and the Connect
   page (**Sign in again** on the Spotify card), one notification and the game's Music services rows

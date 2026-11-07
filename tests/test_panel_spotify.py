@@ -83,7 +83,9 @@ def test_start_login_connects_without_blocking_and_the_running_provider_picks_it
     assert snap["state"] == "waiting" and snap["authorizeUrl"] == session.authorize_url
     assert "verifier" not in json.dumps(snap).lower()
     status, page = approve(session.authorize_url)
-    assert status == 200 and "control panel" in page and "terminal" not in page
+    # v1.2.1 review ON-7: the app's sign-in page points to the game's Refresh status and the Connect page
+    # (the v1.1 control panel is gone)
+    assert status == 200 and "Refresh status" in page and "Connect page" in page and "terminal" not in page
     assert session.wait(5) == "connected"
     assert session.account == "Thrall" and "Thrall" in session.message and session.warning is None
     form = fake.find("POST", "/api/token")[0].form
@@ -170,7 +172,8 @@ def test_provider_status_dict_and_reset(tmp_path):
                   "missingScopes": [], "scopeMessage": None, "saveError": None,
                   "stuck": False,                    # the session health verdict (SPOT-NO-SESSION-HEALTH)
                   # 1.2.1 (D17): the mode, the detailed state, the in-app player (none in connect mode)
-                  "mode": "connect", "state": "connected", "warning": None, "relogin": False, "player": None}
+                  "mode": "connect", "state": "connected", "warning": None, "relogin": False, "player": None,
+                  "problem": None}  # v1.2.1 review ON-9: the no-player cause (None unless state no-player)
     assert "AT1" not in json.dumps(st) and "RT1" not in json.dumps(st)
     sp._mark_unavailable(PREMIUM_MESSAGE)
     assert sp.status_dict()["badge"] == "premium" and not sp.available()
@@ -394,6 +397,6 @@ def test_the_housekeeping_reconnects_an_in_app_player_that_never_got_ready(tmp_p
         assert not built[-1].available() and page.ops()[0] == "connect"
         ns.app._next_spotify_watch = 0.0
         ns.app._watch_spotify(ns.app._clock())
-        assert page.ops().count("reconnect") == 1
+        assert page.ops().count("reload") == 1
     finally:
         ns.close()

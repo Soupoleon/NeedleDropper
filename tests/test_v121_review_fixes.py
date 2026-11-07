@@ -260,6 +260,7 @@ def test_another_site_cannot_open_a_second_player_page(deck):
         popup = SSE(deck.port, "player")  # no key: retired, never a player
         assert popup.next_data() == {"cmd": "retire"}
         popup.close()
+        deck.spotify.verify_device("dev-hidden", deck.spotify.ready_seq, listed=True)
         assert deck.player_count == 1 and deck.spotify.wait_ready(0) == "dev-hidden"
     finally:
         hidden.close()
@@ -592,6 +593,7 @@ def fast_app(monkeypatch):
     from needledropper.providers import spotify as sp
 
     monkeypatch.setattr(sp, "APP_READY_WAIT_S", 0.3)
+    monkeypatch.setattr(sp, "APP_REGISTRATION_WAIT_S", 0.3)
     monkeypatch.setattr(sp, "APP_START_TIMEOUT_S", 0.5)
     monkeypatch.setattr(sp, "APP_API_CHECK_S", 0.2)
     monkeypatch.setattr(sp, "APP_STOP_SLACK_S", 0.3)
@@ -680,7 +682,7 @@ def test_a_short_not_ready_blip_is_not_no_player_and_never_reconnects_the_playin
     time.sleep(0.6)  # offline for longer than the grace: now it is no-player, but the song is not cut
     assert rig.provider.music_state() == "no-player"
     rig.provider.sync_sdk()
-    assert "reconnect" not in rig.page.ops()[len(before):]
+    assert "reload" not in rig.page.ops()[len(before):]
     rig.provider.stop(h, fade_out_ms=0)
 
 
@@ -702,7 +704,7 @@ def test_an_sdk_that_never_gets_ready_stays_no_player_instead_of_flapping(fast_a
         time.sleep(0.05)
     late = [ok for t, ok in samples if t > 0.4]
     assert late and not any(late)  # after the grace: no-player, whatever the re-checks do
-    assert rig.page.ops().count("reconnect") >= 2  # it is still re-checked
+    assert rig.page.ops().count("reload") >= 2  # it is still re-checked
     rig2 = make_app_rig(tmp_path / "app2", page=PageDeck(ready=False))
     rig2.page.report("connect", ok=False)
     assert rig2.provider.music_state() == "no-player"
@@ -853,6 +855,8 @@ def test_sdk_reports_need_the_launch_key_too(deck):
     assert _http(deck, "POST", "/status", hdrs, body)[0] == 401
     assert deck.spotify.wait_ready(0) is None
     assert _http(deck, "POST", "/status", {**hdrs, "X-ND-Key": deck.player_key}, body)[0] == 204
+    assert deck.spotify.wait_ready(0) is None
+    deck.spotify.verify_device("dev-forged", deck.spotify.ready_seq, listed=True)
     assert deck.spotify.wait_ready(0) == "dev-forged"
     js = (server.STATIC_DIR / "player.js").read_text(encoding="utf-8")
     assert '"X-ND-Token": TOKEN, "X-ND-Key": KEY' in js

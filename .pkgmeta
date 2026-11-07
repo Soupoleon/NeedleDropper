@@ -22,6 +22,7 @@ move-folders:
   NeedleDropper/addon/NeedleDropper: NeedleDropper
 
 ignore:
+  - handoff
   - addon/NeedleDropper_Local
   - assets
   - build
