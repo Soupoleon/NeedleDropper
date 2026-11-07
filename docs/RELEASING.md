@@ -39,6 +39,11 @@ The **BigWigs packager** GitHub Action (`BigWigsMods/packager@v2`) does the foll
 
 The same workflow builds `NeedleDropper.exe` with `tools/build_release.ps1` and attaches it to the GitHub release.
 
+Beta.1 uses the addon's English fallback on every client language. Both packager calls pass `-l`
+to skip optional CurseForge localization exports, which currently reject project access. File
+uploads remain enabled. When translations and localization access are ready, remove `-l` from
+both calls in `release.yml`.
+
 What it needs, once:
 
 1. **A public GitHub repo**, so testers and addon-site reviewers can download the app and source

@@ -386,18 +386,20 @@ jobs:
 
       # BigWigs packager: https://github.com/BigWigsMods/packager (README "Usage", and release.sh).
       #   -d    skip uploading (this first run only builds .release/NeedleDropper-<tag>.zip)
+      #   -l    skip optional CurseForge localization exports for this English-fallback beta.
+      #         The new project's API rejects localization access; Locale.lua still supplies
+      #         every English string. Remove -l from both calls when translations are ready.
       #   -w 0  unset the WoWInterface id: WoWInterface lists no WoW: Forever versions, and for a
       #         Forever-only addon release.sh's upload_wowinterface skips the "forever" game type,
       #         finds no game version and returns 1, which fails the run after the other uploads.
       #         Remove "-w 0" (both steps) once WoWInterface and a newer packager support Forever.
-      # The CurseForge token is passed here too: with a project id it fills in Locale.lua's
-      # @localization@ lines from CurseForge's localization tool. Without one they stay comments.
+      # -l leaves Locale.lua's @localization@ lines as comments and does not disable uploads.
       # Never give the packager GH_API_TOKEN, GITHUB_API_TOKEN or GITHUB_OAUTH: it would then make
       # a GitHub release of its own, next to the one the github job made.
       - name: Package the addon (no upload yet)
         uses: BigWigsMods/packager@01e8631a69c69d7654c788d152630d5fed9e3812 # v2.7.0
         with:
-          args: -d -w 0
+          args: -d -l -w 0
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_KEY }}
 
@@ -431,7 +433,7 @@ jobs:
         if: needs.prepare.outputs.upload == 'true'
         uses: BigWigsMods/packager@01e8631a69c69d7654c788d152630d5fed9e3812 # v2.7.0
         with:
-          args: -w 0
+          args: -l -w 0
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_KEY }}
           WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
