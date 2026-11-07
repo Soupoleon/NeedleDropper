@@ -105,7 +105,8 @@ flowchart LR
   with* (Spotify first, YouTube first, only one of them, or neither) and the YouTube box's corner, and
   has **Test Spotify** and **Test YouTube** buttons.
 - **A tiny app**: a one-time Connect page, then just a tray icon that starts with Windows and stays
-  quiet. Spotify songs play inside it (Google Chrome needed), so no Spotify window ever comes up.
+  quiet. Its own Spotify player needs Google Chrome and shows no Spotify window; you can choose
+  the separate Spotify desktop app instead.
 - **Private and read-only**: nothing leaves your PC except what Spotify and YouTube need to play the
   music, and an optional daily update check that is off unless you set it up
   ([privacy](docs/PRIVACY.md), [policies](docs/POLICY.md)).
@@ -122,8 +123,10 @@ flowchart LR
    If Windows says *"Windows protected your PC"*, click **More info → Run anyway**
    ([why](docs/INSTALL.md#windows-protected-your-pc)).
    For Spotify, create [your own developer app](docs/PROVIDERS.md#step-1-create-your-developer-app),
-   then paste its Client ID on the **Connect** page and sign in (Premium and Google Chrome needed).
-   Keep **Play on: NeedleDropper (this app)** to play on your gaming PC. To use the separate Spotify
+   then paste its Client ID on the **Connect** page and sign in. Both player choices need Premium
+   and your developer app. **NeedleDropper (this app)** also needs Google Chrome; desktop mode uses
+   the installed Spotify app instead. Keep **Play on: NeedleDropper (this app)** to use its own
+   player on your gaming PC. To use the separate Spotify
    desktop app instead, open Spotify, click **Refresh** beside **Play on**, and select **Spotify
    desktop app — your PC's name**. Select NeedleDropper again to switch back.
    **YouTube** needs no setup. **Start the app before WoW and give it a moment on the desktop:**

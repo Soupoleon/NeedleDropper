@@ -38,9 +38,9 @@ NeedleDropper has two parts:
 - No GitHub account or invitation is needed to download the beta. A GitHub account is needed only
   if you want to file an issue yourself.
 - Something to play the music, one of:
-  - **Spotify Premium** and **Google Chrome** (<https://www.google.com/chrome/>). The app plays
-    Spotify songs itself, in a hidden Chrome window; you don't need the Spotify desktop app. A free
-    Spotify account doesn't work: Spotify's player for apps is Premium only. Or
+  - **Spotify Premium** and **your own Spotify developer app**, plus either **Google Chrome**
+    (<https://www.google.com/chrome/>) for **NeedleDropper (this app)**, or the installed **Spotify
+    desktop app** for desktop mode. Desktop mode does not need Chrome. Or
   - nothing at all, for **YouTube**: Microsoft Edge, which comes with Windows, shows a small player
     (Chrome works too).
 - About 30 minutes for the setup and the quick test.
@@ -142,9 +142,10 @@ After that the app has no window: it waits as an icon in the notification area n
 
 ## 4. Pick your music
 
-Spotify needs **Google Chrome** on the PC (install it first if you don't have it). You can set
-Spotify up on the Connect page, as below, or in the game: type `/needle music`, paste the Client ID
-with Ctrl+V into the box of step 3 and click **Connect Spotify**.
+Spotify needs **Premium** and **your own developer app** in both modes. For **NeedleDropper (this
+app)**, install **Google Chrome**; to use desktop mode instead, install and open the **Spotify app**.
+You can set Spotify up on the Connect page, as below, or in the game: type `/needle music`, paste
+the Client ID with Ctrl+V into the box of step 3 and click **Connect Spotify**.
 
 ### Option A: Spotify, through your own developer app
 
@@ -180,8 +181,9 @@ already owns an app. YouTube can be tested independently while you resolve that.
 
 **Account not allowed**: check that you signed in with the account that owns your developer app;
 if needed, add that account under the app's **Settings → User Management**. **Premium needed**:
-check the Spotify account's subscription. **Install Google Chrome…**: install Chrome, or start
-it once and give it a minute to download its playback component, then restart NeedleDropper.
+check the Spotify account's subscription. **Install Google Chrome…** applies to NeedleDropper's own
+player: install Chrome, or start it once and give it a minute to download its playback component,
+then restart NeedleDropper. Alternatively, choose the installed Spotify desktop app under **Play on**.
 If the player says it **went offline**, quit NeedleDropper from its tray and restart it from
 the desktop, then try Test Spotify again. Please report a repeat failure.
 

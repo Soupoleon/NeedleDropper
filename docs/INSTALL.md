@@ -32,9 +32,10 @@ so to hear them you need the app.
 - For the app (optional):
   - **Windows 10 or 11** (64-bit), and
   - something to play the music, at least one of:
-    - **Spotify Premium** and **Google Chrome**. The app plays Spotify songs itself, in a hidden
-      player that runs in Chrome; the Spotify app doesn't have to be open. (Spotify only lets Premium
-      accounts play in apps like this one, and its player needs Chrome: Microsoft Edge can't run it.)
+    - **Spotify Premium** and **your own Spotify developer app**, for either Spotify mode.
+      **NeedleDropper (this app)** needs **Google Chrome** for its hidden player; Microsoft Edge
+      cannot run that player. Alternatively, select the installed **Spotify desktop app** under
+      **Play on**; this mode does not need Chrome.
     - **Microsoft Edge** (built into Windows) or **Google Chrome**, for YouTube.
 
 You do **not** need Python, developer tools, a repository clone or any command line. Public GitHub
@@ -161,7 +162,7 @@ firewall access; if Windows ever asks, you can cancel. It has four cards:
 | Card | What it does |
 |---|---|
 | **World of Warcraft** | Finds your game and shows which addon version is installed. If the addon is missing, it links to CurseForge and offers **Install addon** (close the game first). It doesn't offer to install when an addon manager looks after the addon |
-| **Spotify** | Optional, needs Premium and Google Chrome. Create your own developer app with **Web API** and **Web Playback SDK**, set redirect URI `http://127.0.0.1:8321/callback`, paste its Client ID, then **Sign in**. Afterwards keep **Play on: NeedleDropper (this app)** (recommended) and use **Test Spotify**. The card also shows the account details Spotify supplies. You can connect in game too ([Music services in game](#music-services-in-game)). Full steps: [Music services](PROVIDERS.md#spotify-premium) |
+| **Spotify** | Optional; both player modes need Premium and your own developer app. NeedleDropper's own player also needs Google Chrome; desktop mode uses the installed Spotify app instead. Create your developer app with **Web API** and **Web Playback SDK**, set redirect URI `http://127.0.0.1:8321/callback`, paste its Client ID, then **Sign in**. Choose **Play on: NeedleDropper (this app)** (recommended) or your Spotify desktop app and use **Test Spotify**. The card also shows the account details Spotify supplies. You can connect in game too ([Music services in game](#music-services-in-game)). Full steps: [Music services](PROVIDERS.md#spotify-premium) |
 | **YouTube** | Nothing to set up. A small player window shows on top of the game, in the top-right corner (or the corner you choose in game), while a YouTube song plays, and never takes the focus from the game ([why it must stay visible](PROVIDERS.md#the-player-window-must-stay-visible)). **Test YouTube** plays a test song there; **Sign in to YouTube** is optional (YouTube Premium, no ads) |
 | **Check the link** | *In WoW type /needle test*. A tick appears when the app sees the game, normally within 2 seconds ([next step](#5-check-the-link)) |
 
@@ -268,8 +269,9 @@ name into a drop's **In-game file** field. Details: [In-game audio files](PROVID
   more permissions for that. Until you sign in again, Spotify songs play on YouTube, and the Connect
   page (**Sign in again** on the Spotify card), one notification and the game's Music services rows
   ask you to. Your Client ID stays.
-- **Google Chrome** is needed for Spotify now. The Spotify app no longer has to be open (and no longer
-  plays the drops, unless you pick it under **Play on**).
+- **Google Chrome** is needed for **NeedleDropper (this app)**, its own Spotify player. To keep using
+  the installed Spotify desktop app without Chrome, select that app under **Play on** instead.
+  Both modes still need Premium and your Spotify developer app.
 - **Your Spotify developer app from 1.2.0:** open it in the dashboard → **Settings** → **Edit**, tick
   **Web Playback SDK** too and **Save** (the Redirect URI and the Client ID stay). A new app: tick both
   **Web API** and **Web Playback SDK** when you create it
