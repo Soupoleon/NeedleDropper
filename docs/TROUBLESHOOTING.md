@@ -246,6 +246,18 @@ Keep **Play on: NeedleDropper (this app)** for the recommended setup. **Test Spo
 Spotify alone; a failure never tries YouTube. **Test YouTube** checks YouTube alone.
 **Send a test signal** and `/needle test` only check the link and play nothing.
 
+To use the separate Spotify desktop app, open Spotify on your gaming PC, click **Refresh** beside
+**Play on**, and select **Spotify desktop app — your PC's name** (just the device name in beta.1).
+Choose **NeedleDropper (this app)** to switch back to NeedleDropper's own player.
+
+**Device-selection safeguards in beta.2 and newer:** selecting a specific
+Spotify device saves its ID. An offline or restricted device fails with recovery instructions;
+NeedleDropper does not substitute another Spotify device. Click **Refresh** beside **Play on** and
+select it again after opening Spotify there. IDs can change, and older name-only choices must
+match exactly one device. Entries with duplicate names have extra identifying details.
+**Automatic Spotify Connect device** can choose another PC or phone; beta.1 misleadingly labels
+this **The Spotify app on this PC (automatic)**. For your gaming PC, keep **NeedleDropper (this app)**.
+
 | Error or notification | Meaning | Fix |
 |---|---|---|
 | **403** (*Premium needed* on the Spotify card) | Spotify refused playback because of the subscription, or the developer-app owner no longer has Premium. New developer apps may not receive a plan in the profile response | Check that both the signed-in account and developer-app owner have Premium |
@@ -260,19 +272,23 @@ Spotify alone; a failure never tries YouTube. **Test YouTube** checks YouTube al
 | Notification: *Spotify didn't start*; in game *Spotify: a song didn't start in NeedleDropper's player* | Spotify accepted a song, but the player did not start it. Your needle drops use YouTube until recovery if they have a video and your settings allow it; service tests do not fall back | Quit NeedleDropper from its tray, restart it from the desktop and try **Test Spotify** again. Send the relevant `Spotify` lines from `needledropper.log` privately if the failure repeats |
 | *Spotify refused NeedleDropper's player even with a fresh sign-in* | Spotify's player rejected the sign-in twice | Sign in to Spotify again on the Connect page |
 | Notification asking you to restart the Spotify app | **Play on** is another device: Spotify accepted the song but did not start it | Pick **NeedleDropper (this app)** under **Play on**. If you want the separate Spotify app, restart that app and play and pause a song once |
-| **404**, **Device not found**, or the in-app player **went offline** | The device reported by the player is not reachable. NeedleDropper reloads the player page, checks the replacement against Spotify's device list and retries once | If it still fails, tray → **Quit**, start NeedleDropper again with WoW in the background, and **Test Spotify**. With another **Play on** device, open Spotify there, play and pause a song, then select it again |
+| **404**, **Device not found**, or the in-app player **went offline** | The device reported by the player is not reachable. NeedleDropper reloads the player page, checks the replacement against Spotify's device list and retries once | If it still fails, tray → **Quit**, start NeedleDropper again with WoW in the background, and **Test Spotify**. With another **Play on** device, open Spotify there, play and pause a song, click **Refresh**, then select it again |
 | **429** / rate limited | Too many requests in a short time, or Spotify's `QUOTA_EXCEEDED` | Wait a few minutes; NeedleDropper already waits when Spotify asks it to |
 | **INVALID_CLIENT: Invalid redirect URI** | The redirect URI in your developer app isn't exactly right | Set it to `http://127.0.0.1:8321/callback` (127.0.0.1, http, no `/` at the end) |
 | **INVALID_CLIENT: Invalid client** | Wrong Client ID, or the developer app was deleted | Copy it again from the [dashboard](https://developer.spotify.com/dashboard) |
 | Notification: Spotify sign-in expired | Spotify ended the login (password change, removed access, a long break) | Click the notification (or tray icon → **Open setup…**) and **Sign in** again on the Spotify card |
 | Notification: song not found on Spotify | The drop has no Spotify link, and searching for its artist and title found nothing close enough | Paste the song's Spotify link into the drop (for a built-in drop: **Change song here** first). Meanwhile it plays on YouTube if it has a YouTube link |
 | The wrong recording plays | The drop has no Spotify link and the search picked another version | Paste the exact song link. After the next login, the drop's form shows the match the app found (*Spotify match: …* with **Use this exact song**) so you can keep it with one click |
-| The song starts on the wrong device | **Play on** is another device, and a different one was active | Choose the device under **Play on**, or **NeedleDropper (this app)** |
+| The song starts on the wrong device | Automatic Spotify Connect selection can choose another PC or phone; beta.1 lacks the safeguards for a specific selection | Update to beta.2 or newer, then choose **NeedleDropper (this app)** for your gaming PC, or **Refresh** and select the intended Spotify device |
+| Spotify is playing, but the wrong speakers or headphones are used | Windows has a separate output setting for the app playing the audio | In **Windows Settings → System → Sound → Volume mixer**, set **Google Chrome** to the wanted **Output device** for in-app playback, or **Spotify** for the desktop Spotify app; also check mute and volume |
 | Your own Spotify music stops when a drop starts | One account plays on one device at a time: Spotify moves your playback to NeedleDropper's player | Normal. With *Resume my Spotify music afterwards* on (in game), it comes back afterwards. The Spotify Windows app may not restart by itself: press play there |
 | A **NeedleDropper** device in the Spotify app's device list | The app's own player, while the app runs | Nothing to do. Picking it plays your own music through the app |
 
 If Spotify can't play a drop, the app falls back to the drop's YouTube video, if it has one (and
 *Play music with* allows YouTube).
+
+**Play on** selects a Spotify player. Speakers and headphones on that PC are selected through
+Windows; see [Microsoft's app-audio instructions](https://support.microsoft.com/en-au/windows/hardware/audio/fix-app-audio-not-working-while-system-sounds-work-in-windows).
 
 ## YouTube
 

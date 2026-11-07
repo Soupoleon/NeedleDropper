@@ -37,31 +37,44 @@ so to hear them you need the app.
       accounts play in apps like this one, and its player needs Chrome: Microsoft Edge can't run it.)
     - **Microsoft Edge** (built into Windows) or **Google Chrome**, for YouTube.
 
-You do **not** need Python or any command line.
+You do **not** need Python, developer tools, a repository clone or any command line. Public GitHub
+downloads need no GitHub account or invitation.
 
 ## 1. Install the addon
 
-**For 1.2.1 beta 1, use the [GitHub release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.1)
-for both the addon and the app.** CurseForge is reviewing the project; it may not appear in addon
-managers yet. No GitHub account or invitation is needed. See also [Beta testing](BETA-TESTING.md).
+**Install the addon from [CurseForge](https://www.curseforge.com/wow/addons/needledropper), then download
+the companion app from [GitHub's 1.2.1 beta 2 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2).**
+If the CurseForge file is awaiting moderation or is absent from your addon manager, use the
+GitHub-only route below. See also [Beta testing](BETA-TESTING.md).
+
+**Already have the 1.2.1 addon from CurseForge?** Keep it and go straight to
+[the companion app](#3-optional-the-needledropper-app). Beta.2 keeps the addon/app base version at 1.2.1.
 
 ### With an addon manager
 
-If your addon manager supports World of Warcraft: Forever, search for **NeedleDropper** and install
-it like any other addon; it also keeps it up to date. Managers only replace the `NeedleDropper`
+Close WoW. In CurseForge, select your **World of Warcraft: Forever** installation, search for
+**NeedleDropper**, and allow **Beta** files for this addon. Install the newest **1.2.1 Beta** file
+for WoW: Forever (or choose it from the project's **Files** tab). The manager keeps the addon up
+to date; it does not install `NeedleDropper.exe`. Managers only replace the `NeedleDropper`
 folder. Your own audio files live in a separate `NeedleDropper_Local` folder, and the app's small
 data addon in `NeedleDropper_Companion`; managers never touch either.
 
 ### From the addon zip
 
+This is the complete **GitHub-only alternative**: download both `NeedleDropper-1.2.1-addon.zip`
+and `NeedleDropper.exe` from [1.2.1 beta 2](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2).
+Install the addon below, then follow [step 3](#3-optional-the-needledropper-app) for the app.
+You do not need CurseForge, a repository clone, developer tools or a GitHub account.
+
 1. Close WoW and download `NeedleDropper-1.2.1-addon.zip` from
-   [Releases](https://github.com/Soupoleon/NeedleDropper/releases).
+   the [beta 2 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2).
 2. Open your AddOns folder: `World of Warcraft\_forever_\Interface\AddOns`. If `Interface` or
    `AddOns` doesn't exist yet, create it.
 3. Double-click the zip to open it and drag the **NeedleDropper** folder into the AddOns folder.
    You should end up with `...\AddOns\NeedleDropper\NeedleDropper.toc`, not
    `...\AddOns\NeedleDropper\NeedleDropper\...` or `...\AddOns\NeedleDropper-<version>-addon\...`.
-4. Start the game (or restart it: WoW only loads new addon files when it starts).
+4. For Spotify or YouTube, [start the companion](#3-optional-the-needledropper-app) before starting
+   WoW. Otherwise start the game now. WoW only loads new addon files when it starts.
 
 ### Check that it loads
 
@@ -92,17 +105,30 @@ back with the app running.
 
 ## 3. Optional: the NeedleDropper app
 
-1. Download **`NeedleDropper-1.2.1-win64.zip`** from
-   [Releases](https://github.com/Soupoleon/NeedleDropper/releases). (The bare
-   `NeedleDropper.exe` is there too; it is the same file.)
-2. Right-click the zip, choose **Extract All…**, and pick a permanent place such as
-   `Documents\NeedleDropper`. Don't run the app from inside the zip or from a temporary folder: the
-   Connect page warns you when it does, and **Start with Windows** can't be turned on from there.
+The companion always comes from GitHub, including when CurseForge manages your addon.
+
+1. Download **`NeedleDropper.exe`** from
+   [1.2.1 beta 2](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2).
+   `NeedleDropper-1.2.1-win64.zip` contains the same executable and a quick start.
+2. Put the executable somewhere permanent, such as `Documents\NeedleDropper`. If you chose the
+   zip, right-click it and choose **Extract All…** first. Don't run the app from inside the zip or
+   from a temporary folder: the Connect page warns you when it does, and **Start with Windows**
+   can't be turned on from there.
 3. *Optional, for the careful:* compare the file's fingerprint with `SHA256SUMS.txt` from the
    releases page. In PowerShell: `Get-FileHash .\NeedleDropper.exe` and compare the long code with
    the `NeedleDropper.exe` line (case doesn't matter).
 4. Double-click `NeedleDropper.exe`. Its **Connect** page opens in your browser
    ([next step](#4-the-connect-page)).
+
+The release has five assets. Choose one app download; you do not need all three forms of the app.
+
+| Asset | Use |
+|---|---|
+| `NeedleDropper-1.2.1-addon.zip` | Manual addon install; skip if CurseForge already installed 1.2.1 |
+| `NeedleDropper.exe` | Companion app on its own |
+| `NeedleDropper-1.2.1-win64.zip` | Same app with a quick start |
+| `NeedleDropper-1.2.1-win64-folder.zip` | Same app in a folder; keep its files together |
+| `SHA256SUMS.txt` | SHA-256 checksums for the four downloads above |
 
 **Start the app before the game the first time, and give it a moment on the desktop.** It never
 opens its player while WoW is in front. If the game is already open, return to the desktop to let
@@ -138,6 +164,13 @@ firewall access; if Windows ever asks, you can cancel. It has four cards:
 | **Spotify** | Optional, needs Premium and Google Chrome. Create your own developer app with **Web API** and **Web Playback SDK**, set redirect URI `http://127.0.0.1:8321/callback`, paste its Client ID, then **Sign in**. Afterwards keep **Play on: NeedleDropper (this app)** (recommended) and use **Test Spotify**. The card also shows the account details Spotify supplies. You can connect in game too ([Music services in game](#music-services-in-game)). Full steps: [Music services](PROVIDERS.md#spotify-premium) |
 | **YouTube** | Nothing to set up. A small player window shows on top of the game, in the top-right corner (or the corner you choose in game), while a YouTube song plays, and never takes the focus from the game ([why it must stay visible](PROVIDERS.md#the-player-window-must-stay-visible)). **Test YouTube** plays a test song there; **Sign in to YouTube** is optional (YouTube Premium, no ads) |
 | **Check the link** | *In WoW type /needle test*. A tick appears when the app sees the game, normally within 2 seconds ([next step](#5-check-the-link)) |
+
+**Choose where Spotify plays:** select **NeedleDropper (this app)** for its own player on your gaming
+PC. To use the separate Spotify desktop app, open Spotify on that PC, click **Refresh** beside
+**Play on**, and select **Spotify desktop app — your PC's name**. You can switch back at any time.
+**Automatic Spotify Connect device** can choose another PC or phone; select a specific device when
+you want to control where it plays. For speakers/headphones, use
+[Windows audio output settings](PROVIDERS.md#speakers-or-headphones-on-your-pc).
 
 At the bottom: **Start with Windows** (ticked by default) and **Done**.
 

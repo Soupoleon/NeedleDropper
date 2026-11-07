@@ -10,7 +10,7 @@ deep-merged over :data:`DEFAULT_CONFIG` on load and normalised by
 their defaults). Keys this version does not know are kept in the file.
 
 v1.2 keys (the Connect page changes only ``wowRoot``, ``setupComplete``,
-``startWithWindows``, ``spotify.clientId`` / ``deviceName`` / ``enabled`` and
+``startWithWindows``, ``spotify.clientId`` / ``device`` / ``deviceId`` / ``deviceName`` / ``enabled`` and
 ``youtube.enabled``; everything else is an advanced knob edited in this file):
 
 * ``startWithWindows`` -- the player's "Start with Windows" choice: ``null``
@@ -32,7 +32,9 @@ v1.2.1 keys:
   player, the Spotify Web Playback SDK in the hidden player window (the Connect device
   "NeedleDropper"; it needs Google Chrome and a sign-in from 1.2.1 or later), or
   ``"connect"`` to control another Spotify Connect device (the desktop app, a phone;
-  ``spotify.deviceName`` picks one), the 1.2.0 behaviour.
+  ``spotify.deviceId`` pins the chosen device; ``deviceName`` is its display name).
+  Older name-only selections require one exact matching name. An unavailable selection never
+  falls back to another device. Empty ID and name enable automatic Connect selection.
 * ``music`` -- the player's music choices, **set in game** (Options > AddOns > NeedleDropper >
   Music services; DESIGN-v1.2.1 3.2): the game sends them and the app writes them here, together
   with ``deck.playerCorner`` (the YouTube box position) and ``spotify.restorePrevious`` ("Resume
@@ -120,7 +122,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "packs": [str(DEFAULT_PACK)],
     "packsDisabled": [],
     "providers": ["spotify", "local", "youtube"],
-    "spotify": {"enabled": True, "clientId": "", "redirectPort": 8321, "device": "app", "deviceName": "", "fade": True,
+    "spotify": {"enabled": True, "clientId": "", "redirectPort": 8321, "device": "app", "deviceId": "", "deviceName": "", "fade": True,
                 "restorePrevious": True, "volume": None},
     "local": {"enabled": True, "mediaDir": "%APPDATA%\\NeedleDropper\\media"},
     "youtube": {"enabled": True},

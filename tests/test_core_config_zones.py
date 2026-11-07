@@ -18,7 +18,7 @@ def test_default_config_matches_spec():
         "packsDisabled": [],
         "providers": ["spotify", "local", "youtube"],
         # 1.2.1 (D6): "device" -- Spotify plays in the app's own player ("app") or on a Connect device
-        "spotify": {"enabled": True, "clientId": "", "redirectPort": 8321, "device": "app", "deviceName": "", "fade": True,
+        "spotify": {"enabled": True, "clientId": "", "redirectPort": 8321, "device": "app", "deviceId": "", "deviceName": "", "fade": True,
                     "restorePrevious": True, "volume": None},
         "local": {"enabled": True, "mediaDir": "%APPDATA%\\NeedleDropper\\media"},
         "youtube": {"enabled": True},

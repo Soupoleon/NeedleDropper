@@ -4,6 +4,27 @@ All notable changes to NeedleDropper (the addon and the companion app). The form
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1-beta.2] - 2026-11-06
+
+The addon and app keep the compatible 1.2.1 version. Update the companion app to get these fixes.
+
+### Fixed
+
+- A specific **Play on** choice is saved by Spotify device ID. If that device is offline or
+  restricted, playback fails with **Refresh** and reselect instructions instead of switching to
+  another Spotify device. Duplicate names are distinguished in the selector; older name-only
+  settings require one exact match. Refresh and reselect if Spotify changes a device's ID.
+
+### Changed
+
+- **Play on** makes the choice between **NeedleDropper (this app)** and the separate Spotify
+  desktop app clearer. Open Spotify, click **Refresh**, and select **Spotify desktop app — your
+  PC's name**; choose NeedleDropper again to switch back.
+- Renamed the automatic option to **Automatic Spotify Connect device**: it can choose another PC
+  or phone. **NeedleDropper (this app)** remains the recommended default for the gaming PC.
+- Explained speaker/headphone selection through Windows **Sound → Volume mixer**: choose the
+  output for **Google Chrome** during in-app Spotify playback, or **Spotify** for its desktop app.
+
 ## [1.2.1] - 2026-11-06
 
 Spotify now plays **inside the NeedleDropper app**: no Spotify window, and no Spotify app has to be

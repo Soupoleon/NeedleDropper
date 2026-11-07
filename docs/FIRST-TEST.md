@@ -10,7 +10,7 @@ the app playing, and taint. Do it once per client patch, and before every releas
 ## Before you start WoW
 
 For a downloaded beta, use the addon zip and app from the same
-[GitHub release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.1).
+[GitHub release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2).
 [BETA-TESTING.md](BETA-TESTING.md) covers a clean PC, including creating your own Spotify developer
 app (Premium, Google Chrome, redirect URI `http://127.0.0.1:8321/callback`, **Web API** and
 **Web Playback SDK**). The source-build commands below are for maintainers.

@@ -17,14 +17,17 @@ Two modes (``spotify.device``, D6):
   for the session and the engine plays YouTube. Stop fades out and pauses in the page; with
   ``restorePrevious`` the player's previous device and context resume. The stuck signature of the
   desktop app (:func:`looks_stuck`) never applies to the SDK device.
-* ``"connect"``: control another Connect device (the desktop app, a phone; ``deviceName``), the
+* ``"connect"``: control another Connect device (the desktop app, a phone; exact ``deviceId`` or
+  a unique exact ``deviceName``), the
   v1.2 flow below.
 
 Flow of one drop in connect mode::
 
     snapshot GET /v1/me/player            (204 = nothing playing)
-    pick a device GET /v1/me/player/devices  (deviceName > Computer > active > first)
-      (none? os.startfile("spotify:") and poll <= 10 s)
+    select from GET /v1/me/player/devices  (exact deviceId, else unique exact deviceName)
+      (explicit selection missing/restricted/ambiguous? fail; never choose another output)
+      (no explicit selection? automatic Computer > active > first non-restricted)
+      (automatic finds none? os.startfile("spotify:") and poll <= 10 s, only outside the game)
     [volume low]  PUT /v1/me/player/volume
     PUT /v1/me/player/play?device_id=..   {"uris": [uri], "position_ms": startMs}
     verify GET /v1/me/player item == uri  (retry once)
@@ -104,8 +107,8 @@ NOTICE_STUCK = "spotifyStuck"
 NOT_CONFIGURED_MESSAGE = ("Spotify is not set up: no spotify.clientId in the config. "
                           "Run 'needledropper setup'.")
 NOT_LOGGED_IN_MESSAGE = "Not logged in to Spotify. Run 'needledropper spotify-login'."
-NO_DEVICE_MESSAGE = ("No Spotify device is available. Open the Spotify app on this PC (signed in to the same "
-                     "account) and try again, or set spotify.deviceName to choose a device.")
+NO_DEVICE_MESSAGE = ("No Spotify device is available. Open the Spotify app on the device you want (signed in "
+                     "to the same account), then use Refresh beside Play on on the Connect page and select it.")
 #: D9: a sign-in from before in-app Spotify lacks ``streaming`` / ``user-read-email``.
 RELOGIN_MESSAGE = ("Sign in to Spotify again: NeedleDropper now plays Spotify in its own player, which needs two "
                    "more permissions (playback in the app, your e-mail address). Your Client ID stays.")
@@ -288,26 +291,25 @@ def largest_image(images: Any) -> Optional[str]:
     return best_url
 
 
-def pick_device(devices: Iterable[dict], preferred_name: str = "") -> Optional[dict]:
-    """Choose a device: configured name > type Computer > active > first non-restricted."""
+def pick_device(devices: Iterable[dict], preferred_name: str = "", preferred_id: str = "") -> Optional[dict]:
+    """An explicit id, else a unique exact name, else automatic Computer/active selection.
+    Explicit selections never fall back to another device. Ids are opaque and case-sensitive."""
     want = (preferred_name or "").strip().casefold()
+    want_id = (preferred_id or "").strip()
     usable = [d for d in devices or [] if isinstance(d, dict) and d.get("id") and not d.get("is_restricted")
               and (str(d.get("name") or "").casefold() != APP_DEVICE_NAME.casefold()
-                   or want == APP_DEVICE_NAME.casefold())]
+                   or want == APP_DEVICE_NAME.casefold() or (want_id and d.get("id") == want_id))]
     if not usable:
         return None
     def chosen(device: dict) -> dict:
         log.info("Spotify Connect: selected device %r (%.8s)", device.get("name"), str(device.get("id") or ""))
         return device
+    if want_id:
+        match = next((d for d in usable if d.get("id") == want_id), None)
+        return chosen(match) if match is not None else None
     if want:
-        for d in usable:
-            if str(d.get("name") or "").casefold() == want:
-                return chosen(d)
-        for d in usable:
-            if want in str(d.get("name") or "").casefold():
-                return chosen(d)
-        log.info("Spotify device %r not found (have: %s); choosing another one", preferred_name,
-                 ", ".join(str(d.get("name")) for d in usable))
+        matches = {str(d["id"]): d for d in usable if str(d.get("name") or "").strip().casefold() == want}
+        return chosen(next(iter(matches.values()))) if len(matches) == 1 else None
     computers = [d for d in usable if str(d.get("type") or "").casefold() == "computer"]
     if computers:
         return chosen(next((d for d in computers if d.get("is_active")), computers[0]))
@@ -631,6 +633,7 @@ class _Session:
     outcome: Optional[str] = None  # "end" | "user" | "error"
     stopped: bool = False
     parked: bool = False  # accepted but never started: SpotifyStuckError's cleanup handle (see _park)
+    pinned: bool = False  # explicitly selected Connect output; never follow playback to another device
     app: bool = False  # in-app Spotify (the player page's SDK); then play_id / sdk_seq apply
     play_id: str = ""
     sdk_seq: int = 0  # the SDK report seq when the play was sent (later reports belong to this song)
@@ -688,7 +691,7 @@ class SpotifyProvider(Provider):
     """Spotify Web API provider (Premium). Thread-safe for engine + fade threads.
 
     ``config_section`` is the ``spotify`` config dict (clientId, redirectPort, device
-    (``"app"`` | ``"connect"``), deviceName, fade, restorePrevious, volume). ``paths`` needs
+    (``"app"`` | ``"connect"``), deviceId, deviceName, fade, restorePrevious, volume). ``paths`` needs
     ``app_dir``. ``deck`` (the player server) carries the in-app player (``deck.spotify``); without
     one, app mode cannot play. ``passive``: an instance that only reports (the Connect page's
     stand-in while Spotify is switched off) never connects or disconnects the in-app player.
@@ -716,6 +719,7 @@ class SpotifyProvider(Provider):
         self._deck = deck
         self._passive = bool(passive)
         self._device_name = str(cfg.get("deviceName") or "").strip()
+        self._device_id = str(cfg.get("deviceId") or "").strip()
         self._fade = bool(cfg.get("fade", True))
         self._restore_previous = bool(cfg.get("restorePrevious", True))
         self._fixed_volume = _clamp_volume(cfg.get("volume"))
@@ -919,6 +923,14 @@ class SpotifyProvider(Provider):
         except Exception as exc:  # noqa: BLE001 - a probe
             log.debug("Spotify health read failed: %s", exc)
             return None
+        if self._selected_device():
+            try:
+                target = self._choose_device(self._get_devices())
+            except ProviderError:
+                return None
+            dev = state.get("device") if isinstance(state, dict) else None
+            if not isinstance(dev, dict) or dev.get("id") != target["id"]:
+                return None  # another output's health says nothing about the chosen player
         if looks_stuck(state):
             self._log_disallows(state)
             self._mark_stuck("its player allows neither play nor pause")
@@ -1424,11 +1436,35 @@ class SpotifyProvider(Provider):
 
     # ----------------------------------------------------------- devices --
 
+    def _selected_device(self) -> bool:
+        return bool(self._device_id or self._device_name)
+
+    def _device_error(self, devices: Optional[list[dict]] = None) -> ProviderError:
+        if not self._selected_device():
+            return ProviderError(NO_DEVICE_MESSAGE)
+        label = self._device_name or self._device_id[:8]
+        matches = {str(d.get("id")) for d in devices or [] if d.get("id") and not d.get("is_restricted")
+                   and str(d.get("name") or "").strip().casefold() == self._device_name.casefold()}
+        if not self._device_id and len(matches) > 1:
+            reason = f"More than one Spotify device is named {label!r}."
+        else:
+            reason = f"Selected Spotify device {label!r} is unavailable or cannot be controlled."
+        return ProviderError(reason + " Open Spotify on the device you want, then use Refresh beside Play on "
+                             "on the Connect page and select that device again.")
+
+    def _choose_device(self, devices: list[dict]) -> Optional[dict]:
+        device = pick_device(devices, self._device_name, self._device_id)
+        if device is None and self._selected_device():
+            raise self._device_error(devices)
+        return device
+
     def _remember_device(self, device: dict) -> None:
         with self._lock:
             self._device_cache = (dict(device), self._clock())
 
     def _cached_device(self) -> Optional[dict]:
+        if self._selected_device():
+            return None  # an explicit target must still be listed and controllable now
         with self._lock:
             if self._device_cache and self._clock() - self._device_cache[1] <= DEVICE_CACHE_TTL_S:
                 return dict(self._device_cache[0])
@@ -1444,6 +1480,8 @@ class SpotifyProvider(Provider):
         Never while the game is the foreground window: launching Spotify can bring its window in
         front of the game, and nothing may take the focus from the game (real-client findings #8
         and #13). The drop then plays on the next provider."""
+        if self._selected_device():
+            return None  # a local app launch cannot identify or revive a selected remote output
         try:
             in_front = bool(self._game_in_front())
         except Exception:  # noqa: BLE001 - never let the check break playback
@@ -1464,7 +1502,7 @@ class SpotifyProvider(Provider):
         while self._clock() < deadline:
             self._wait(WAKE_POLL_S)
             try:
-                device = pick_device(self._get_devices(), self._device_name)
+                device = self._choose_device(self._get_devices())
             except ProviderUnavailable:
                 raise
             except ProviderError as exc:
@@ -1476,8 +1514,8 @@ class SpotifyProvider(Provider):
         return None
 
     def _acquire_device(self) -> dict:
-        """Fresh device list -> pick; else a recently seen device; else wake Spotify."""
-        device = pick_device(self._get_devices(), self._device_name)
+        """Resolve a listed explicit target; automatic mode may also reuse its cache or wake Spotify."""
+        device = self._choose_device(self._get_devices())
         if device is None:
             self._join_background_wake()  # a wake started on ARM may be about to find one
             device = self._cached_device()
@@ -1669,7 +1707,7 @@ class SpotifyProvider(Provider):
             if self._mode == MODE_APP:
                 self._app_prepare()
                 return
-            device = pick_device(self._get_devices(), self._device_name)
+            device = self._choose_device(self._get_devices())
             if device is not None:
                 self._remember_device(device)
             elif self._cached_device() is None:
@@ -1678,6 +1716,8 @@ class SpotifyProvider(Provider):
             log.info("Spotify prewarm for %s failed: %s", drop.id, exc)
 
     def _start_background_wake(self) -> None:
+        if self._selected_device():
+            return
         with self._lock:
             if self._wake_thread is not None and self._wake_thread.is_alive():
                 return
@@ -1802,7 +1842,7 @@ class SpotifyProvider(Provider):
                         start_ms=start_ms, snapshot=snapshot, orig_volume=orig,
                         volume_device=str(device["id"]),
                         volume_ok=bool(device.get("supports_volume", True)) and orig is not None,
-                        last_pos=start_ms, last_pos_t=self._clock())
+                        last_pos=start_ms, last_pos_t=self._clock(), pinned=self._selected_device())
 
     def _plan_volume(self, s: _Session, device: dict, drop: Drop, fade_in_ms: int) -> tuple[Optional[int], bool]:
         """(target volume or None to leave it alone, whether to fade in)."""
@@ -1841,16 +1881,16 @@ class SpotifyProvider(Provider):
                 raise
             log.info("Spotify device %r not reachable (%s); looking again", device.get("name"), exc.reason or 404)
         self._forget_device()
-        retry = pick_device(self._get_devices(), self._device_name)
-        if retry is None or retry.get("id") == device.get("id"):
+        retry = self._choose_device(self._get_devices())
+        if not self._selected_device() and (retry is None or retry.get("id") == device.get("id")):
             retry = self._wake_device() or retry
         if retry is None:
-            raise ProviderError(NO_DEVICE_MESSAGE)
+            raise self._device_error()
         try:
             self._play_command(str(retry["id"]), uri, start_ms)
         except SpotifyApiError as exc:
             if exc.status == 404:
-                raise ProviderError(NO_DEVICE_MESSAGE) from exc
+                raise self._device_error() from exc
             raise
         self._remember_device(retry)
         return retry
@@ -1865,7 +1905,8 @@ class SpotifyProvider(Provider):
         again and ~2.5 s more (about 4 s in all); then the recovery the real client needed --
         ``PUT /me/player {device_ids: [ours], play: true}`` and play again -- and ~2.5 s more.
         Still nothing: :class:`SpotifyStuckError` (the engine plays the next provider). A player
-        state that cannot be read at all is assumed to be fine (None), as before.
+        state that cannot be read at all is assumed to be fine (None) only for automatic routing;
+        an explicit output must have its start confirmed.
 
         Fast path (real-client #10): when the first reads show the stuck signature
         (:func:`looks_stuck`: neither pausing nor resuming allowed), no play is sent again and no
@@ -1874,10 +1915,13 @@ class SpotifyProvider(Provider):
         start, or a :class:`SpotifyStuckError` that parks the song.
         """
         saw_state = False
+        saw_target = False
         last_state: Optional[dict] = None
         phases = ((VERIFY_DELAYS_S, None), (VERIFY_RESEND_DELAYS_S, "resend"), (RECOVER_DELAYS_S, "recover"))
         for delays, action in phases:
-            if action is not None and looks_stuck(last_state) and not _item_matches(last_state, uri):
+            last_device = last_state.get("device") if isinstance(last_state, dict) else None
+            if action is not None and isinstance(last_device, dict) and last_device.get("id") == s.device_id \
+                    and looks_stuck(last_state) and not _item_matches(last_state, uri):
                 break  # the stuck desktop app: leave it alone (below)
             if action == "resend":
                 log.info("Spotify has not started %s yet; sending play again", uri)
@@ -1912,6 +1956,13 @@ class SpotifyProvider(Provider):
                     continue
                 saw_state = True
                 last_state = state
+                dev = state.get("device") if isinstance(state, dict) else None
+                if not isinstance(dev, dict) or dev.get("id") != s.device_id:
+                    prev = None
+                    # GET /me/player can briefly lag a successful PUT, including when the previous
+                    # output was playing this same song. Give the chosen output the normal start budget.
+                    continue
+                saw_target = True
                 if not _item_matches(state, uri):
                     prev = None
                     continue
@@ -1921,8 +1972,18 @@ class SpotifyProvider(Provider):
                     return state
                 prev = progress
         if not saw_state:
+            if s.pinned:
+                raise ProviderError(f"Could not confirm Spotify playback on {s.device_name!r}. Open Spotify on "
+                                    "that device, then use Refresh beside Play on and select it again.")
             log.info("Could not confirm Spotify playback (player state unreadable); assuming it started")
             return None
+        last_device = last_state.get("device") if isinstance(last_state, dict) else None
+        if isinstance(last_device, dict) and last_device.get("id") and last_device["id"] != s.device_id:
+            raise ProviderError("Spotify is playing on another device, so playback on "
+                                f"{s.device_name!r} could not be confirmed. Use Refresh beside Play on "
+                                "on the Connect page and select the device you want.")
+        if not saw_target and self._selected_device():
+            raise self._device_error()
         self._log_disallows(last_state)
         if _item_matches(last_state, uri):
             raise SpotifyStuckError(f"{STUCK_MESSAGE} (it loaded {uri} but did not start playing it)")
@@ -1981,6 +2042,11 @@ class SpotifyProvider(Provider):
             state = self._get_player()
         except ProviderError as exc:
             log.info("Spotify: could not read playback state (%s)", exc)
+        dev = state.get("device") if isinstance(state, dict) else None
+        if s.pinned and isinstance(dev, dict) and dev.get("id") and dev["id"] != s.device_id:
+            log.info("Spotify: playback moved from the selected device; leaving your playback as it is")
+            self._restore_volume(s, state, only_if_untouched=True)
+            return
         if isinstance(state, dict) and state.get("is_playing"):
             if not _item_matches(state, s.uri):
                 log.info("Spotify: something else plays now; leaving it as it is")
@@ -2021,7 +2087,7 @@ class SpotifyProvider(Provider):
                 s.last_pos = int(state.get("progress_ms") or start)
                 s.last_playing = bool(state.get("is_playing", True))
                 dev = state.get("device")
-                if isinstance(dev, dict) and dev.get("id"):
+                if not s.pinned and isinstance(dev, dict) and dev.get("id"):
                     s.device_id = str(dev["id"])
             s.last_pos_t = now
             s.last_poll = now
@@ -2396,6 +2462,9 @@ class SpotifyProvider(Provider):
 
     def _assess(self, s: _Session, state: Optional[dict], now: float) -> str:
         """'playing' (ours, still going), 'end' (our end point / natural end / autoplay), 'user'."""
+        dev = state.get("device") if isinstance(state, dict) else None
+        if s.pinned and isinstance(dev, dict) and dev.get("id") and dev["id"] != s.device_id:
+            return "user"  # a chosen output never follows or pauses a move to another device
         near = s.near_natural_end(now)
         if not isinstance(state, dict) or not isinstance(state.get("item"), dict):
             return "end" if near else "user"
@@ -2505,7 +2574,9 @@ class SpotifyProvider(Provider):
         verdict = s.outcome
         if state_ok:
             fresh = self._assess(s, state, now)
-            if verdict != "end":
+            if s.pinned and fresh == "user":
+                verdict = "user"  # a device move wins even if the preceding poll reached our end
+            elif verdict != "end":
                 verdict = "user" if (verdict == "user" or fresh == "user") else fresh
         elif verdict in (None, "error"):
             verdict = "playing"
@@ -2751,7 +2822,7 @@ class SpotifyProvider(Provider):
                 problem = self.sdk_problem()
                 badge, message = "error", (problem[1] if problem else message)
         return {"badge": badge, "message": message, "configured": configured, "loggedIn": logged_in,
-                "deviceName": self._device_name, "missingScopes": missing,
+                "deviceName": self._device_name, "deviceId": self._device_id, "missingScopes": missing,
                 "scopeMessage": SCOPE_MESSAGE if missing else None, "saveError": self._store.save_error,
                 "stuck": self.stuck(), "mode": self._mode, "state": state, "warning": warning, "problem": cause,
                 "relogin": self._mode == MODE_APP and logged_in and self.needs_relogin(),

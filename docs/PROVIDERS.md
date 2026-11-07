@@ -162,21 +162,46 @@ since February 2026).
 
 ### Devices: Play on
 
-**Play on**, on the Connect page's Spotify card, picks what plays the songs:
+**Play on**, on the Connect page's Spotify card, chooses the Spotify player that plays the songs.
+For playback inside NeedleDropper on your gaming PC, choose **NeedleDropper (this app)**.
+To use the separate Spotify desktop app, open Spotify on that PC, click **Refresh** beside
+**Play on**, then select **Spotify desktop app — your PC's name**. Switch back by choosing
+**NeedleDropper (this app)** again.
 
-- **NeedleDropper (this app)**, the recommended default: the app's own hidden player. While the app runs, the
+**Use [1.2.1 beta 2](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2) or newer
+for these device-selection safeguards.** Beta.1 lists desktop devices without the new label.
+
+- **NeedleDropper (this app)**, the recommended default: the app's own hidden player on your gaming PC. While the app runs, the
   Spotify app on your phone or PC lists it among your devices as **NeedleDropper**. You don't have to
   do anything with it; if you pick it there yourself, your own music plays through the app.
-- **The Spotify app on this PC (automatic)**, or one of your other **Spotify Connect** devices: how
-  NeedleDropper 1.2.0 played Spotify, by remote-controlling that device. It plays on the device you
-  picked, otherwise the Spotify app on this PC, otherwise the device that is currently active or the
-  first available one. If no device is online, NeedleDropper starts the Spotify app on this PC (never
-  while the game is in front) and waits up to 10 seconds for it. This choice does not use the
-  hidden in-app player; automatic selection skips devices named **NeedleDropper**. Phones,
-  speakers and TVs that don't allow remote volume control start and stop without fading.
+- **Automatic Spotify Connect device** lets NeedleDropper choose an available Spotify device.
+  This can be another PC or a phone signed into your account. Published beta.1 calls this
+  **The Spotify app on this PC (automatic)**, but it is not limited to this PC. Automatic selection
+  skips the in-app **NeedleDropper** player.
+- **A specific Spotify Connect device** keeps playback on that selected device. Devices with the
+  same name have extra identifying details in the list. If the selected device is offline or Spotify
+  will not let apps control it, Spotify playback fails with instructions; NeedleDropper does not
+  switch to another Spotify device. Open Spotify on the intended device, click **Refresh** beside
+  **Play on**, and select it again. You can also choose **NeedleDropper (this app)** to play locally.
 
-In `config.json` the choice is `spotify.device` (`app` or `connect`) and, for a named device,
-`spotify.deviceName`.
+Spotify [device IDs can change](https://developer.spotify.com/documentation/web-api/reference/get-a-users-available-devices).
+If a saved choice is no longer found, use **Refresh** and select its current entry again.
+Older settings that saved only a name work only when exactly one available
+device has that exact name; otherwise, select it again. Phones, speakers and TVs that do not allow
+remote volume control start and stop without fading. Your normal service order still decides
+whether a failed Spotify drop may try YouTube; **Test Spotify** uses Spotify alone.
+
+In `config.json` the choice is `spotify.device` (`app` or `connect`). A specific device is saved as
+`spotify.deviceId`, with `spotify.deviceName` for its label; use the selector to change it.
+
+### Speakers or headphones on your PC
+
+Choose **NeedleDropper (this app)** to keep Spotify on your gaming PC. To choose which speakers or
+headphones it uses, open **Windows Settings → System → Sound → Volume mixer**. Under **Apps**, set
+the **Output device** for **Google Chrome** (NeedleDropper's in-app Spotify player), or **Spotify**
+if you chose the separate desktop Spotify app. Check that the same app is unmuted and its volume
+is turned up. **Play on** chooses a Spotify player; Windows controls that player's audio output.
+See [Microsoft's app-audio instructions](https://support.microsoft.com/en-au/windows/hardware/audio/fix-app-audio-not-working-while-system-sounds-work-in-windows).
 
 ### One account, one device at a time
 
@@ -232,11 +257,12 @@ include the device and the app's log in your report.
 | **Premium needed**, or a Premium-related error **403** | Spotify refused playback because of the account subscription; profile fields alone may not report the plan | Check that the signed-in account and developer-app owner have Premium |
 | **Account not allowed** | The account isn't on your app's User Management list | Add it under [User Management](#signing-in-with-a-different-spotify-account-user-management) |
 | Notification asking you to restart the Spotify app | Only when **Play on** is another device: Spotify accepted the song but did not start it | Pick **NeedleDropper (this app)** under **Play on**. To keep using the separate Spotify app, restart that app and play and pause a song once |
-| Error **404**, **Device not found**, or the player **went offline** | In app mode, the device reported by the player is not reachable. NeedleDropper reloads the page, checks the replacement against Spotify's device list and retries once. In Connect mode, the chosen device may be offline | In app mode, if recovery fails, quit NeedleDropper from its tray and restart it from the desktop, then Test Spotify. In Connect mode, open Spotify on the chosen device, play and pause a song, then select it again |
+| Error **404**, **Device not found**, or the player **went offline** | In app mode, the device reported by the player is not reachable. NeedleDropper reloads the page, checks the replacement against Spotify's device list and retries once. In Connect mode, the chosen device may be offline or its ID may have changed | In app mode, if recovery fails, quit NeedleDropper from its tray and restart it from the desktop, then Test Spotify. In Connect mode, open Spotify on the chosen device, play and pause a song, click **Refresh** beside **Play on**, then select it again |
 | Error **429** / "rate limited" | Too many requests in a short time; Spotify may also report `QUOTA_EXCEEDED` | Wait a few minutes and try again; NeedleDropper already waits when Spotify asks it to |
 | **Sign in** never finishes | The consent page wasn't completed in time (the sign-in link expires after a few minutes), or another program uses port 8321 | Click **Sign in** again and finish the consent page; close other apps that might use port 8321 |
 | Notification: Spotify sign-in expired | Spotify ended the login | Click the notification and **Sign in** again |
-| The song starts on the wrong device | **Play on** is another device, and a different one was active | Pick the device under **Play on**, or **NeedleDropper (this app)** |
+| The song starts on the wrong device | Automatic Spotify Connect selection can choose another PC or phone; beta.1 lacks the safeguards for a specific selection | Update to beta.2 or newer, then choose **NeedleDropper (this app)** for your gaming PC, or **Refresh** and select the intended Spotify device |
+| The song plays through the wrong speakers or headphones | Windows routes the playing app's audio to that output | Set Chrome's or Spotify's output in [Windows Volume mixer](#speakers-or-headphones-on-your-pc) |
 
 More in [Troubleshooting](TROUBLESHOOTING.md#spotify).
 

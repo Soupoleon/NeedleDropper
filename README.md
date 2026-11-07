@@ -112,18 +112,22 @@ flowchart LR
 
 ## Quick start
 
-1. **Download [1.2.1 beta 1](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.1)**
-   (or a newer beta from [Releases](https://github.com/Soupoleon/NeedleDropper/releases)). While
-   CurseForge approval is pending, get both parts here. Unzip `NeedleDropper-1.2.1-addon.zip`
-   into `World of Warcraft\_forever_\Interface\AddOns`
-   ([how](docs/INSTALL.md#1-install-the-addon)).
-2. **Optional, for Spotify and YouTube: install the app.** Download **`NeedleDropper.exe`** or unzip
-   `NeedleDropper-1.2.1-win64.zip` somewhere permanent and run it. If Windows says *"Windows protected
-   your PC"*, click **More info → Run anyway** ([why](docs/INSTALL.md#windows-protected-your-pc)).
+1. **Install the addon from [CurseForge](https://www.curseforge.com/wow/addons/needledropper).** Select your
+   **WoW: Forever** installation and the **Beta** channel, then install NeedleDropper **1.2.1**
+   with WoW closed. If the file is still awaiting moderation or absent from the manager, use the
+   GitHub-only option below. Already have the 1.2.1 addon from CurseForge? Keep it and get the app.
+2. **For Spotify and YouTube, get the companion from [1.2.1 beta 2 on GitHub](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2).**
+   Download **`NeedleDropper.exe`**, or unzip `NeedleDropper-1.2.1-win64.zip`, somewhere permanent
+   and run it. CurseForge supplies the addon; the companion download is on GitHub.
+   If Windows says *"Windows protected your PC"*, click **More info → Run anyway**
+   ([why](docs/INSTALL.md#windows-protected-your-pc)).
    For Spotify, create [your own developer app](docs/PROVIDERS.md#step-1-create-your-developer-app),
    then paste its Client ID on the **Connect** page and sign in (Premium and Google Chrome needed).
-   Keep **Play on: NeedleDropper (this app)**. **YouTube** needs no setup. **Start the app before
-   WoW and give it a moment on the desktop:** it never opens its player while the game is in front,
+   Keep **Play on: NeedleDropper (this app)** to play on your gaming PC. To use the separate Spotify
+   desktop app instead, open Spotify, click **Refresh** beside **Play on**, and select **Spotify
+   desktop app — your PC's name**. Select NeedleDropper again to switch back.
+   **YouTube** needs no setup. **Start the app before WoW and give it a moment on the desktop:**
+   it never opens its player while the game is in front,
    and the game discovers its small data addon at startup. In game, open *Options → AddOns →
    NeedleDropper → Music services* and use **Test Spotify**, then **Test YouTube**; each tests only
    its own service. `/needle test` and **Send a test signal** check the link and play nothing.
@@ -135,9 +139,14 @@ flowchart LR
 5. **Share.** On the Soundtracks tab, **Share...** gives you a code to paste into Discord; friends paste
    it into **Import...** ([share codes](docs/PACKS.md#share-codes)).
 
-Full walk-through: [Beta testing](docs/BETA-TESTING.md) or [Installation](docs/INSTALL.md).
-The release includes `SHA256SUMS.txt`. New betas are announced to testers directly; the app's
-update check reports stable releases only.
+**GitHub-only option:** from the same [beta 2 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2),
+download `NeedleDropper-1.2.1-addon.zip` and `NeedleDropper.exe`. With WoW closed, put the zip's
+`NeedleDropper` folder into `World of Warcraft\_forever_\Interface\AddOns`, then follow step 2 for
+the app. No repository clone, developer tools, GitHub account or invitation is needed.
+
+Full walk-through: [Beta testing](docs/BETA-TESTING.md) or [Installation](docs/INSTALL.md), including
+the [five release assets](docs/BETA-TESTING.md#1-download-the-beta) and `SHA256SUMS.txt` checksums.
+New betas are announced to testers directly; the app's update check reports stable releases only.
 
 ## In game
 

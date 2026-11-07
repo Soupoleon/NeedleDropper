@@ -1,13 +1,14 @@
 # Putting NeedleDropper on CurseForge
 
-NeedleDropper's project is created. The **Release** workflow will publish the GitHub pre-release
-and upload the first **Beta** file to CurseForge when `v1.2.1-beta.1` is pushed after green CI.
-Testers use [GitHub Releases](https://github.com/Soupoleon/NeedleDropper/releases) for both the addon
-and the app while CurseForge reviews the project. This is Phase 1 of [RELEASING.md](../RELEASING.md).
+NeedleDropper's project is created. The **Release** workflow publishes each GitHub pre-release
+and uploads its **Beta** addon to CurseForge after green CI. CurseForge accepted the first upload,
+`v1.2.1-beta.1`, in [run 42333788920](https://github.com/Soupoleon/NeedleDropper/actions/runs/42333788920).
+Get the addon from CurseForge and the companion from GitHub; [GitHub Releases](https://github.com/Soupoleon/NeedleDropper/releases)
+also provide both parts while a CurseForge project or file is awaiting review.
 
 ## Recorded status, 2026-11-06
 
-- **Project 1786392:** created, status **New**, unlisted pending first-file review.
+- **Project 1786392:** created; the first Beta upload was accepted. Public moderation approval has not been verified.
 - **Description:** LISTING.md's long description, using Markdown.
 - **Categories:** Audio & Video, Miscellaneous and Roleplay.
 - **License:** MIT. **Third-party distribution:** allowed.
@@ -17,13 +18,13 @@ and the app while CurseForge reviews the project. This is Phase 1 of [RELEASING.
 - **Automation:** `CF_API_KEY` is configured in GitHub Actions; the addon TOC contains
   `## X-Curse-Project-ID: 1786392` and `## Version: 1.2.1`.
 - **GitHub:** the repository is public for beta.1.
-- **Still pending:** publish and verify beta.1, and set the **Source** link.
+- **Still pending:** verify public CurseForge availability and set the **Source** link.
   Now that GitHub is public, open [CurseForge Authors](https://authors.curseforge.com) →
   NeedleDropper → **Source** → **GitHub**, set `https://github.com/Soupoleon/NeedleDropper`,
   then **Save**. CurseForge refused this link while the repository was private.
 
 The setup instructions below are reference material. Do not recreate the project, replace the
-owner's summary/logo, or manually upload beta.1 after the workflow already uploaded it.
+owner's summary/logo, or manually upload a file already accepted through the workflow.
 
 Values marked *(verify)* weren't confirmed on the live site yet. Check them on screen as you go.
 

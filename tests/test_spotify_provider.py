@@ -46,8 +46,8 @@ def test_pick_device_order():
     laptop = dict(PC, id="lap", name="Laptop", is_active=True)
     devs = [restricted_pc, PHONE, speaker, PC, laptop]
     assert pick_device(devs, "kitchen")["id"] == "spk"           # configured name (case-insensitive)
-    assert pick_device(devs, "kitch")["id"] == "spk"             # partial name
-    assert pick_device(devs, "nope")["id"] == "lap"              # Computer, active one first
+    assert pick_device(devs, "kitch") is None                    # names must match exactly
+    assert pick_device(devs, "nope") is None                     # an explicit target never falls back
     assert pick_device(devs)["id"] == "lap"
     assert pick_device([restricted_pc, PHONE, speaker])["id"] == "dev-phone"  # active
     assert pick_device([restricted_pc, speaker])["id"] == "spk"               # first non-restricted
@@ -248,6 +248,7 @@ def test_404_with_new_device_id_retries_without_launching_spotify(tmp_path):
     renamed = dict(PC, id="dev-pc-2")
     rig.http.set("GET", "/v1/me/player/devices", (200, {"devices": [PC]}), (200, {"devices": [renamed]}))
     rig.http.set("PUT", "/v1/me/player/play", err(404, message="Device not found"), (204, None))
+    rig.http.set("GET", "/v1/me/player", (204, None), (200, player_state(DROP_TRACK, 1200, device=renamed)))
     h = rig.provider.play(make_drop(), fade_in_ms=0)
     assert rig.started == []
     assert [c.query["device_id"] for c in rig.http.find("PUT", "/v1/me/player/play")] == ["dev-pc", "dev-pc-2"]

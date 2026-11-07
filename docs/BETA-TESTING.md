@@ -1,8 +1,11 @@
 # Testing the NeedleDropper beta
 
 This guide takes you from a clean Windows PC to your first needle drop, without any programming
-tools. Download both parts from the public GitHub release while CurseForge reviews the addon.
-Then follow the checks below and tell us what you found.
+tools. Install the **WoW: Forever addon from [CurseForge](https://www.curseforge.com/wow/addons/needledropper)**
+(Beta channel, version 1.2.1), then get **`NeedleDropper.exe` from
+[GitHub's beta 2 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2)**.
+Already have the 1.2.1 CurseForge addon? You only need the new companion. A complete GitHub-only
+route is below if you prefer it or the CurseForge file is still awaiting moderation.
 
 > **What is NeedleDropper?** The first time your character arrives somewhere new in World of Warcraft:
 > Forever, the zone music fades, one hand-picked song starts, and a quiet title card drifts in at the
@@ -44,29 +47,40 @@ NeedleDropper has two parts:
 
 ## 1. Download the beta
 
-1. Open [NeedleDropper 1.2.1 beta 1](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.1),
+1. Install the addon through [CurseForge](https://www.curseforge.com/wow/addons/needledropper), selecting
+   **WoW: Forever**, **Beta** files and version **1.2.1** ([step 2](#2-install-the-addon)).
+   If it is still awaiting moderation or does not appear, use the GitHub-only alternative below.
+2. Open [NeedleDropper 1.2.1 beta 2](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2),
    or the [Releases page](https://github.com/Soupoleon/NeedleDropper/releases) for a newer beta.
-2. Pick the newest release marked **Pre-release**, for example *NeedleDropper 1.2.1 beta 1*. Note its
-   tag, `v1.2.1-beta.1`: the bug report form asks for it.
-3. Under **Assets**, download:
+   Note the tag, `v1.2.1-beta.2`: the bug report form asks for it.
+3. Under **Assets**, download **`NeedleDropper.exe`** for Spotify and YouTube. The companion is
+   always downloaded from GitHub, even if CurseForge manages your addon. These are all five assets:
 
    | File | What it is |
    |---|---|
-   | `NeedleDropper-1.2.1-addon.zip` | The addon |
-   | `NeedleDropper.exe` or `NeedleDropper-1.2.1-win64.zip` | The app, for Spotify and YouTube (skip it if you only want title cards) |
+   | `NeedleDropper-1.2.1-addon.zip` | The addon for manual installation; skip if CurseForge already installed 1.2.1 |
+   | `NeedleDropper.exe` | The app, for Spotify and YouTube (skip it if you only want title cards) |
+   | `NeedleDropper-1.2.1-win64.zip` | The same app with a quick start |
+   | `NeedleDropper-1.2.1-win64-folder.zip` | The same app as a folder; keep its files together ([step 3](#3-start-the-app)) |
+   | `SHA256SUMS.txt` | SHA-256 checksums for the four downloads above |
 
-   The release also has `NeedleDropper-1.2.1-win64-folder.zip` (the same app as a folder, see
-   [step 3](#3-start-the-app)) and `SHA256SUMS.txt`: five assets in total.
+   Choose one form of the app; you do not need all three.
 4. *Optional, for the careful:* `SHA256SUMS.txt` lists each file's fingerprint. In PowerShell, run
-   `Get-FileHash .\NeedleDropper-1.2.1-win64.zip` in your Downloads folder and compare the long code
-   with the matching line (upper or lower case doesn't matter).
+   `Get-FileHash .\NeedleDropper.exe` in your Downloads folder and compare the long code with its
+   line (upper or lower case doesn't matter). For a zip download, check that zip's name and line instead.
+
+**GitHub-only alternative:** download `NeedleDropper-1.2.1-addon.zip` and `NeedleDropper.exe` from
+that same release. Install the zip as described below and start the app in step 3. This is the whole
+installation: no CurseForge, repository clone, developer tools, GitHub account or invitation needed.
 
 ## 2. Install the addon
 
-From the release's addon zip, as below. (Once the owner tells you NeedleDropper is live on
-CurseForge, you can install it from there instead, with the CurseForge app or from the project's
-**Files** tab; pick the newest **Beta** file for WoW: Forever. It is the same addon, but always use
-an addon and an app of the same version: a 1.2.1 app can't read a 1.2.0 addon's signals.)
+**CurseForge:** close WoW, select its **WoW: Forever** installation in the CurseForge app, find
+**NeedleDropper**, and enable **Beta** files for it. Install the newest **1.2.1 Beta** file, or choose
+it from the project's **Files** tab. If you already have the 1.2.1 addon, keep it and continue to
+step 3; beta.2 does not change the base addon version. A 1.2.1 app cannot read a 1.2.0 addon's signals.
+
+**GitHub-only/manual install:** if you downloaded the addon zip, follow these steps:
 
 1. **Close WoW completely.** The game only loads new addon files when it starts.
 2. Open the AddOns folder. Normally it is
@@ -149,9 +163,11 @@ Client ID or an invitation from them.
    **Sign in**. Approve the request on Spotify's page, which shows the app name you chose.
    Your password only goes to Spotify. You can also connect in game through
    *Options → AddOns → NeedleDropper → Music services* (`/needle music`).
-5. Keep **Play on** set to **NeedleDropper (this app)**, the recommended choice. No Spotify
-   desktop app needs to run. *The Spotify app on this PC* sends commands to a separate Spotify
-   app or Connect device; it does not use NeedleDropper's own player.
+5. Keep **Play on** set to **NeedleDropper (this app)**, the recommended choice for your gaming PC.
+   No Spotify desktop app needs to run. To use the separate desktop app instead, open Spotify on
+   your gaming PC, click **Refresh** beside **Play on**, and select **Spotify desktop app — your
+   PC's name**. Choose **NeedleDropper (this app)** again to switch back. **Automatic Spotify
+   Connect device** can select another PC or phone signed into your Spotify account.
 6. In game, open *Options → AddOns → NeedleDropper → Music services* and press **Test Spotify**,
    then **Test YouTube**. Each plays 15 seconds of Toto's *Africa* using only that service.
    **Test Spotify never falls back to YouTube.** Spotify shows no player window; YouTube shows
@@ -170,6 +186,19 @@ If the player says it **went offline**, quit NeedleDropper from its tray and res
 the desktop, then try Test Spotify again. Please report a repeat failure.
 
 The full walk-through: [Music services → Spotify Premium](PROVIDERS.md#spotify-premium).
+
+**Speakers or headphones:** open **Windows Settings → System → Sound → Volume mixer** and set
+**Google Chrome** to the wanted **Output device** for NeedleDropper's in-app Spotify player.
+If you selected the separate desktop Spotify app, set **Spotify** instead. Check its mute and
+volume too. [Microsoft's instructions](https://support.microsoft.com/en-au/windows/hardware/audio/fix-app-audio-not-working-while-system-sounds-work-in-windows)
+explain these Windows settings; **Play on** selects the Spotify player.
+
+**Check device selection in beta.2:** selecting a specific device saves its ID; duplicate names have extra identifying
+details. If it goes offline or Spotify restricts control, the app reports the problem without
+switching to another Spotify device. Open Spotify there, click **Refresh** beside **Play on**, and
+select it again. Do the same if Spotify changes its ID or an older name-only choice is ambiguous.
+Check this with **Test Spotify**: it should fail when your selected device is unavailable, even if
+another device is online.
 
 ### Option B: YouTube only
 
@@ -381,8 +410,10 @@ All the details: [Uninstalling](INSTALL.md#uninstalling).
 ## For the owner: getting a tester ready
 
 - [ ] **A release:** push a beta tag (`v1.2.1-beta.N`). The release workflow builds and publishes the
-      pre-release with its five files; check that they are there. The addon and the app must come
-      from the same release: a 1.2.0 app and a 1.2.1 addon can't read each other.
+      pre-release with its five files; check that they are there and match `SHA256SUMS.txt`.
+      Check CurseForge's Beta file for WoW: Forever, and give testers the GitHub addon zip if it
+      awaits moderation. Both parts need base version 1.2.1; an existing 1.2.1 CurseForge addon
+      works with the beta.2 app. A 1.2.0 app and a 1.2.1 addon cannot read each other.
 - [ ] **Spotify:** point the tester to step 4 to create their own developer app. Never send them
       the owner's Client ID, tokens or Client secret.
 - [ ] **Send** this guide and the link to the release.

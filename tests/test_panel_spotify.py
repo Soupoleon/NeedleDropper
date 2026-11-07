@@ -168,7 +168,7 @@ def test_provider_status_dict_and_reset(tmp_path):
     # connect mode: in app mode available() also needs the in-app player (test_spotify_inapp.py)
     sp = SpotifyProvider({"clientId": CID, "deviceName": "PC", "device": "connect"}, paths, http=FakeHTTP())
     st = sp.status_dict()
-    assert st == {"badge": "connected", "message": None, "configured": True, "loggedIn": True, "deviceName": "PC",
+    assert st == {"badge": "connected", "message": None, "configured": True, "loggedIn": True, "deviceName": "PC", "deviceId": "",
                   "missingScopes": [], "scopeMessage": None, "saveError": None,
                   "stuck": False,                    # the session health verdict (SPOT-NO-SESSION-HEALTH)
                   # 1.2.1 (D17): the mode, the detailed state, the in-app player (none in connect mode)
@@ -248,6 +248,23 @@ def test_connect_flow(rig):
     st, _ = rig.call("POST", "/api/config", {"spotify": {"deviceName": "GAMING-PC"}})
     assert st == 200 and rig.call("GET", "/api/spotify/devices")[1]["selected"] == "GAMING-PC"
     assert spotify(rig)["deviceName"] == "GAMING-PC"
+
+    # Two devices may use the same name: the selection must preserve the chosen ID.
+    rig.fake.set("GET", "/v1/me/player/devices", (200, {"devices": [
+        {"id": "pc", "name": "GAMING-PC", "type": "Computer"},
+        {"id": "other-pc", "name": "GAMING-PC", "type": "Computer"}]}))
+    st, _ = rig.call("POST", "/api/config", {"spotify": {
+        "device": "connect", "deviceName": "GAMING-PC", "deviceId": "other-pc"}})
+    assert st == 200
+    st, devices = rig.call("GET", "/api/spotify/devices")
+    assert st == 200 and devices["selectedId"] == "other-pc"
+    assert {d["id"] for d in devices["devices"]} == {"pc", "other-pc"}
+    assert spotify(rig)["deviceId"] == "other-pc"
+    # Offline selections remain saved so Refresh cannot silently choose a different device.
+    rig.fake.set("GET", "/v1/me/player/devices", (200, {"devices": []}))
+    st, devices = rig.call("GET", "/api/spotify/devices")
+    assert st == 200 and devices["devices"] == []
+    assert devices["selected"] == "GAMING-PC" and devices["selectedId"] == "other-pc"
 
     st, data = rig.call("POST", "/api/spotify/disconnect", {})
     assert st == 200 and not (rig.home / "spotify_token.bin").exists()

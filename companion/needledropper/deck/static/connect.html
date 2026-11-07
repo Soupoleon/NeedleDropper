@@ -93,7 +93,7 @@
             <p class="status" id="sp-status"><span class="glyph" aria-hidden="true"></span><span class="status-text">Checking&hellip;</span></p>
           </div>
           <div class="card-body">
-            <p class="note">Plays the real recording inside NeedleDropper, with no Spotify window (it needs Google Chrome). Spotify lets every player connect through a free developer app of their own: about two minutes, once.</p>
+            <p class="note">Play through NeedleDropper's own player, or choose a separate Spotify desktop app below. The built-in player needs Google Chrome. Connect through a free Spotify developer app of your own: a one-time setup.</p>
             <dl class="facts">
               <div class="fact">
                 <dt>Play music with</dt>
@@ -136,10 +136,11 @@
               <div class="field">
                 <label for="sp-device">Play on</label>
                 <div class="field-row">
-                  <select id="sp-device" aria-describedby="sp-device-hint"><option value="app">NeedleDropper (this app, recommended)</option></select>
+                  <select id="sp-device" aria-describedby="sp-device-status sp-device-hint"><option value="app">NeedleDropper (this app, recommended)</option></select>
                   <button type="button" class="btn small" id="sp-refresh">Refresh</button>
                 </div>
-                <p class="hint" id="sp-device-hint">NeedleDropper plays Spotify itself: no Spotify app has to be open.</p>
+                <p class="hint" id="sp-device-status" aria-live="polite">Selected: NeedleDropper on this PC.</p>
+                <p class="hint" id="sp-device-hint">Uses this PC's Windows audio output. Choose headphones or speakers in Windows Settings &gt; System &gt; Sound &gt; Volume mixer.</p>
               </div>
               <p class="actions">
                 <button type="button" class="btn small" id="sp-test" aria-describedby="sp-test-result">Test Spotify</button>

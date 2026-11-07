@@ -31,6 +31,13 @@
   let tokenRejected = false;
   let autostartTouched = false;
   let devicesLoaded = false;
+  let devicesLoading = false;
+  let deviceListRequest = 0;
+  let deviceSelectionRevision = 0;
+  let deviceRetryAt = 0;
+  let deviceSaving = false;
+  let deviceRows = [];
+  let deviceListError = "";
   let lastHeardCount = null;
   let lastSpotifyState = null;
   let wowFormOpenedByUser = false;
@@ -406,10 +413,14 @@
       setText($("sp-country"), sp.country || "");
       show($("sp-country-row"), !!sp.country);
       show($("sp-reconnect-row"), !!sp.reconnect);
-      if (!devicesLoaded) loadDevices(false);
-      syncDeviceSelect(sp.device || "app", sp.deviceName || "");
+      if (!devicesLoaded && !devicesLoading && !deviceSaving && Date.now() >= deviceRetryAt) loadDevices(false);
+      syncDeviceSelect(sp.device || "app", sp.deviceName || "", sp.deviceId || "");
     } else {
+      if (devicesLoaded || devicesLoading) deviceListRequest++;
       devicesLoaded = false;
+      deviceRows = [];
+      deviceListError = "";
+      deviceRetryAt = 0;
     }
     if (st === "connected" && lastSpotifyState && lastSpotifyState !== "connected") {
       toast(sp.account ? `Spotify connected: ${sp.account}.` : "Spotify connected.", "ok");
@@ -424,8 +435,11 @@
   }
 
   // "Play on": NeedleDropper itself (spotify.device "app", the default: the Spotify Web Playback SDK in
-  // its own player), or another Spotify Connect device ("connect", optionally named by deviceName).
-  function deviceValue(device, name) { return device === "connect" ? `connect:${name || ""}` : "app"; }
+  // its own player), or one exact Spotify Connect device. Names are labels, not identities.
+  function deviceValue(device, name, id) {
+    if (device !== "connect") return "app";
+    return id ? `connect-id:${id}` : (name ? `connect-name:${name}` : "connect:");
+  }
 
   function addOption(sel, value, text) {
     const o = document.createElement("option");
@@ -435,39 +449,131 @@
     return o;
   }
 
-  function syncDeviceSelect(device, name) {
+  function selectedDevice(device, name, id) {
+    if (device !== "connect") return null;
+    if (id) return deviceRows.find((d) => d.id === id) || null;
+    const matches = deviceRows.filter((d) => d.name.toLowerCase() === name.toLowerCase());
+    return name && matches.length === 1 ? matches[0] : null;
+  }
+
+  function deviceShortId(device) {
+    let length = Math.min(8, device.id.length);
+    while (length < device.id.length && deviceRows.some((other) => other.id !== device.id
+      && other.name.toLowerCase() === device.name.toLowerCase() && other.id.slice(0, length) === device.id.slice(0, length))) length++;
+    return device.id.slice(0, length);
+  }
+
+  function syncDeviceSelect(device, name, id, force) {
     const sel = $("sp-device");
-    const value = deviceValue(device, name);
-    // the hint follows the saved choice, also while the list still has the focus after a change
+    const value = deviceValue(device, name, id);
+    const row = selectedDevice(device, name, id);
+    const label = name || (row && row.name) || "Saved Spotify device";
+    const desktop = row && String(row.type || "").toLowerCase() === "computer";
+    const noDesktop = devicesLoaded && !deviceRows.some((d) => String(d.type || "").toLowerCase() === "computer" && d.id && !d.isRestricted);
     setText($("sp-device-hint"), value === "app"
-      ? "NeedleDropper plays Spotify itself: no Spotify app has to be open (it needs Google Chrome)."
-      : "Remote-controls a separate Spotify app. Open Spotify on that device, then Refresh. For playback here, choose NeedleDropper (this app, recommended).");
-    if (document.activeElement === sel) return;
+      ? "Uses Google Chrome and this PC's Windows audio output. For headphones or speakers, choose the output in Windows Settings > System > Sound > Volume mixer."
+        + (noDesktop ? " To use the separate Spotify desktop app instead, open Spotify on this PC, Refresh, then choose this PC's named entry." : "")
+      : (value === "connect:"
+        ? "Automatic can choose another computer, phone or speaker. To use the Spotify desktop app on this PC, open Spotify, Refresh, then choose this PC's named entry."
+        : (noDesktop ? "No Spotify desktop app was found. Open Spotify on this PC, Refresh, then choose this PC's named entry. "
+          : desktop ? "Keep Spotify open on the selected PC. To choose another PC, open Spotify there and Refresh. "
+          : "Open Spotify on the selected device, then Refresh. ")
+          + "If the selected device is unavailable, NeedleDropper will not send your song to a different Spotify device."));
+    let status = value === "app" ? "Selected: NeedleDropper on this PC. No separate Spotify app is needed."
+      : value === "connect:" ? "Selected: Automatic Spotify Connect device. A device is chosen when a song starts."
+      : `Selected: ${desktop ? "Spotify desktop app — " : ""}${label}. ` + (!devicesLoaded ? "Device availability has not been checked."
+        : !row ? (id ? "Unavailable. Open Spotify there and Refresh." : "Unavailable or the name is shared by several devices. Choose a device below.")
+        : row.isRestricted || !row.id ? "Spotify does not allow this device to be controlled. Choose another device."
+        : "Available at the last refresh." + (!id ? " Saved by name; choose its entry below to save this exact device." : ""));
+    if (deviceListError) status += ` Refresh failed: ${deviceListError}`;
+    setText($("sp-device-status"), status);
+    // A pending save owns the displayed value. A normal state poll must not revert that choice.
+    if (deviceSaving && !force) return;
     if (![...sel.options].some((o) => o.value === value)) {
-      addOption(sel, value, value === "connect:" ? "The Spotify app on this PC (automatic)" : `${name} (not open right now)`);
+      const option = addOption(sel, value, value === "app" ? "NeedleDropper (this app, recommended)"
+        : value === "connect:" ? "Automatic Spotify Connect device"
+        : `${label} (${devicesLoaded && !row ? "unavailable" : id ? "saved device" : "saved by name"})`);
+      option.disabled = value !== "app" && value !== "connect:" && (!row || row.isRestricted || !row.id);
     }
+    // Set even while focused: rebuilding options otherwise silently displays the first entry.
     sel.value = value;
   }
 
   async function loadDevices(announceIt) {
-    devicesLoaded = true;
+    if (devicesLoading || deviceSaving) return;
+    devicesLoading = true;
+    const request = ++deviceListRequest;
     const sel = $("sp-device");
-    const sp = (state && state.spotify) || {};
     try {
       const r = await api("/api/spotify/devices");
-      const devices = (r.devices || []).filter((d) => d.name !== APP_DEVICE);
+      if (request !== deviceListRequest) return; // a selection changed while this request was in flight
+      const previous = (state && state.spotify) || {};
+      const sp = { ...previous, device: r.device ?? previous.device ?? "app",
+        deviceName: r.selected ?? previous.deviceName ?? "", deviceId: r.selectedId ?? previous.deviceId ?? "" };
+      if (state) state.spotify = sp; // this endpoint also returns the current saved selection
+      deviceRows = (r.devices || []).filter((d) => String(d.name || "").toLowerCase() !== APP_DEVICE.toLowerCase())
+        .map((d) => ({ ...d, id: String(d.id || ""), name: String(d.name || "Unnamed device") }))
+        .sort((a, b) => Number(String(b.type || "").toLowerCase() === "computer")
+          - Number(String(a.type || "").toLowerCase() === "computer") || a.name.localeCompare(b.name));
+      devicesLoaded = true;
+      deviceListError = "";
+      deviceRetryAt = 0;
       sel.textContent = "";
       addOption(sel, "app", "NeedleDropper (this app, recommended)");
-      addOption(sel, "connect:", "The Spotify app on this PC (automatic)");
-      devices.forEach((d) => {
-        addOption(sel, `connect:${d.name}`,
-                  d.name + (d.type ? ` (${d.type.toLowerCase()})` : "") + (d.isActive ? ", playing now" : ""));
+      deviceRows.forEach((d, index) => {
+        const duplicate = deviceRows.filter((other) => other.name.toLowerCase() === d.name.toLowerCase()).length > 1;
+        const desktop = String(d.type || "").toLowerCase() === "computer";
+        const detail = [!desktop && d.type ? String(d.type).toLowerCase() : "", duplicate && d.id ? deviceShortId(d) : ""].filter(Boolean);
+        const unavailable = d.isRestricted || !d.id;
+        const option = addOption(sel, d.id ? `connect-id:${d.id}` : `unavailable:${index}`,
+          (desktop ? "Spotify desktop app — " : "") + d.name + (detail.length ? ` (${detail.join(", ")})` : "")
+            + (unavailable ? " — unavailable for control" : d.isActive ? " — active" : ""));
+        option.disabled = unavailable;
       });
-      syncDeviceSelect(r.device || sp.device || "app", r.selected || "");
-      if (announceIt) announce(`${devices.length} other Spotify devices found.`);
+      addOption(sel, "connect:", "Automatic Spotify Connect device");
+      syncDeviceSelect(sp.device || "app", sp.deviceName || "", sp.deviceId || "");
+      if (announceIt) announce(`${deviceRows.filter((d) => d.id && !d.isRestricted).length} available Spotify Connect devices found.`);
     } catch (e) {
-      syncDeviceSelect(sp.device || "app", sp.deviceName || "");
-      if (announceIt) setText($("sp-device-hint"), e.message);
+      if (request !== deviceListRequest) return;
+      devicesLoaded = false;
+      deviceRetryAt = Date.now() + 10000;
+      deviceListError = e.message;
+      const sp = (state && state.spotify) || {};
+      syncDeviceSelect(sp.device || "app", sp.deviceName || "", sp.deviceId || "");
+      if (announceIt) announce(`Could not refresh Spotify devices: ${e.message}`);
+    } finally {
+      devicesLoading = false;
+    }
+  }
+
+  async function saveDeviceSelection() {
+    const sel = $("sp-device");
+    if (deviceSaving) return;
+    const value = sel.value;
+    const id = value.startsWith("connect-id:") ? value.slice("connect-id:".length) : "";
+    const row = deviceRows.find((d) => d.id === id && id && !d.isRestricted);
+    if (value !== "app" && value !== "connect:" && !row) return;
+    const patch = value === "app" ? { spotify: { device: "app" } }
+      : { spotify: { device: "connect", deviceId: row ? row.id : "", deviceName: row ? row.name : "" } };
+    const message = value === "app" ? "Spotify songs will play in NeedleDropper on this PC."
+      : row ? `Spotify songs will play on ${row.name}.`
+      : "Spotify songs will use an available Spotify Connect device, which may be on another computer, phone or speaker.";
+    deviceSaving = true;
+    deviceSelectionRevision++;
+    deviceListRequest++; // an older refresh cannot overwrite this choice
+    sel.disabled = true;
+    sel.setAttribute("aria-busy", "true");
+    try {
+      await saveConfig(patch, message);
+    } catch (e) {
+      toast(e.message, "error");
+    } finally {
+      deviceSaving = false;
+      deviceSelectionRevision++;
+      sel.disabled = false;
+      sel.removeAttribute("aria-busy");
+      const sp = (state && state.spotify) || {};
+      syncDeviceSelect(sp.device || "app", sp.deviceName || "", sp.deviceId || "", true);
     }
   }
 
@@ -536,10 +642,13 @@
 
   // --------------------------------------------------------------- refresh --
   async function refresh() {
+    if (deviceSaving) { schedule(POLL_MS); return; }
     if (refreshing) { refreshAgain = true; return; }
+    const selectionRevision = deviceSelectionRevision;
     refreshing = true;
     try {
-      apply(await api("/api/state"));
+      const next = await api("/api/state");
+      if (!deviceSaving && selectionRevision === deviceSelectionRevision) apply(next);
     } catch (e) {
       if (e.network || e.status === 401) {
         offline = !!e.network;
@@ -548,8 +657,10 @@
       }
     } finally {
       refreshing = false;
-      if (refreshAgain) { refreshAgain = false; setTimeout(refresh, 60); }
-      schedule();
+      const again = refreshAgain;
+      refreshAgain = false;
+      if (again && !deviceSaving && selectionRevision === deviceSelectionRevision) setTimeout(refresh, 60);
+      schedule(deviceSaving ? POLL_MS : undefined);
     }
   }
 
@@ -678,16 +789,7 @@
   // inside this click so the browser lets it open Spotify's tab.
   $("sp-reconnect").addEventListener("click", () => { $("sp-form").requestSubmit(); });
   $("sp-refresh").addEventListener("click", () => busy($("sp-refresh"), "Looking…", () => loadDevices(true)));
-  $("sp-device").addEventListener("change", async () => {
-    const value = $("sp-device").value;
-    const name = value.startsWith("connect:") ? value.slice("connect:".length) : "";
-    const patch = value === "app" ? { spotify: { device: "app" } } : { spotify: { device: "connect", deviceName: name } };
-    const msg = value === "app" ? "Spotify songs will play in NeedleDropper itself."
-      : (name ? `Spotify songs will play on ${name}.` : "Spotify songs will play in the Spotify app on this PC.");
-    try {
-      await saveConfig(patch, msg);
-    } catch (e) { toast(e.message, "error"); }
-  });
+  $("sp-device").addEventListener("change", saveDeviceSelection);
   $("sp-test").addEventListener("click", () => sendRequest($("sp-test"), "/api/music/test", { service: "spotify" },
                                                            "test-spotify", "Testing…"));
   $("yt-test").addEventListener("click", () => sendRequest($("yt-test"), "/api/music/test", { service: "youtube" },

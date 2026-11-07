@@ -309,5 +309,5 @@ def test_changelog_has_an_entry_for_this_version():
 
     text = read("CHANGELOG")
     assert re.search(rf"^## \[{re.escape(__version__)}\] - \d{{4}}-\d{{2}}-\d{{2}}$", text, re.M), __version__
-    newest = re.search(r"^## \[([^\]]+)\]", text, re.M).group(1)
-    assert newest == __version__, "the newest CHANGELOG entry should be the current version"
+    newest = re.search(r"^## \[(\d+\.\d+\.\d+)\]", text, re.M).group(1)
+    assert newest == __version__, "the newest released CHANGELOG entry should be the current version"

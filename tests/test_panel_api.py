@@ -79,6 +79,9 @@ def test_the_companion_creates_the_data_addon_before_the_game_starts(shell):
     ({"updates": {"releasesUrl": "https://example.invalid"}}, "updates"),
     ({"spotify": {"redirectPort": 9000}}, "spotify.redirectPort"),
     ({"spotify": {"clientId": "has spaces!"}}, "spotify.clientId"),
+    ({"spotify": {"deviceId": True}}, "spotify.deviceId"),
+    ({"spotify": {"deviceId": "x" * 201}}, "spotify.deviceId"),
+    ({"spotify": {"deviceId": "bad\x00id"}}, "spotify.deviceId"),
     ({"setupComplete": "yes"}, "setupComplete"),
     ({"startWithWindows": 1}, "startWithWindows"),
     ({"youtube": {"enabled": "on"}}, "youtube.enabled"),
@@ -95,8 +98,8 @@ def test_config_patch_allows_only_the_connect_page_keys(shell, patch, field):
 def test_schema_is_exactly_the_connect_page(shell):
     assert set(SCHEMA) == {"wowRoot", "setupComplete", "startWithWindows", "spotify", "youtube"}
     # 1.2.1: the Connect page also picks where Spotify plays (spotify.device, D6)
-    assert set(SCHEMA["spotify"]) == {"enabled", "clientId", "deviceName", "device"}
-    assert validate_config_patch({"spotify": {"deviceName": "  PC  "}}) == {"spotify": {"deviceName": "PC"}}
+    assert set(SCHEMA["spotify"]) == {"enabled", "clientId", "deviceName", "deviceId", "device"}
+    assert validate_config_patch({"spotify": {"deviceName": "  PC  "}}) == {"spotify": {"deviceName": "PC", "deviceId": ""}}
     assert validate_config_patch({"spotify": {"device": "Connect"}}) == {"spotify": {"device": "connect"}}
     with pytest.raises(PatchError):
         validate_config_patch({"spotify": {"device": "desktop"}})
@@ -116,7 +119,31 @@ def test_config_patch_applies_live_and_keeps_unknown_keys(shell):
     assert "youtube" not in [p.name for p in shell.engines.current.providers]
     st, data = shell.call("POST", "/api/config", {"youtube": {"enabled": True}, "spotify": {"deviceName": "PC"}})
     assert st == 200 and "youtube" in [p.name for p in shell.engines.current.providers]
-    assert raw_config(shell.cfg_file)["spotify"] == {"deviceName": "PC"}
+    assert raw_config(shell.cfg_file)["spotify"] == {"deviceName": "PC", "deviceId": ""}
+
+
+def test_spotify_device_pin_persists_and_legacy_name_change_clears_it(shell):
+    choice = {"device": "connect", "deviceName": "Gaming PC", "deviceId": "pc-id-2"}
+    st, data = shell.call("POST", "/api/config", {"spotify": choice})
+    assert st == 200
+    assert all(data["state"]["spotify"][key] == value for key, value in choice.items())
+    assert config.load_config(shell.cfg_file)["spotify"]["deviceId"] == "pc-id-2"
+    # Switching back to the in-app player retains the saved Connect target for later.
+    st, data = shell.call("POST", "/api/config", {"spotify": {"device": "app"}})
+    assert st == 200 and data["state"]["spotify"]["device"] == "app"
+    assert data["state"]["spotify"]["deviceId"] == "pc-id-2"
+    # A name-only client must not silently keep routing to that old pin.
+    st, data = shell.call("POST", "/api/config", {"spotify": {"device": "connect", "deviceName": "Office"}})
+    assert st == 200 and data["state"]["spotify"]["deviceName"] == "Office"
+    assert data["state"]["spotify"]["deviceId"] == ""
+    assert raw_config(shell.cfg_file)["spotify"]["deviceId"] == ""
+
+
+def test_spotify_id_only_change_drops_the_previous_display_name(shell):
+    shell.call("POST", "/api/config", {"spotify": {"deviceName": "Old PC", "deviceId": "old"}})
+    st, data = shell.call("POST", "/api/config", {"spotify": {"deviceId": "new"}})
+    assert st == 200 and data["state"]["spotify"]["deviceId"] == "new"
+    assert data["state"]["spotify"]["deviceName"] == ""
 
 
 def test_switching_a_service_on_puts_it_back_in_the_provider_order(shell):

@@ -171,7 +171,7 @@ SCHEMA: dict[str, Any] = {
     "wowRoot": _v_path,
     "setupComplete": _v_bool,
     "startWithWindows": _v_bool,
-    "spotify": {"enabled": _v_bool, "clientId": _v_client_id, "deviceName": _v_text(200),
+    "spotify": {"enabled": _v_bool, "clientId": _v_client_id, "deviceName": _v_text(200), "deviceId": _v_text(200),
                 "device": _v_spotify_device},
     "youtube": {"enabled": _v_bool},
 }
@@ -216,6 +216,14 @@ def validate_config_patch(patch: Any, cfg: Optional[dict[str, Any]] = None, *,
     if errors:
         first = next(iter(errors.items()))
         raise PatchError(f"{first[0]} {first[1]}", errors)
+    spotify = clean.get("spotify")
+    if isinstance(spotify, dict):
+        # A legacy client selecting by name must not retain an earlier ID pin. Likewise,
+        # an ID-only request must not display the previous device's name after the change.
+        if "deviceName" in spotify and "deviceId" not in spotify:
+            spotify["deviceId"] = ""
+        elif "deviceId" in spotify and "deviceName" not in spotify:
+            spotify["deviceName"] = ""
     return clean
 
 
@@ -1533,6 +1541,7 @@ class Companion:
             return 502, {"error": str(exc)}
         sp_cfg = self.cfg.get("spotify") or {}
         return 200, {"devices": devices, "selected": sp_cfg.get("deviceName") or "",
+                     "selectedId": sp_cfg.get("deviceId") or "",
                      "device": sp_cfg.get("device") or "app"}
 
     def _spotify_status(self) -> dict[str, Any]:
@@ -1602,6 +1611,7 @@ class Companion:
                 "product": product, "country": country, "missingScopes": missing, "reconnect": reconnect,
                 "reconnectMessage": st.get("scopeMessage") if reconnect else None, "saveError": save_error,
                 "warning": warning, "deviceName": sp_cfg.get("deviceName") or "", "login": login,
+                "deviceId": sp_cfg.get("deviceId") or "",
                 "device": sp_cfg.get("device") or "app", "relogin": bool(st.get("relogin")),
                 "musicState": st.get("state")}
 
