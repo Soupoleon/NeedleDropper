@@ -113,11 +113,15 @@ flowchart LR
 
 ## Quick start
 
+Beta 4 improves companion cleanup and Spotify diagnostics. Spotify playback failures remain under
+investigation; this release is not a confirmed fix for them.
+
 1. **Install the addon from [CurseForge](https://www.curseforge.com/wow/addons/needledropper).** Select your
    **WoW: Forever** installation and the **Beta** channel, then install NeedleDropper **1.2.1**
    with WoW closed. If the file is still awaiting moderation or absent from the manager, use the
-   GitHub-only option below. Already have the 1.2.1 addon from CurseForge? Keep it and get the app.
-2. **For Spotify and YouTube, get the companion from [1.2.1 beta 3 on GitHub](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3).**
+   GitHub-only option below. Already have the beta 3 addon? Keep it and update the companion.
+   From an earlier beta, update both parts for the location fixes, volume setting and minimap icon.
+2. **For Spotify and YouTube, get the companion from [1.2.1 beta 4 on GitHub](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.4).**
    Download **`NeedleDropper.exe`**, or unzip `NeedleDropper-1.2.1-win64.zip`, somewhere permanent
    and run it. CurseForge supplies the addon; the companion download is on GitHub.
    If Windows says *"Windows protected your PC"*, click **More info → Run anyway**
@@ -142,7 +146,7 @@ flowchart LR
 5. **Share.** On the Soundtracks tab, **Share...** gives you a code to paste into Discord; friends paste
    it into **Import...** ([share codes](docs/PACKS.md#share-codes)).
 
-**GitHub-only option:** from the same [beta 3 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3),
+**GitHub-only option:** from the same [beta 4 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.4),
 download `NeedleDropper-1.2.1-addon.zip` and `NeedleDropper.exe`. With WoW closed, put the zip's
 `NeedleDropper` folder into `World of Warcraft\_forever_\Interface\AddOns`, then follow step 2 for
 the app. No repository clone, developer tools, GitHub account or invitation is needed.

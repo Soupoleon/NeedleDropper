@@ -52,7 +52,7 @@ def test_a_stuck_in_app_spotify_names_no_spotify_app(shell):
                                            "title": "Africa", "detail": "no progress within 3 s"}})
     note = [n for n in shell.app.notifier.history if n.kind == tray.NOTE_SPOTIFY_STUCK][-1]
     assert note.title == "Spotify didn't start" and "NeedleDropper's player" in note.text
-    assert "restart the Spotify app" not in note.text and "your needle drops play on YouTube" in note.text
+    assert "restart the Spotify app" not in note.text and "YouTube when allowed by your music settings" in note.text
 
 
 def _stuck_spotify_app_reported_once(shell):
@@ -72,6 +72,20 @@ def test_service_only_failure_does_not_claim_youtube_was_tried(shell):
                                                "test": True, "dropId": "test-spotify"}})
     note = [n for n in shell.app.notifier.history if n.kind == tray.NOTE_SPOTIFY_STUCK][-1]
     assert "YouTube wasn't tried; Test Spotify checks only Spotify." in note.text
+
+
+def test_spotify_only_mode_does_not_promise_youtube_playback(tmp_path, _needledropper_home):
+    shell = make_shell(tmp_path, Path(_needledropper_home),
+                       cfg_extra={"spotify": {"device": "connect"}, "music": {"order": "spotify"}})
+    try:
+        shell.engines.current.on_status({"change": {"kind": "spotifyStuck", "provider": "spotify",
+                                                   "test": True, "dropId": "test-spotify"}})
+        note = [n for n in shell.app.notifier.history if n.kind == tray.NOTE_SPOTIFY_STUCK][-1]
+        assert "YouTube when allowed by your music settings" in note.text
+        assert "your needle drops play on YouTube" not in note.text
+        assert "YouTube wasn't tried" in note.text
+    finally:
+        shell.close()
 
 
 def test_repeated_old_player_pages_show_one_actionable_notice(shell):

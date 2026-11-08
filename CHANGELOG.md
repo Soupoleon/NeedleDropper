@@ -4,6 +4,27 @@ All notable changes to NeedleDropper (the addon and the companion app). The form
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1-beta.4] - 2026-11-07
+
+Update the **companion app** for these fixes. The beta 3 addon remains compatible; users of older
+betas should update both parts for the location fixes, volume slider and minimap icon. This release
+fixes confirmed startup/cleanup defects; the reported Spotify Connect failure still needs a retest.
+
+### Fixed
+
+- A failed Spotify Connect start cannot pause an unrelated song that remains on the selected
+  device. Cleanup checks both the device and the requested song before pausing.
+- A briefly empty Spotify state gets the full bounded startup observation time. Recovery commands
+  stay suppressed while Spotify reports that the selected player cannot pause or resume.
+- Desktop Spotify errors give desktop recovery steps. YouTube fallback notices now respect that
+  fallback depends on the chosen music settings; Spotify-only service tests try no other service.
+
+### Added
+
+- Spotify startup logs compare the selected device with the observed device, song and playback
+  progress, including a snapshot before any volume/play command. These logs distinguish an already
+  stale Spotify Connect state from a failed requested song; send them privately when reporting.
+
 ## [1.2.1-beta.3] - 2026-11-07
 
 Update **both the addon and companion app**, including older betas whose base version also says 1.2.1.

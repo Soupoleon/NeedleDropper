@@ -69,8 +69,13 @@ What it needs, once:
 
 ## Friends beta: what a tester needs
 
+Beta 4 updates companion cleanup and Spotify diagnostics. An existing beta 3 addon remains
+compatible; testers on earlier betas should update both parts for the volume setting, minimap icon
+and location fixes. Keep providing all five release assets, including the addon zip for new installs.
+Do not describe this release as a confirmed fix for Spotify playback failures; playback needs a retest.
+
 1. WoW: Forever on Windows.
-2. The WoW: Forever Beta addon from [CurseForge](https://www.curseforge.com/wow/addons/needledropper), or `NeedleDropper-1.2.1-addon.zip` from the [beta release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3), extracted into `World of Warcraft\_forever_\Interface\AddOns\`.
+2. The WoW: Forever Beta addon from [CurseForge](https://www.curseforge.com/wow/addons/needledropper), or `NeedleDropper-1.2.1-addon.zip` from the [beta release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.4), extracted into `World of Warcraft\_forever_\Interface\AddOns\`.
 3. `NeedleDropper.exe` (optional) from the same release. Windows SmartScreen may warn because the build is unsigned: *More info → Run anyway*. Check `SHA256SUMS.txt`. Start the app before WoW and give it a moment on the desktop; it never opens its player while the game is in front.
 4. Music (one of):
    - **Spotify via their own app:** Premium and Google Chrome; create an app in the Spotify dashboard, set redirect URI `http://127.0.0.1:8321/callback`, tick **Web API** and **Web Playback SDK**, paste its Client ID on the Connect page and sign in. Keep **Play on: NeedleDropper (this app)**. Full steps: [BETA-TESTING.md](BETA-TESTING.md).

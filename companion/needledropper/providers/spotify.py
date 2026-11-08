@@ -101,7 +101,8 @@ ALLOWLIST_MESSAGE = ("Spotify refused this account for your Spotify app: add its
 SCOPE_MESSAGE = ("Spotify asks for one more permission (search with your country's catalogue, the Premium "
                  "check): open the Connect page and sign in to Spotify again")
 #: The desktop app accepted play but never started the song (seen on a real PC on 2026-11-05).
-STUCK_MESSAGE = "Spotify isn't starting songs — choose NeedleDropper (this app) under Play on"
+STUCK_MESSAGE = ("Spotify did not start on the selected device. Play a song in the Spotify desktop app, "
+                 "then use Refresh beside Play on and select the device again.")
 #: ``ProviderError.notice`` for the engine / tray when Spotify accepted a song but did not start it.
 NOTICE_STUCK = "spotifyStuck"
 NOT_CONFIGURED_MESSAGE = ("Spotify is not set up: no spotify.clientId in the config. "
@@ -239,7 +240,7 @@ class SpotifyStuckError(ProviderError):
         super().__init__(message)
         self.notice = NOTICE_STUCK
         self.cleanup = cleanup
-        self.loaded = loaded  # Spotify loaded the song (False: nothing loaded -- no pause is sent)
+        self.loaded = loaded  # Spotify loaded our requested song, not merely another/manual track
 
 
 @dataclass
@@ -878,7 +879,7 @@ class SpotifyProvider(Provider):
             self._stuck_seq = seq
         if first:
             what = APP_STUCK_MESSAGE if self._mode == MODE_APP else STUCK_MESSAGE
-            log.warning("Spotify: %s -- YouTube plays instead until Spotify works again (%s)", what, reason)
+            log.warning("Spotify: %s (%s)", what, reason)
 
     def clear_stuck(self, why: str = "") -> None:
         with self._lock:
@@ -891,9 +892,9 @@ class SpotifyProvider(Provider):
     def stuck_notice(self) -> tuple[str, str]:
         """(title, text) for the "Spotify isn't starting songs" notification, per mode."""
         if self._mode == MODE_APP:
-            return ("Spotify didn't start", f"{APP_STUCK_MESSAGE}; your needle drops play on YouTube until "
-                    "Spotify reconnects. If it stays unavailable, quit NeedleDropper from the tray and start it again.")
-        return ("Spotify isn't starting songs", f"{STUCK_MESSAGE}; your needle drops play on YouTube until Spotify works again.")
+            return ("Spotify didn't start", f"{APP_STUCK_MESSAGE}. Needle drops try YouTube when allowed by your "
+                    "music settings. If it stays unavailable, quit NeedleDropper from the tray and start it again.")
+        return ("Spotify isn't starting songs", f"{STUCK_MESSAGE} Needle drops try YouTube when allowed by your music settings.")
 
     def check_health(self) -> Optional[bool]:
         """One cheap read of ``GET /v1/me/player`` (on ARM, before any song is sent): False when it
@@ -1771,6 +1772,7 @@ class SpotifyProvider(Provider):
 
         device = self._acquire_device()
         s = self._new_session(uri, device, start_ms, snapshot)
+        self._log_start_state("before-play", s.device_id, snapshot)
         target, fade = self._plan_volume(s, device, drop, fade_in_ms)
         muted = _clamp_volume(drop.volume) == 0 or self._fixed_volume == 0
         low = int(round(target * FADE_FLOOR)) if fade and target is not None else None
@@ -1926,22 +1928,22 @@ class SpotifyProvider(Provider):
         state that cannot be read at all is assumed to be fine (None) only for automatic routing;
         an explicit output must have its start confirmed.
 
-        Fast path (real-client #10): when the first reads show the stuck signature
-        (:func:`looks_stuck`: neither pausing nor resuming allowed), no play is sent again and no
-        transfer is tried -- on the owner's PC that sequence froze the Spotify app. A failed
+        When target-device reads show the stuck signature (:func:`looks_stuck`: neither pausing nor
+        resuming allowed), keep observing for the bounded startup budget but send no more play or
+        transfer commands -- on the owner's PC that sequence froze the Spotify app. A failed
         resend or recovery command is logged and the reads go on, so the outcome is still a
         start, or a :class:`SpotifyStuckError` that parks the song.
         """
         saw_state = False
         saw_target = False
+        observe_only = False
         last_state: Optional[dict] = None
         phases = ((VERIFY_DELAYS_S, None), (VERIFY_RESEND_DELAYS_S, "resend"), (RECOVER_DELAYS_S, "recover"))
         for delays, action in phases:
-            last_device = last_state.get("device") if isinstance(last_state, dict) else None
-            if action is not None and isinstance(last_device, dict) and last_device.get("id") == s.device_id \
-                    and looks_stuck(last_state) and not _item_matches(last_state, uri):
-                break  # the stuck desktop app: leave it alone (below)
-            if action == "resend":
+            if action is not None and observe_only:
+                log.info("Spotify startup on %.8s: continuing observation without more play/transfer commands",
+                         s.device_id)
+            elif action == "resend":
                 log.info("Spotify has not started %s yet; sending play again", uri)
                 try:
                     self._play_command(s.device_id, uri, start_ms)
@@ -1970,17 +1972,21 @@ class SpotifyProvider(Provider):
                 except ProviderUnavailable:
                     raise
                 except ProviderError as exc:
-                    log.debug("verify read failed: %s", exc)
+                    log.info("Spotify start check phase=%s target=%.8s: playback state unreadable (%s)",
+                             action or "initial", s.device_id, exc)
                     continue
                 saw_state = True
                 last_state = state
                 dev = state.get("device") if isinstance(state, dict) else None
+                self._log_start_state("observe" if observe_only else (action or "initial"), s.device_id, state)
                 if not isinstance(dev, dict) or dev.get("id") != s.device_id:
                     prev = None
                     # GET /me/player can briefly lag a successful PUT, including when the previous
                     # output was playing this same song. Give the chosen output the normal start budget.
                     continue
                 saw_target = True
+                if looks_stuck(state) and not _item_matches(state, uri):
+                    observe_only = True
                 if not _item_matches(state, uri):
                     prev = None
                     continue
@@ -1997,17 +2003,18 @@ class SpotifyProvider(Provider):
             return None
         last_device = last_state.get("device") if isinstance(last_state, dict) else None
         if isinstance(last_device, dict) and last_device.get("id") and last_device["id"] != s.device_id:
-            raise ProviderError("Spotify is playing on another device, so playback on "
+            raise ProviderError("Spotify is reporting another device, so playback on "
                                 f"{s.device_name!r} could not be confirmed. Use Refresh beside Play on "
                                 "on the Connect page and select the device you want.")
         if not saw_target and self._selected_device():
-            raise self._device_error()
+            raise ProviderError(f"Spotify accepted the request but never reported playback on {s.device_name!r}. "
+                                "Play a song on that device, then use Refresh beside Play on and select it again.")
         self._log_disallows(last_state)
         if _item_matches(last_state, uri):
             raise SpotifyStuckError(f"{STUCK_MESSAGE} (it loaded {uri} but did not start playing it)")
         other = ((last_state or {}).get("item") or {}).get("uri") if isinstance(last_state, dict) else None
         raise SpotifyStuckError(f"Spotify accepted the play command but is playing {other or 'nothing'} "
-                                f"instead of {uri}. {STUCK_MESSAGE}", loaded=bool(other))
+                                f"instead of {uri}. {STUCK_MESSAGE}", loaded=False)
 
     def _transfer_playback(self, device_id: str) -> None:
         """``PUT /me/player {device_ids: [id], play: true}``: make our device the active one (best effort)."""
@@ -2017,6 +2024,19 @@ class SpotifyProvider(Provider):
             raise
         except ProviderError as exc:
             log.info("Spotify transfer of playback failed: %s", exc)
+
+    def _log_start_state(self, phase: str, target_id: str, state: Optional[dict]) -> None:
+        """Only the playback fields needed to compare the baseline with a requested start."""
+        device = state.get("device") if isinstance(state, dict) else None
+        item = state.get("item") if isinstance(state, dict) else None
+        log.info("Spotify start check phase=%s target=%.8s observed=%.8s: item=%s is_playing=%s "
+                 "progress_ms=%s active=%s restricted=%s", phase, target_id,
+                 str(device.get("id") or "none") if isinstance(device, dict) else "none",
+                 item.get("uri") if isinstance(item, dict) else None,
+                 state.get("is_playing") if isinstance(state, dict) else None,
+                 state.get("progress_ms") if isinstance(state, dict) else None,
+                 device.get("is_active") if isinstance(device, dict) else None,
+                 device.get("is_restricted") if isinstance(device, dict) else None)
 
     def _log_disallows(self, state: Optional[dict]) -> None:
         """Log which player actions Spotify disallows right now (``actions.disallows``): with a stuck
@@ -2032,11 +2052,21 @@ class SpotifyProvider(Provider):
                      state.get("is_playing"), state.get("progress_ms"), ", ".join(names))
 
     def _park(self, s: _Session, drop: Drop, uri: str, *, pause: bool = True) -> PlayHandle:
-        """A song Spotify accepted but did not start: pause our device (a late start must not play over
+        """A song Spotify accepted but did not start: pause our confirmed song (a late start must not play over
         the fallback provider), put the volume back, and hand the engine a handle that finishes the job
         when the drop ends (pause again if it started after all, resume the player's own music).
-        ``pause=False``: Spotify loaded nothing, so no pause is sent to it now (real-client #10)."""
+        ``pause=False``: our song never loaded, so no pause is sent now (real-client #10).
+        A fresh same-device, same-track observation is required before cleanup may pause; an accepted
+        command alone does not authorize interrupting manual playback that never changed."""
         log.warning("Spotify: %s", STUCK_MESSAGE)
+        if pause:
+            state = None
+            try:
+                state = self._get_player()
+            except ProviderError as exc:
+                log.info("Spotify startup cleanup: playback state unreadable; leaving playback alone (%s)", exc)
+            device = state.get("device") if isinstance(state, dict) else None
+            pause = isinstance(device, dict) and device.get("id") == s.device_id and _item_matches(state, uri)
         if pause:
             try:
                 self._call("PUT", "/me/player/pause", params={"device_id": s.device_id}, tolerant=True)
@@ -2061,17 +2091,20 @@ class SpotifyProvider(Provider):
         except ProviderError as exc:
             log.info("Spotify: could not read playback state (%s)", exc)
         dev = state.get("device") if isinstance(state, dict) else None
-        if s.pinned and isinstance(dev, dict) and dev.get("id") and dev["id"] != s.device_id:
+        if isinstance(dev, dict) and dev.get("id") and dev["id"] != s.device_id:
             log.info("Spotify: playback moved from the selected device; leaving your playback as it is")
             self._restore_volume(s, state, only_if_untouched=True)
             return
         if isinstance(state, dict) and state.get("is_playing"):
+            if not isinstance(dev, dict) or dev.get("id") != s.device_id:
+                log.info("Spotify: late-start playback device is unconfirmed; leaving playback as it is")
+                self._restore_volume(s, state, only_if_untouched=True)
+                return
             if not _item_matches(state, s.uri):
                 log.info("Spotify: something else plays now; leaving it as it is")
                 return
-            dev = state.get("device") if isinstance(state.get("device"), dict) else {}
             try:
-                self._call("PUT", "/me/player/pause", params={"device_id": str(dev.get("id") or s.device_id)},
+                self._call("PUT", "/me/player/pause", params={"device_id": s.device_id},
                            tolerant=True)
             except ProviderError as exc:
                 log.info("Spotify pause failed: %s", exc)

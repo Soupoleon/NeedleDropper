@@ -44,12 +44,15 @@ downloads need no GitHub account or invitation.
 ## 1. Install the addon
 
 **Install the addon from [CurseForge](https://www.curseforge.com/wow/addons/needledropper), then download
-the companion app from [GitHub's 1.2.1 beta 3 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3).**
+the companion app from [GitHub's 1.2.1 beta 4 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.4).**
 If the CurseForge file is awaiting moderation or is absent from your addon manager, use the
 GitHub-only route below. See also [Beta testing](BETA-TESTING.md).
 
-**Updating an older beta?** Update both the addon and [the companion app](#3-optional-the-needledropper-app)
-to beta 3 for these fixes. The base versions still say 1.2.1; that alone does not identify the beta.
+**Updating from beta 3?** Keep its addon and update [the companion app](#3-optional-the-needledropper-app)
+to beta 4. This release improves companion cleanup and Spotify diagnostics; it is not a confirmed
+fix for Spotify playback failures. The release still includes an addon zip for new installations.
+From an earlier beta, update both parts for the location fixes, volume setting and minimap icon.
+The base versions still say 1.2.1; that alone does not identify the beta.
 
 ### With an addon manager
 
@@ -63,12 +66,12 @@ data addon in `NeedleDropper_Companion`; managers never touch either.
 ### From the addon zip
 
 This is the complete **GitHub-only alternative**: download both `NeedleDropper-1.2.1-addon.zip`
-and `NeedleDropper.exe` from [1.2.1 beta 3](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3).
+and `NeedleDropper.exe` from [1.2.1 beta 4](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.4).
 Install the addon below, then follow [step 3](#3-optional-the-needledropper-app) for the app.
 You do not need CurseForge, a repository clone, developer tools or a GitHub account.
 
 1. Close WoW and download `NeedleDropper-1.2.1-addon.zip` from
-   the [beta 3 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3).
+   the [beta 4 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.4).
 2. Open your AddOns folder: `World of Warcraft\_forever_\Interface\AddOns`. If `Interface` or
    `AddOns` doesn't exist yet, create it.
 3. Double-click the zip to open it and drag the **NeedleDropper** folder into the AddOns folder.
@@ -110,7 +113,7 @@ back with the app running.
 The companion always comes from GitHub, including when CurseForge manages your addon.
 
 1. Download **`NeedleDropper.exe`** from
-   [1.2.1 beta 3](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3).
+   [1.2.1 beta 4](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.4).
    `NeedleDropper-1.2.1-win64.zip` contains the same executable and a quick start.
 2. Put the executable somewhere permanent, such as `Documents\NeedleDropper`. If you chose the
    zip, right-click it and choose **Extract All…** first. Don't run the app from inside the zip or
@@ -126,7 +129,7 @@ The release has five assets. Choose one app download; you do not need all three 
 
 | Asset | Use |
 |---|---|
-| `NeedleDropper-1.2.1-addon.zip` | Manual addon install; skip if CurseForge already installed beta 3 |
+| `NeedleDropper-1.2.1-addon.zip` | Manual addon install; skip if beta 3 or later is already installed |
 | `NeedleDropper.exe` | Companion app on its own |
 | `NeedleDropper-1.2.1-win64.zip` | Same app with a quick start |
 | `NeedleDropper-1.2.1-win64-folder.zip` | Same app in a folder; keep its files together |

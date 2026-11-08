@@ -297,6 +297,23 @@ this **The Spotify app on this PC (automatic)**. For your gaming PC, keep **Need
 | Your own Spotify music stops when a drop starts | One account plays on one device at a time: Spotify moves your playback to NeedleDropper's player | Normal. With *Resume my Spotify music afterwards* on (in game), it comes back afterwards. The Spotify Windows app may not restart by itself: press play there |
 | A **NeedleDropper** device in the Spotify app's device list | The app's own player, while the app runs | Nothing to do. Picking it plays your own music through the app |
 
+### Spotify desktop plays manually, but a test starts nothing
+
+Check that Spotify desktop and the Connect page use the same account. Play a song manually in
+Spotify, select **This computer** in Spotify's device menu, then pause it. On NeedleDropper's Connect
+page, **Refresh** and reselect **Spotify desktop app — your PC's name**, then use **Test Spotify**.
+If you have Spotify on another device, check whether it sees the desktop song while it plays
+manually; that helps distinguish a Spotify Connect synchronization problem from a NeedleDropper test.
+[Spotify's Connect guide](https://support.spotify.com/us/article/spotify-connect/) also covers restarting
+and updating the desktop app.
+
+A log saying Spotify accepted a play command while `item=None`, `is_playing=False` and
+`progress_ms=0` means playback was not confirmed. It does not establish missing Premium, a bad
+password, or which side failed to load the song. Share those lines privately with the target/observed
+device details and the manual-play result. **Test Spotify** tests only Spotify. **Spotify only**
+does not enable YouTube fallback. An Edge/Chrome error belongs to **NeedleDropper (this app)**;
+desktop Spotify does not require Chrome.
+
 If Spotify can't play a drop, the app falls back to the drop's YouTube video, if it has one (and
 *Play music with* allows YouTube).
 

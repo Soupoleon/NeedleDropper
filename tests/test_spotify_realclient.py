@@ -166,7 +166,7 @@ def test_track_that_never_starts_raises_stuck_and_pauses_first(tmp_path, caplog)
     puts = [c.path for c in rig.http.puts()]
     assert puts.count("/v1/me/player/play") == 1                     # sent once, never again
     assert "/v1/me/player" not in puts and "/v1/me/player/pause" not in puts
-    assert sum(rig.clock.sleeps) <= 2.0                              # fast: the first reads decide
+    assert sum(rig.clock.sleeps) == 6.5                              # bounded observation, no more commands
     assert rig.provider.stuck()
     assert "disallowed actions: pausing, resuming, seeking, skipping_next" in caplog.text
 

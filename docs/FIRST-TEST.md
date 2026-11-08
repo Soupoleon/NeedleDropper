@@ -9,8 +9,12 @@ the app playing, and taint. Do it once per client patch, and before every releas
 
 ## Before you start WoW
 
-For a downloaded beta, use the addon zip and app from the same
-[GitHub release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3).
+For a downloaded beta, install the addon from [CurseForge](https://www.curseforge.com/wow/addons/needledropper)
+and get the app from the [beta 4 GitHub release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.4).
+That release also provides the addon zip for a complete GitHub-only installation. An existing beta 3
+addon can stay installed; earlier beta users should update both parts for the volume setting, minimap
+icon and location fixes. Beta 4 improves companion cleanup and Spotify diagnostics, but does not
+establish a fix for Spotify playback failures. Record the playback result separately.
 [BETA-TESTING.md](BETA-TESTING.md) covers a clean PC, including creating your own Spotify developer
 app (Premium, Google Chrome, redirect URI `http://127.0.0.1:8321/callback`, **Web API** and
 **Web Playback SDK**). The source-build commands below are for maintainers.

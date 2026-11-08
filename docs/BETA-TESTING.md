@@ -3,8 +3,11 @@
 This guide takes you from a clean Windows PC to your first needle drop, without any programming
 tools. Install the **WoW: Forever addon from [CurseForge](https://www.curseforge.com/wow/addons/needledropper)**
 (Beta channel, version 1.2.1), then get **`NeedleDropper.exe` from
-[GitHub's beta 3 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3)**.
-Update both the addon and companion to beta 3 for the location fixes, volume setting and minimap icon.
+[GitHub's beta 4 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.4)**.
+Beta 4 improves companion cleanup and Spotify diagnostics; it is not a confirmed fix for Spotify
+playback failures. Keep an existing beta 3 addon and update the companion. From an earlier beta,
+update both parts for the location fixes, volume setting and minimap icon. An addon zip is still
+provided for new installations.
 A complete GitHub-only route is below if you prefer it or the CurseForge file is still awaiting moderation.
 
 > **What is NeedleDropper?** The first time your character arrives somewhere new in World of Warcraft:
@@ -50,15 +53,15 @@ NeedleDropper has two parts:
 1. Install the addon through [CurseForge](https://www.curseforge.com/wow/addons/needledropper), selecting
    **WoW: Forever**, **Beta** files and version **1.2.1** ([step 2](#2-install-the-addon)).
    If it is still awaiting moderation or does not appear, use the GitHub-only alternative below.
-2. Open [NeedleDropper 1.2.1 beta 3](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3),
+2. Open [NeedleDropper 1.2.1 beta 4](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.4),
    or the [Releases page](https://github.com/Soupoleon/NeedleDropper/releases) for a newer beta.
-   Note the tag, `v1.2.1-beta.3`: the bug report form asks for it.
+   Note the tag, `v1.2.1-beta.4`: the bug report form asks for it.
 3. Under **Assets**, download **`NeedleDropper.exe`** for Spotify and YouTube. The companion is
    always downloaded from GitHub, even if CurseForge manages your addon. These are all five assets:
 
    | File | What it is |
    |---|---|
-   | `NeedleDropper-1.2.1-addon.zip` | The addon for manual installation; skip if CurseForge already installed beta 3 |
+   | `NeedleDropper-1.2.1-addon.zip` | The addon for manual installation; skip if beta 3 or later is already installed |
    | `NeedleDropper.exe` | The app, for Spotify and YouTube (skip it if you only want title cards) |
    | `NeedleDropper-1.2.1-win64.zip` | The same app with a quick start |
    | `NeedleDropper-1.2.1-win64-folder.zip` | The same app as a folder; keep its files together ([step 3](#3-start-the-app)) |
@@ -77,8 +80,9 @@ installation: no CurseForge, repository clone, developer tools, GitHub account o
 
 **CurseForge:** close WoW, select its **WoW: Forever** installation in the CurseForge app, find
 **NeedleDropper**, and enable **Beta** files for it. Install the newest **1.2.1 Beta** file, or choose
-it from the project's **Files** tab. Update an older beta even if its base version also says 1.2.1;
-beta 3 changes both the addon and the app. A 1.2.1 app cannot read a 1.2.0 addon's signals.
+it from the project's **Files** tab. An existing beta 3 addon works with the beta 4 companion and
+can stay installed. Update addons from earlier betas even if their base version also says 1.2.1.
+A 1.2.1 app cannot read a 1.2.0 addon's signals.
 
 **GitHub-only/manual install:** if you downloaded the addon zip, follow these steps:
 
@@ -253,9 +257,14 @@ resolution, Windows scaling, HDR and display mode.
 
 ## 6. The quick test (about 15 minutes)
 
-**Beta 3 controls:** left-click the new minimap icon to open the addon; right-click it for settings.
+**Minimap and volume controls:** left-click the minimap icon to open the addon; right-click it for settings.
 Drag it around the minimap, or turn off **Show minimap icon**. Set **Music volume**, then use a
 service test to check the next song's level. The slider does not change a song already playing.
+
+**Beta 4 retest:** quit the old companion before replacing its executable, then start the new one
+from the desktop. Test Spotify again and record the result. If the desktop app plays manually but
+the test starts nothing, follow the [Spotify diagnostics](TROUBLESHOOTING.md#spotify-desktop-plays-manually-but-a-test-starts-nothing).
+Cleanup and diagnostic changes alone do not confirm that playback is fixed.
 
 **Custom landmark check:** after updating the addon, stand inside Zoram Strand (or another landmark)
 and press **Use my location** on the intended drop. Verify the place names the landmark, not all of
@@ -424,8 +433,10 @@ All the details: [Uninstalling](INSTALL.md#uninstalling).
 - [ ] **A release:** push a beta tag (`v1.2.1-beta.N`). The release workflow builds and publishes the
       pre-release with its five files; check that they are there and match `SHA256SUMS.txt`.
       Check CurseForge's Beta file for WoW: Forever, and give testers the GitHub addon zip if it
-      awaits moderation. Update both parts to beta 3 for these fixes, even though their base
-      versions remain 1.2.1. A 1.2.0 app and a 1.2.1 addon cannot read each other.
+      awaits moderation. Beta 3 addon users need only the beta 4 companion; earlier beta users
+      should update both parts. Their base versions remain 1.2.1. A 1.2.0 app and a 1.2.1 addon
+      cannot read each other. Describe beta 4 as companion cleanup and diagnostic fixes, with
+      Spotify playback still requiring verification.
 - [ ] **Spotify:** point the tester to step 4 to create their own developer app. Never send them
       the owner's Client ID, tokens or Client secret.
 - [ ] **Send** this guide and the link to the release.

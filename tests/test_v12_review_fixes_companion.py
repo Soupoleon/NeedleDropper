@@ -90,7 +90,9 @@ def test_after_one_stuck_attempt_youtube_plays_without_trying_spotify_again(tmp_
                  on_status=lambda st: notes.append(st["change"]))
     eng.handle(fire(10, "zone:1429"), "pixel")
     assert yt.plays == ["zone:1429"] and rig.provider.stuck()
-    assert sum(rig.clock.sleeps) <= 2.0                     # fast stuck detection, not 6.5 s of retries
+    assert sum(rig.clock.sleeps) == 6.5                    # bounded observation, with no recovery commands
+    assert len(spotify_plays(rig)) == 1
+    assert not [c for c in rig.http.puts() if c.path == "/v1/me/player"]
     eng.stop_playback()
     eng.drain()
     before = len(rig.http.calls)
