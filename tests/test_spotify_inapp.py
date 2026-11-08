@@ -426,6 +426,29 @@ def test_no_fade_and_fixed_volume_reach_the_page(tmp_path, fast):
     assert start["fadeInMs"] == 0 and start["volume"] == 25
 
 
+@pytest.mark.parametrize("master, per_drop, fixed, expected", [
+    (50, 80, None, 40), (50, 80, 50, 20), (0, 80, 55, 0), (50, 0, 55, 0),
+])
+def test_engine_master_volume_reaches_sdk_and_preserves_previous_music(tmp_path, fast,
+                                                                      master, per_drop, fixed, expected):
+    from needledropper.engine import Engine
+
+    rig = make_app_rig(tmp_path, cfg={"volume": fixed})
+    rig.http.add("GET", "/v1/me/player", (200, player_state(PREV, 30_000, device=PHONE)))
+    plays_and_ticks(rig)
+    engine = Engine([rig.provider], music_volume=master, fade_in_ms=0, fade_out_ms=0)
+    engine.play_now(make_drop(volume=per_drop), only="spotify")
+    engine.drain()
+    start = [c for c in rig.page.sent if c.get("op") == "start"]
+    assert len(start) == 1 and start[0]["volume"] == expected
+    assert not rig.http.find("PUT", "/v1/me/player/volume")
+    engine.stop_playback()
+    engine.drain()
+    restored = rig.http.find("PUT", "/v1/me/player/play")[-1]
+    assert restored.query["device_id"] == PHONE["id"]
+    assert restored.json == {"uris": [PREV["uri"]], "position_ms": 30_000}
+
+
 def test_the_start_check_also_reads_the_web_api(tmp_path, fast):
     rig = make_app_rig(tmp_path)
     ours = dict(player_state(DROP_TRACK, 1_500), device={"id": SDK_DEVICE, "name": "NeedleDropper"})

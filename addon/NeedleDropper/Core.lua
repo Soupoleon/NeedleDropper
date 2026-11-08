@@ -150,6 +150,7 @@ end
 
 ns.DEFAULTS = {
   enabled = true,
+  minimapIcon = true,
   dwellSec = 10,
   minDwellSec = 3,
   landmarkDwellSec = 4,
@@ -163,6 +164,7 @@ ns.DEFAULTS = {
   musicOrder = "spotify-youtube",
   youtubeCorner = "topright",
   musicFade = true,
+  musicVolume = 100,
   resumeMyMusic = true,
   combatFadeSec = 5,
   maxDropSec = 300,
@@ -187,6 +189,8 @@ ns.DEFAULTS = {
 ns.SETTINGS = {
   { key = "enabled", type = "boolean", label = "Enable needle drops",
     tip = "Play a curated song the first time you arrive in a zone or landmark." },
+  { key = "minimapIcon", type = "boolean", label = ns.MinimapText.label,
+    tip = ns.MinimapText.tip },
   { key = "dwellSec", type = "number", min = 0, max = 300, step = 1, label = "Zone arrival delay (s)",
     tip = "Seconds you must spend in a new zone before its song starts." },
   { key = "minDwellSec", type = "number", min = 0, max = 300, step = 1, label = "Delay after discovery (s)",
@@ -217,6 +221,8 @@ ns.SETTINGS = {
     tip = "Where the small YouTube player box appears while a YouTube song plays. YouTube requires the player to stay visible." },
   { key = "musicFade", type = "boolean", label = "Fade songs in and out",
     tip = "Off: songs start and stop at once, like a real needle drop." },
+  { key = "musicVolume", type = "number", min = 0, max = 100, step = 1, integer = true,
+    percentValue = true, label = ns.MusicVolumeText.label, tip = ns.MusicVolumeText.tip },
   { key = "resumeMyMusic", type = "boolean", label = "Resume my Spotify music afterwards",
     tip = "When a Spotify needle drop ends, Spotify goes back to what you were listening to." },
   { key = "combatFadeSec", type = "number", min = 0, max = 120, step = 1, label = "Stop after combat lasting (s)",

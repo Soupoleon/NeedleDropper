@@ -76,6 +76,7 @@ UI\\Soundtracks.lua
 UI\\Journal.lua
 UI\\ShareDialogs.lua
 UI\\MusicDialog.lua
+Minimap.lua
 SelfTest.lua
 """
 

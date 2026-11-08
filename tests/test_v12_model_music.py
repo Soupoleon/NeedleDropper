@@ -91,7 +91,7 @@ def test_defaults_and_the_saved_music_table():
     assert m["prefsSet"] is False and m.get("requests") in ([], {}) and "clientId" not in m
     keys = [e["key"] for e in h.from_lua(h.ns.SETTINGS)]
     i = keys.index("instanceDrops")
-    assert keys[i + 1:i + 5] == ["musicOrder", "youtubeCorner", "musicFade", "resumeMyMusic"]
+    assert keys[i + 1:i + 6] == ["musicOrder", "youtubeCorner", "musicFade", "musicVolume", "resumeMyMusic"]
 
 
 def test_saved_music_table_is_validated_at_load():
@@ -127,11 +127,11 @@ def test_prefs_travel_only_once_a_music_choice_was_made_in_game():
     assert h.beacon_status().get("prefs") is None
     h.set_setting("musicOrder", "youtube-spotify")           # the Settings panel writes and announces
     assert ms(h, "PrefsSet") is True and h.account_db()["music"]["prefsSet"] is True
-    want = {"order": "youtube-spotify", "corner": "topright", "fade": True, "resume": True}
+    want = {"order": "youtube-spotify", "corner": "topright", "fade": True, "resume": True, "volume": 100}
     assert h.beacon_status()["prefs"] == want
     drawn = h.beacon_decoded()                                # the HELLO on screen changed at once
-    assert drawn.type == ET.HELLO and drawn.prefs == p2.Prefs("youtube-spotify", "topright", True, True)
-    assert h.beacon_status()["size"] == "144x3"
+    assert drawn.type == ET.HELLO and drawn.prefs == p2.Prefs("youtube-spotify", "topright", True, True, 100)
+    assert h.beacon_status()["size"] == "192x3"
     assert configs(h) == []
     h.advance(0.9)
     h.set_setting("youtubeCorner", "topleft")                 # debounced: one CONFIG 1 s after the last change
@@ -140,9 +140,9 @@ def test_prefs_travel_only_once_a_music_choice_was_made_in_game():
     h.advance(0.2)
     cfg = configs(h)
     assert len(cfg) == 1 and "action" not in cfg[0] and "clientId" not in cfg[0]
-    assert cfg[0]["prefs"] == {"order": "youtube-spotify", "corner": "topleft", "fade": True, "resume": True}
+    assert cfg[0]["prefs"] == {"order": "youtube-spotify", "corner": "topleft", "fade": True, "resume": True, "volume": 100}
     line = [f for f in h.chat_frames() if f.type == ET.CONFIG][-1]
-    assert line.prefs == p2.Prefs("youtube-spotify", "topleft", True, True) and line.action is None
+    assert line.prefs == p2.Prefs("youtube-spotify", "topleft", True, True, 100) and line.action is None
     h.emit(ET.HELLO)
     assert h.events_of(ET.HELLO)[-1]["prefs"]["corner"] == "topleft"
     assert [f for f in h.chat_frames() if f.type == ET.HELLO][-1].prefs.corner == "topleft"
@@ -153,7 +153,7 @@ def test_a_settings_reset_counts_as_a_choice_and_sends_the_defaults():
     h.slash("reset settings")
     assert ms(h, "PrefsSet") is True
     h.advance(1.1)
-    assert configs(h)[-1]["prefs"] == {"order": "spotify-youtube", "corner": "topright", "fade": True, "resume": True}
+    assert configs(h)[-1]["prefs"] == {"order": "spotify-youtube", "corner": "topright", "fade": True, "resume": True, "volume": 100}
 
 
 def test_the_echo_shows_the_apps_choices_until_the_player_sets_one():
@@ -176,6 +176,33 @@ def test_unknown_echo_values_are_ignored():
     h = make(app(block=music(prefs={"order": "loud", "corner": "middle", "fade": "yes"})))
     s = h.settings()
     assert (s["musicOrder"], s["youtubeCorner"], s["musicFade"]) == ("spotify-youtube", "topright", True)
+
+
+def test_music_volume_slider_echo_persistence_and_test_frames():
+    h = make(app(block=music(prefs={"volume": 37})), settings={"chatlog": True})
+    assert h.settings()["musicVolume"] == 37 and not ms(h, "PrefsSet")
+    meta = h.ns.SETTINGS_BY_KEY["musicVolume"]
+    assert (meta.min, meta.max, meta.step, meta.integer) == (0, 100, 1, True)
+    assert h.ns.Options.FormatSliderValue(meta, 37) == "37%"
+    assert "next drop or music test" in meta.tip
+    h.set_setting("musicVolume", 0)
+    assert h.beacon_decoded().prefs.volume == 0
+    h.advance(1.1)
+    assert configs(h)[-1]["prefs"]["volume"] == 0
+    assert [f for f in h.chat_frames() if f.type == ET.CONFIG][-1].prefs.volume == 0
+    h2 = h.reload(companion_data=app(block=music(prefs={"volume": 37})))
+    assert h2.settings()["musicVolume"] == 0
+    assert h2.beacon_decoded().prefs.volume == 0  # stale app echo cannot replace an explicit game choice
+    h2.ns.MusicServices.Send("test-spotify")
+    assert h2.events_of(ET.CONFIG)[-1]["prefs"]["volume"] == 0
+    h2.slash("reset settings")
+    assert h2.settings()["musicVolume"] == 100
+
+
+@pytest.mark.parametrize("value", [-1, 101, 1.5, True, "50"])
+def test_invalid_music_volume_echo_is_ignored(value):
+    h = make(app(block=music(prefs={"volume": value})))
+    assert h.settings()["musicVolume"] == 100
 
 
 def test_the_prefs_config_is_skipped_for_an_app_that_cannot_read_it():
@@ -348,7 +375,7 @@ def test_a_request_is_one_config_frame_with_its_action():
     assert [e["type"] for e in new] == [ET.CONFIG]
     raw = encoded(h, last_lua_event(h))
     fr = p2.decode_frame(raw)
-    assert len(raw) == 23 and fr.type == ET.CONFIG and fr.action.name == "test-spotify"
+    assert len(raw) == 26 and fr.type == ET.CONFIG and fr.action.name == "test-spotify"
     assert fr.action.issued_at == before and fr.prefs.order == "youtube" and fr.client_id is None
     assert not fr.has(Flags.TEST)
     assert h.account_db()["music"]["requests"][-1] == {"action": "test-spotify", "at": before}
@@ -369,7 +396,7 @@ def test_connect_and_disconnect_carry_the_client_id_and_never_prefs():
     assert len(raw) == 35 and fr.client_id == CID and fr.prefs is None      # the app's active ID
     h.call("MusicServices.Send", "youtube-sign-in")
     fr = p2.decode_frame(encoded(h, last_lua_event(h)))
-    assert fr.prefs == p2.Prefs("spotify-youtube", "topright", False, True) and fr.client_id is None
+    assert fr.prefs == p2.Prefs("spotify-youtube", "topright", False, True, 100) and fr.client_id is None
 
 
 def test_connect_needs_some_client_id_and_disconnect_the_apps():

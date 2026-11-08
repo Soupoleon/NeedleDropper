@@ -41,7 +41,8 @@ v1.2.1 keys:
   my Spotify music afterwards"). ``music.order`` is "Play music with": ``"spotify-youtube"``
   (default), ``"youtube-spotify"``, ``"spotify"``, ``"youtube"`` or ``"none"``; ``music.fade``
   (default ``true``) fades songs in and out (``fadeInMs`` / ``fadeOutMs``; ``false`` starts and
-  stops them at once); ``music.fromGame`` is ``true`` once the game has sent its choices (from
+  stops them at once); ``music.volume`` (default 100, range 0..100) multiplies each drop's volume
+  for the next drop or music test; ``music.fromGame`` is ``true`` once the game has sent its choices (from
   then on the game's fade choice also rules Spotify's own ``spotify.fade``). Values edited here
   are replaced by the game's at its next choice.
 
@@ -128,7 +129,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "youtube": {"enabled": True},
     "deck": {"port": 8322, "autoOpen": "youtube", "browser": "edge", "playerPosition": "",
              "playerCorner": "topright", "panelOnStart": "first-run"},
-    "music": {"order": "spotify-youtube", "fade": True, "fromGame": False},
+    "music": {"order": "spotify-youtube", "fade": True, "volume": 100, "fromGame": False},
     "transport": {"pixel": {"enabled": True, "method": "auto", "hz": 4, "regionW": 512, "regionH": 48},
                   "chatlog": {"enabled": True, "pollMs": 250, "match": "strict"}},
     "fadeInMs": 2500,
@@ -260,6 +261,7 @@ def normalize_config(cfg: dict[str, Any]) -> dict[str, Any]:
     spotify["device"] = _enum(spotify.get("device"), SPOTIFY_DEVICE_MODES, "app")
     music = _section(cfg, "music")
     music["order"] = _enum(music.get("order"), MUSIC_ORDERS, "spotify-youtube")
+    music["volume"] = music_volume(music.get("volume"))
     for key, default in (("fade", True), ("fromGame", False)):
         if not isinstance(music.get(key), bool):
             music[key] = default
@@ -331,9 +333,14 @@ def effective_fades(cfg: dict[str, Any]) -> tuple[int, int]:
     return (_int_ms(cfg.get("fadeInMs", 2500), 2500), _int_ms(cfg.get("fadeOutMs", 3000), 3000))
 
 
+def music_volume(value: Any) -> int:
+    """A whole percentage; invalid saved values retain the default playback level."""
+    return max(0, min(100, value)) if isinstance(value, int) and not isinstance(value, bool) else 100
+
+
 def music_choices(cfg: dict[str, Any]) -> dict[str, Any]:
     """The music choices in effect (DESIGN-v1.2.1 3.10 ``music.prefs``): ``order``, ``corner``,
-    ``fade``, ``resume`` and ``fromGame`` (whether the game has sent them yet)."""
+    ``fade``, ``resume``, ``volume`` and ``fromGame`` (whether the game has sent them yet)."""
     music = cfg.get("music") if isinstance(cfg.get("music"), dict) else {}
     deck = cfg.get("deck") if isinstance(cfg.get("deck"), dict) else {}
     spotify = cfg.get("spotify") if isinstance(cfg.get("spotify"), dict) else {}
@@ -342,6 +349,7 @@ def music_choices(cfg: dict[str, Any]) -> dict[str, Any]:
     return {"order": order if order in MUSIC_ORDERS else "spotify-youtube",
             "corner": corner if corner in PLAYER_CORNERS else "topright",
             "fade": music.get("fade") is not False,
+            "volume": music_volume(music.get("volume")),
             "resume": spotify.get("restorePrevious") is not False,
             "fromGame": music.get("fromGame") is True}
 

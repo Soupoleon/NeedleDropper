@@ -147,12 +147,15 @@ def prefs_changes(prefs: Any, cfg: dict[str, Any]) -> dict[str, Any]:
     corner = getattr(prefs, "corner", None)
     fade = getattr(prefs, "fade", None)
     resume = getattr(prefs, "resume", None)
+    volume = getattr(prefs, "volume", None)
     changes: dict[str, Any] = {}
     if order is not None and order != music.get("order"):
         changes.setdefault("music", {})["order"] = order
     if isinstance(fade, bool) and fade != music.get("fade"):
         changes.setdefault("music", {})["fade"] = fade
-    if any(v is not None for v in (order, corner, fade, resume)) and music.get("fromGame") is not True:
+    if isinstance(volume, int) and not isinstance(volume, bool) and 0 <= volume <= 100 and volume != music.get("volume"):
+        changes.setdefault("music", {})["volume"] = volume
+    if any(v is not None for v in (order, corner, fade, resume, volume)) and music.get("fromGame") is not True:
         changes.setdefault("music", {})["fromGame"] = True
     if corner is not None and corner != deck.get("playerCorner"):
         changes["deck"] = {"playerCorner": corner, "playerPosition": ""}

@@ -16,6 +16,13 @@ its **Connect** page, at `http://127.0.0.1:8322/` while the app runs (tray icon 
 or in the game: *Game Menu → Options → AddOns → NeedleDropper*, section **Music services**, and the
 **Music services** dialog (`/needle music`) ([how](INSTALL.md#music-services-in-game)).
 
+**Music volume** in the addon's settings scales companion playback from 0% to 100%, including
+**Test Spotify** and **Test YouTube**. It combines with a drop's own volume: 50% master volume and
+80% on the drop produce a 40% multiplier of the player's base level. Spotify Connect uses that
+device's starting volume as its base. Changes apply to the next song or test and do not change a song already
+playing. In-game audio files use WoW's **Music** volume. Speaker/headphone selection remains in
+Windows **Sound → Volume mixer** for Chrome or Spotify, depending on your selected player.
+
 ## Which service plays a drop
 
 1. **An in-game file** comes first, if the drop has one and the *Play in-game files* option is on.

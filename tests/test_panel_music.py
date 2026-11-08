@@ -35,11 +35,16 @@ class MusicEngine(FakeEngine):
     def __init__(self, *a: Any, **kw: Any) -> None:
         super().__init__(*a, **kw)
         self.orders: list[str] = []
+        self.volumes: list[int] = []
         self.played: list[tuple] = []
 
     def set_music_order(self, order: str) -> str:
         self.orders.append(order)
         return order
+
+    def set_music_volume(self, volume: int) -> int:
+        self.volumes.append(volume)
+        return volume
 
     def play_now(self, drop: Any, *, test: bool = True, only: Optional[str] = None) -> None:
         self.played.append((drop.id, only))
@@ -90,7 +95,7 @@ def test_prefs_from_a_transport_reach_config_json_and_apply_live(ns):
     # the game reads the choices in effect back (the echo), and the D17 detail
     music = music_data(ns)
     assert music["prefs"] == {"order": "youtube", "corner": "bottomleft", "fade": False, "resume": False,
-                              "fromGame": True}
+                              "fromGame": True, "volume": 100}
     assert music["spotify"]["state"] == "not-connected" and music["spotify"]["mode"] == "app"
     assert music["spotify"]["redirectUri"] == "http://127.0.0.1:8321/callback"
     assert music["youtube"]["enabled"] is True and music["youtube"]["player"] in ("chrome", "edge", "none")
@@ -169,14 +174,87 @@ def test_the_pixel_link_reports_each_baseline_once():
 def test_config_defaults_and_normalisation_of_the_music_keys():
     cfg = config.normalize_config(config.deep_merge(config.DEFAULT_CONFIG, {
         "music": {"order": "LOUDEST", "fade": "yes", "fromGame": 1}, "deck": {"playerCorner": "Top-Left"}}))
-    assert cfg["music"] == {"order": "spotify-youtube", "fade": True, "fromGame": False}
+    assert cfg["music"] == {"order": "spotify-youtube", "fade": True, "volume": 100, "fromGame": False}
     assert cfg["deck"]["playerCorner"] == "topleft"
     assert config.normalize_config(config.deep_merge(config.DEFAULT_CONFIG, {"music": "x"}))["music"] == \
         config.DEFAULT_CONFIG["music"]
     # until the game chose, the app plays as 1.2.0 did: fadeInMs / fadeOutMs, Spotify first
     assert config.effective_fades(config.default_config()) == (2500, 3000)
     assert config.music_choices(config.default_config()) == {"order": "spotify-youtube", "corner": "topright",
-                                                             "fade": True, "resume": True, "fromGame": False}
+                                                             "fade": True, "resume": True, "volume": 100, "fromGame": False}
+
+
+def test_master_volume_persists_echoes_and_reaches_next_drop_before_worker(ns):
+    eng = ns.engines.current
+    assert eng.volumes == [100]
+    fr = frame(ET.CONFIG, seq=71, prefs={"volume": 35})
+    ns.transports.live("pixel").emit(fr)
+    assert eng.volumes[-1] == 35  # synchronous: the following FIRE sees it before the config worker
+    assert ns.app.music.wait_idle(5)
+    assert raw_config(ns.cfg_file)["music"]["volume"] == 35
+    assert music_data(ns)["prefs"]["volume"] == 35
+    assert ns.call("GET", "/api/state")[1]["music"]["volume"] == 35
+    # An old addon's four-byte PREFS must not reset the saved master.
+    ns.transports.live("chatlog").emit(frame(ET.HELLO, seq=72, prefs={"order": "youtube"}))
+    assert ns.app.music.wait_idle(5)
+    assert raw_config(ns.cfg_file)["music"]["volume"] == eng.volumes[-1] == 35
+
+
+def test_master_volume_loaded_at_start_and_engine_recreation(tmp_path, _needledropper_home):
+    s = shell(tmp_path, _needledropper_home, cfg_extra={"music": {"volume": 0}})
+    try:
+        assert s.engines.current.volumes == [0]
+        s.app._replace_engine()
+        assert s.engines.current.volumes[-1] == 0
+    finally:
+        s.close()
+
+
+def test_older_music_worker_write_cannot_roll_back_newer_slider_value(ns):
+    old = frame(ET.CONFIG, seq=80, prefs={"volume": 60})
+    new = frame(ET.CONFIG, seq=81, prefs={"volume": 20})
+    ns.app._music_order_now(old)
+    ns.app._music_order_now(new)
+    eng = ns.engines.current
+    assert eng.volumes[-1] == 20
+    # Force the valid interleaving without timing assumptions: old worker saves after
+    # both fast stores, then a FIRE or an engine recreation can occur before new saves.
+    ns.app.music._apply_prefs(old, "pixel", False)
+    assert raw_config(ns.cfg_file)["music"]["volume"] == 60
+    assert eng.volumes[-1] == 20
+    ns.app._replace_engine()
+    assert ns.engines.current.volumes[-1] == 20
+    ns.app.music._apply_prefs(new, "pixel", False)
+    assert raw_config(ns.cfg_file)["music"]["volume"] == ns.engines.current.volumes[-1] == 20
+
+
+def test_slider_change_while_replacement_engine_starts_reaches_published_engine(ns, monkeypatch):
+    original_make = ns.app._make_engine
+
+    def make(providers):
+        new = original_make(providers)
+        original_start = new.start
+
+        def start():
+            original_start()
+            # A transport delivers mute after construction, before publication.
+            assert ns.app.engine is None
+            ns.app._music_order_now(frame(ET.CONFIG, seq=83, prefs={"volume": 0}))
+
+        new.start = start
+        return new
+
+    monkeypatch.setattr(ns.app, "_make_engine", make)
+    ns.app._replace_engine()
+    assert ns.app.engine is ns.engines.current
+    assert ns.engines.current.volumes[-1] == 0
+
+
+@pytest.mark.parametrize("value, expected", [(-1, 0), (0, 0), (47, 47), (101, 100),
+                                              (None, 100), (True, 100), ("50", 100), (1.5, 100)])
+def test_master_volume_saved_config_normalization(value, expected):
+    cfg = config.normalize_config({"music": {"volume": value}})
+    assert cfg["music"]["volume"] == config.music_choices(cfg)["volume"] == expected
 
 
 def test_the_engine_gets_the_order_and_fades_from_config_at_start(tmp_path, _needledropper_home):

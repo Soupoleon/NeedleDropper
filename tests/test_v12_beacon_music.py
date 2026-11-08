@@ -325,5 +325,5 @@ def test_hello_lines_carry_prefs_once_set_in_game():
     h.set_setting("musicOrder", "spotify")
     h.emit(ET.HELLO)
     hellos = [f for f in h.chat_frames() if f.type == ET.HELLO]
-    assert hellos[-1].prefs == p2.Prefs("spotify", "topright", True, True)
-    assert len(p2.encode_frame(hellos[-1])) == 15
+    assert hellos[-1].prefs == p2.Prefs("spotify", "topright", True, True, 100)
+    assert len(p2.encode_frame(hellos[-1])) == 18

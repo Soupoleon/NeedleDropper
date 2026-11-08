@@ -44,12 +44,12 @@ downloads need no GitHub account or invitation.
 ## 1. Install the addon
 
 **Install the addon from [CurseForge](https://www.curseforge.com/wow/addons/needledropper), then download
-the companion app from [GitHub's 1.2.1 beta 2 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2).**
+the companion app from [GitHub's 1.2.1 beta 3 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3).**
 If the CurseForge file is awaiting moderation or is absent from your addon manager, use the
 GitHub-only route below. See also [Beta testing](BETA-TESTING.md).
 
-**Already have the 1.2.1 addon from CurseForge?** Keep it and go straight to
-[the companion app](#3-optional-the-needledropper-app). Beta.2 keeps the addon/app base version at 1.2.1.
+**Updating an older beta?** Update both the addon and [the companion app](#3-optional-the-needledropper-app)
+to beta 3 for these fixes. The base versions still say 1.2.1; that alone does not identify the beta.
 
 ### With an addon manager
 
@@ -63,12 +63,12 @@ data addon in `NeedleDropper_Companion`; managers never touch either.
 ### From the addon zip
 
 This is the complete **GitHub-only alternative**: download both `NeedleDropper-1.2.1-addon.zip`
-and `NeedleDropper.exe` from [1.2.1 beta 2](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2).
+and `NeedleDropper.exe` from [1.2.1 beta 3](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3).
 Install the addon below, then follow [step 3](#3-optional-the-needledropper-app) for the app.
 You do not need CurseForge, a repository clone, developer tools or a GitHub account.
 
 1. Close WoW and download `NeedleDropper-1.2.1-addon.zip` from
-   the [beta 2 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2).
+   the [beta 3 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3).
 2. Open your AddOns folder: `World of Warcraft\_forever_\Interface\AddOns`. If `Interface` or
    `AddOns` doesn't exist yet, create it.
 3. Double-click the zip to open it and drag the **NeedleDropper** folder into the AddOns folder.
@@ -87,10 +87,11 @@ If it is listed as *Out of date* after a game patch, tick *Load out of date AddO
 The chat window greets you with *NeedleDropper 1.2: your soundtrack is Azeroth Mixtape. Type /needle
 to change a song or pick another soundtrack.*
 
-- **The window:** type `/needle` (or `/nd`), or click NeedleDropper in the add-on compartment, the
-  small numbered button by the minimap. Its tabs are **Drops**, **Soundtracks** and **Journal**; see
+- **The window:** type `/needle` (or `/nd`), or left-click NeedleDropper's minimap icon. Drag the icon
+  around the minimap; **Show minimap icon** in settings hides it. The add-on compartment also opens
+  the window. Its tabs are **Drops**, **Soundtracks** and **Journal**; see
   [Soundtracks](PACKS.md) for everything it does.
-- **The settings:** right-click NeedleDropper in the add-on compartment, use the gear button in the
+- **The settings:** right-click the minimap icon or NeedleDropper in the add-on compartment, use the gear button in the
   window, or open *Game Menu → Options → AddOns → NeedleDropper*.
 - **Key bindings** (optional): *Game Menu → Options → Keybindings*, section **NeedleDropper**: *Open
   or close the NeedleDropper window*, *Add a needle drop where you stand* and *Stop the needle
@@ -109,7 +110,7 @@ back with the app running.
 The companion always comes from GitHub, including when CurseForge manages your addon.
 
 1. Download **`NeedleDropper.exe`** from
-   [1.2.1 beta 2](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2).
+   [1.2.1 beta 3](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3).
    `NeedleDropper-1.2.1-win64.zip` contains the same executable and a quick start.
 2. Put the executable somewhere permanent, such as `Documents\NeedleDropper`. If you chose the
    zip, right-click it and choose **Extract All…** first. Don't run the app from inside the zip or
@@ -125,7 +126,7 @@ The release has five assets. Choose one app download; you do not need all three 
 
 | Asset | Use |
 |---|---|
-| `NeedleDropper-1.2.1-addon.zip` | Manual addon install; skip if CurseForge already installed 1.2.1 |
+| `NeedleDropper-1.2.1-addon.zip` | Manual addon install; skip if CurseForge already installed beta 3 |
 | `NeedleDropper.exe` | Companion app on its own |
 | `NeedleDropper-1.2.1-win64.zip` | Same app with a quick start |
 | `NeedleDropper-1.2.1-win64-folder.zip` | Same app in a folder; keep its files together |

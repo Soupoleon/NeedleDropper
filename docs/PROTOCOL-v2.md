@@ -97,7 +97,8 @@ breaks the structure, and skip tags they don't know.
 | `0x0B` | prefs | 4 code bytes: order, corner, fade, resume | v1.2.1, HELLO and CONFIG (§2.5) |
 | `0x0C` | action | 6 B: code, `code XOR 0xFF`, issuedAt uint32 BE | v1.2.1, CONFIG (§2.5) |
 | `0x0D` | clientId | 16 B: the Spotify client id's 32 hex digits | v1.2.1, CONFIG (§2.5) |
-| `0x0E`–`0xFF` | — | any | reserved for future fields. v2 decoders skip them (kept in `Frame.extra`) |
+| `0x0E` | musicVolume | 1 B, 0–100 | beta 3 master music percentage, HELLO and CONFIG (§2.5) |
+| `0x0F`–`0xFF` | — | any | reserved for future fields. v2 decoders skip them (kept in `Frame.extra`) |
 | `0x00` | — | — | invalid (rejects zero-filled garbage) |
 
 * **Numbers** must be numbers (Lua `type(v) == "number"`, Python int/float but not bool). Anything else,
@@ -105,8 +106,8 @@ breaks the structure, and skip tags they don't know.
 * **Fields per type** (`TYPE_TAGS` in both languages; the encoder drops every other field):
   * ARM and FIRE carry the song fields `0x01`–`0x0A` (never PREFS, ACTION or CLIENT_ID).
   * CANCEL carries `placeKey` and `dropId` only.
-  * HELLO carries `placeKey` (the playing drop's, from `placeKey` or `dropId`; §2.5) and `prefs`.
-  * CONFIG carries `prefs`, `action` and `clientId`.
+  * HELLO carries `placeKey` (the playing drop's, from `placeKey` or `dropId`; §2.5), `prefs` and `musicVolume`.
+  * CONFIG carries `prefs`, `action`, `clientId` and `musicVolume`.
   * PING and NONE carry an empty body.
 * **Fit rule** (DESIGN-v1.2 §2.3, with v1.2.1's F3 / F4 fixes). `EncodeFrame(ev, maxBytes, prefer)` ≡
   `build_frame(..., max_bytes, prefer)` keeps the whole frame within a byte budget: 264 by default (the chat
@@ -181,7 +182,7 @@ A decoder returns `None` / `nil` (it never raises) unless all of these hold:
 * The TLV walk fits the body exactly, every tag is non-zero, and tags are strictly ascending (no duplicates).
 * Known tags have valid lengths and character sets: placeKey/start/length 2 B, volume 1 B ≤ 100, ids per the
   table, query 1–120 B, label 1–48 B, PREFS exactly 4 B, ACTION exactly 6 B with the check byte
-  `code XOR 0xFF`, CLIENT_ID exactly 16 B.
+  `code XOR 0xFF`, CLIENT_ID exactly 16 B, MUSIC_VOLUME exactly 1 B and at most 100.
 * **The query and the label are strict UTF-8** (v1.2.1, decision D5): an invalid sequence (bad lead or
   continuation byte, overlong form, UTF-16 surrogate, above U+10FFFF, cut off at the end) rejects the frame.
   Encoders only ever write valid UTF-8 (§2.2), so a decoded text is always exactly what was sent. Lua
@@ -213,6 +214,12 @@ encoding.
   Encoder input `prefs = { order, corner, fade, resume }`: the names match ASCII case-insensitively, `fade` and
   `resume` must be booleans, anything else is not set; nothing set means no TLV. Later preferences get new
   tags, not longer values.
+
+* **0x0E MUSIC_VOLUME** (HELLO, CONFIG; beta 3), one byte, 0–100 inclusive. This separate optional
+  preference preserves the four-byte PREFS layout. Absence keeps the app's saved `music.volume`;
+  0 means muted. Older apps skip this unknown tag. The master percentage multiplies the drop's
+  volume when the app starts a song or service test; an active song keeps its original volume.
+  In-game WoW audio files continue to use the game's Music volume.
 * **0x0C ACTION** (CONFIG), exactly 6 bytes: `code`, `code XOR 0xFF`, `issuedAt` (uint32 BE, the game's
   `time()` at the click). Codes: 1 connect-spotify · 2 disconnect-spotify · 3 test-spotify · 4 test-youtube ·
   5 youtube-sign-in. Encoder input `action = { name, at }`: the name is one of the five (ASCII

@@ -104,25 +104,11 @@ Dt.Editable = editable
 
 -- -------------------------------------------------------------- places --
 
--- Best-effort areaID of the landmark the player stands in (SPEC-v1.2 §D): explored areas at the
--- player's position, matched against the subzone text by name. Every call is guarded.
-function Dt.CurrentAreaID(mapID, subzone)
-  if type(mapID) ~= "number" or not nonEmpty(subzone) then return nil end
-  if not (C_Map and C_Map.GetPlayerMapPosition and C_MapExplorationInfo
-          and C_MapExplorationInfo.GetExploredAreaIDsAtPosition) then
-    return nil
-  end
-  local okPos, pos = pcall(C_Map.GetPlayerMapPosition, mapID, "player")
-  if not okPos or pos == nil or (ns.IsSecret and ns.IsSecret(pos)) then return nil end
-  local ok, ids = pcall(C_MapExplorationInfo.GetExploredAreaIDsAtPosition, mapID, pos)
-  if not ok or type(ids) ~= "table" then return nil end
-  local want = string.lower(subzone)
-  for _, areaID in ipairs(ids) do
-    if type(areaID) == "number" then
-      local okName, name = pcall(C_Map.GetAreaInfo, areaID)
-      if okName and type(name) == "string" and string.lower(name) == want then return areaID end
-    end
-  end
+-- Use the same guarded area lookup as Add drop here, including the raw map and
+-- known landmark fallback when the client has no exploration answer.
+function Dt.CurrentAreaID(mapID, subzone, rawMapID)
+  local Loc = ns.Location
+  if Loc and Loc.CurrentAreaID then return Loc.CurrentAreaID(mapID, subzone, rawMapID) end
   return nil
 end
 
@@ -141,7 +127,7 @@ function Dt.CurrentPlace()
   local sub = nonEmpty(snap.subzone)
   if sub and string.lower(sub) ~= string.lower(zoneName or "") then
     return { kind = "subzone", mapID = snap.zoneMapID, subzone = sub, label = sub,
-             areaID = Dt.CurrentAreaID(snap.zoneMapID, sub) }
+             areaID = Dt.CurrentAreaID(snap.zoneMapID, sub, snap.rawMapID) }
   end
   return { kind = "zone", mapID = snap.zoneMapID, label = zoneName }
 end

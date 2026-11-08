@@ -165,12 +165,12 @@ runs on every version tag:
 It refuses any other tag (`v1.2.1-rc.1`, `v1.2`). For the next beta:
 
 ```powershell
-git tag -a v1.2.1-beta.2 -m "NeedleDropper 1.2.1 beta 2"
-git push origin v1.2.1-beta.2
+git tag -a v1.2.1-beta.3 -m "NeedleDropper 1.2.1 beta 3"
+git push origin v1.2.1-beta.3
 ```
 
-- **Beta.1 uses this workflow too.** After it succeeds, the next new tag is beta.2. Do not recreate
-  an existing tag or upload the same beta manually.
+- **Every beta uses this workflow.** Beta.1 and beta.2 are already published; beta.3 updates both
+  the addon and companion. Do not recreate an existing tag or upload the same beta manually.
 - The workflow checks the tag against `__version__` in `companion/needledropper/__init__.py` and the
   TOC's `## Version:`, and says what to fix when they don't match.
 - It builds the app and the GitHub release first. Then the BigWigs packager zips the addon and

@@ -2,6 +2,28 @@
 
 Binding interface definitions for the v1.2 build. Behaviour, rationale and UI details are in [DESIGN-v1.2.md](DESIGN-v1.2.md) (authoritative), wire formats in [PROTOCOL-v2.md](PROTOCOL-v2.md) and [SETS-FORMAT.md](SETS-FORMAT.md). If a contract below is impossible, implement the closest compatible thing and report it — do not silently diverge.
 
+## Beta 3 additions (2026-11-07)
+
+- `Location.Snapshot()` separates the normalized containing zone name from raw `zoneText`,
+  `realZoneText` and `subzoneText`. A distinct landmark in `GetZoneText` supplies the matching/capture
+  sub-zone when `GetSubZoneText` is empty or repeats the containing zone. UI capture delegates area
+  lookup to `Location.CurrentAreaID`, including raw-map and known-area fallbacks. `/needle where`
+  reports the raw client text and the chosen landmark source.
+- `ND_LOCATION_READ(state)` fires after every successful state update, before `ND_LOCATION`.
+  Director uses it to reconcile edit holds captured during the location debounce with their real
+  entry timestamp. A pending hold is consumed on the next read and is applied only to that same place.
+- `Core` settings gain `musicVolume` (integer 0–100, default 100) and `minimapIcon` (boolean, default
+  true). `Minimap.lua` uses the existing compartment click/tooltip handlers, saves its angle under
+  `db.ui.minimapAngle`, and responds to setting/reset events.
+- Music preferences gain optional `volume`: saved in companion `music.volume`, echoed through
+  `music.prefs.volume`, and sent separately as `MUSIC_VOLUME` tag `0x0E` in HELLO/CONFIG. Existing
+  PREFS remains four bytes; missing volume preserves the app's saved value, and old apps skip the
+  new tag. See [PROTOCOL-v2.md](PROTOCOL-v2.md#25-v121-config-prefs-action-client_id-and-hellos-placekey).
+- The engine snapshots master volume at the start of a drop and multiplies it by the per-drop level
+  for every provider attempt and service test. This leaves the source drop unchanged and keeps the
+  same level through fallback. Slider changes affect the next song/test; WoW files retain the game's
+  Music volume.
+
 ## 1. Ownership (one owner per file during the build phase)
 
 | Builder | Owns (create/edit) |

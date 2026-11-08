@@ -52,6 +52,7 @@ D.lastPick = nil     -- what PickCandidate last reported ("checking" while a lan
 D.flags = { loading = nil, cinematic = nil, movie = nil, controlLost = nil } -- value = time set
 local checkScheduledFor = nil
 local ticker = nil
+local pendingSuppress = {}  -- edit captured a place whose location read is still debounced
 
 local function now() return GetTime() end
 
@@ -774,11 +775,25 @@ end
 
 -- Keeps drop `id` from firing for the rest of this visit (Add drop here: the player is editing
 -- it). Disarms it when it is pending.
+local function matchesSuppressedPlace(st, place)
+  if place.kind == "instance" then return st.inInstance and st.instanceID == place.instanceID end
+  if st.inInstance or st.zoneMapID ~= place.zoneMapID then return false end
+  return place.kind ~= "subzone" or st.subLower == place.subLower
+end
+
 function D.SuppressHere(id)
   if type(id) ~= "string" or id == "" then return false end
   local St = ns.Soundtracks
   local kind = (St and St.KindOfId and St.KindOfId(id)) or "zone"
   D.suppress[id] = D.EntryTime({ id = id, kind = kind })
+  pendingSuppress[id] = nil
+  local Loc = ns.Location
+  local snap = Loc and Loc.Snapshot and Loc.Snapshot()
+  if snap and ((kind == "instance" and snap.inInstance and snap.instanceID)
+     or (kind ~= "instance" and not snap.inInstance and snap.zoneMapID)) then
+    snap.kind = kind
+    if not matchesSuppressedPlace(Loc.state, snap) then pendingSuppress[id] = snap end
+  end
   if D.armed and D.armed.drop.id == id then D.Disarm("suppressed") end
   return true
 end
@@ -963,6 +978,15 @@ ns.On("PLAYER_ENTERING_WORLD", function(_, isInitialLogin, isReloadingUi)
   end
 end)
 
+ns.On("ND_LOCATION_READ", function(_, st)
+  for id, place in pairs(pendingSuppress) do
+    if matchesSuppressedPlace(st, place) then D.suppress[id] = D.EntryTime(place) end
+    -- An intervening move also consumes the pending hold: it must not suppress
+    -- a later visit to the captured place after the player has already left.
+    pendingSuppress[id] = nil
+  end
+end)
+
 ns.On("ND_LOCATION", function(_, st, ch)
   if ch.instance and st.inInstance and D.active then
     local d = D.active.drop
@@ -1044,6 +1068,7 @@ end)
 ns.On("ND_RESET", function(_, what)
   if what == "char" or what == "all" then D.scanDone = false end
   D.suppress = {}
+  pendingSuppress = {}
   D.quiet = nil
   D.Evaluate("reset")
 end)

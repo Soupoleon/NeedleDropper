@@ -38,7 +38,7 @@ import base64
 import binascii
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Mapping, Optional, Sequence, Union
 
 from .models import EventType, Flags
@@ -47,7 +47,7 @@ from .protocol import fletcher16
 __all__ = [
     "MAGIC", "VERSION", "CHAT_PREFIX", "TAG_PLACE_KEY", "TAG_DROP_ID", "TAG_SPOTIFY", "TAG_YOUTUBE",
     "TAG_QUERY", "TAG_START_DS", "TAG_LENGTH_DS", "TAG_VOLUME", "TAG_LABEL", "TAG_SET_ID", "TAG_PREFS",
-    "TAG_ACTION", "TAG_CLIENT_ID", "TAG_NAMES",
+    "TAG_ACTION", "TAG_CLIENT_ID", "TAG_MUSIC_VOLUME", "TAG_NAMES",
     "MAX_DROP_ID", "MAX_QUERY", "MAX_LABEL", "MAX_SET_ID", "MAX_BODY", "MAX_FRAME", "FRAME_OVERHEAD",
     "TRAILER_LEN", "CHECK_SEED", "CHECK_MUL", "CHECK_MOD", "CHECK_FINAL_ROUNDS", "MIN_QUERY_PART",
     "QUERY_SEP", "HEADER", "HEADER_CODES", "LEAD_CELLS", "MIN_COLS", "MAX_COLS", "COL_STEP", "MAX_ROWS",
@@ -83,11 +83,12 @@ TAG_SET_ID = 0x0A  # ASCII [A-Za-z0-9:_.-], 1..32 bytes
 TAG_PREFS = 0x0B  # 4 bytes: order, corner, fade, resume codes (DESIGN-v1.2.1 2.3); HELLO and CONFIG
 TAG_ACTION = 0x0C  # 6 bytes: code, code XOR 0xFF, issuedAt uint32 BE; CONFIG
 TAG_CLIENT_ID = 0x0D  # 16 bytes: the Spotify client id's 32 hex digits; CONFIG
-_MAX_KNOWN_TAG = TAG_CLIENT_ID
+TAG_MUSIC_VOLUME = 0x0E  # optional uint8 0..100 master percentage; HELLO and CONFIG
+_MAX_KNOWN_TAG = TAG_MUSIC_VOLUME
 TAG_NAMES = {TAG_PLACE_KEY: "placeKey", TAG_DROP_ID: "dropId", TAG_SPOTIFY: "spotify", TAG_YOUTUBE: "youtube",
              TAG_QUERY: "query", TAG_START_DS: "startDs", TAG_LENGTH_DS: "lengthDs", TAG_VOLUME: "volume",
              TAG_LABEL: "label", TAG_SET_ID: "setId", TAG_PREFS: "prefs", TAG_ACTION: "action",
-             TAG_CLIENT_ID: "clientId"}
+             TAG_CLIENT_ID: "clientId", TAG_MUSIC_VOLUME: "musicVolume"}
 
 MAX_DROP_ID = 40
 MAX_QUERY = 120
@@ -125,10 +126,10 @@ _SONG_TAGS = frozenset(range(TAG_PLACE_KEY, TAG_SET_ID + 1))
 #: never carry PREFS; a HELLO carries the playing drop's placeKey (with DROP_ACTIVE, D3) and PREFS.
 TYPE_TAGS: dict[EventType, frozenset[int]] = {
     EventType.NONE: frozenset(), EventType.PING: frozenset(),
-    EventType.HELLO: frozenset((TAG_PLACE_KEY, TAG_PREFS)),
+    EventType.HELLO: frozenset((TAG_PLACE_KEY, TAG_PREFS, TAG_MUSIC_VOLUME)),
     EventType.ARM: _SONG_TAGS, EventType.FIRE: _SONG_TAGS,
     EventType.CANCEL: frozenset((TAG_PLACE_KEY, TAG_DROP_ID)),
-    EventType.CONFIG: frozenset((TAG_PREFS, TAG_ACTION, TAG_CLIENT_ID)),
+    EventType.CONFIG: frozenset((TAG_PREFS, TAG_ACTION, TAG_CLIENT_ID, TAG_MUSIC_VOLUME)),
 }
 
 # Pixel layout.
@@ -541,28 +542,32 @@ class Prefs:
     """The PREFS TLV (0x0B, DESIGN-v1.2.1 2.3): the player's music choices made in game.
 
     ``order`` is one of :data:`PREFS_ORDERS`, ``corner`` one of :data:`PREFS_CORNERS`, ``fade``
-    and ``resume`` booleans; None means "not set" (the app keeps its own value). Unknown codes
-    from a newer addon decode as None too.
+    and ``resume`` booleans; ``volume`` is the separate optional MUSIC_VOLUME TLV (0..100).
+    None means "not set" (the app keeps its own value). Unknown codes from a newer addon decode as None too.
     """
 
     order: Optional[str] = None
     corner: Optional[str] = None
     fade: Optional[bool] = None
     resume: Optional[bool] = None
+    volume: Optional[int] = None
 
     @classmethod
     def coerce(cls, value: Any) -> Optional["Prefs"]:
         """Lua ``EncodeFrame``'s normalisation of ``ev.prefs`` (a mapping with ``order``,
-        ``corner``, ``fade``, ``resume`` or a :class:`Prefs`): names match ASCII
+        ``corner``, ``fade``, ``resume``, ``volume`` or a :class:`Prefs`): names match ASCII
         case-insensitively, fade / resume must be booleans, anything else is not set. None
         when nothing is set (no TLV)."""
         if isinstance(value, Prefs):
-            value = {"order": value.order, "corner": value.corner, "fade": value.fade, "resume": value.resume}
+            value = {"order": value.order, "corner": value.corner, "fade": value.fade, "resume": value.resume,
+                     "volume": value.volume}
         if not isinstance(value, Mapping):
             return None
         codes = (_name_code(value.get("order"), PREFS_ORDERS), _name_code(value.get("corner"), PREFS_CORNERS),
                  _bool_code(value.get("fade")), _bool_code(value.get("resume")))
-        return None if not any(codes) else cls.from_codes(bytes(codes))
+        volume = _num(value.get("volume"))
+        volume = None if volume is None else _clamp(int(math.floor(volume + 0.5)), 0, 100)
+        return None if not any(codes) and volume is None else replace(cls.from_codes(bytes(codes)), volume=volume)
 
     @classmethod
     def from_codes(cls, codes: bytes) -> "Prefs":
@@ -588,7 +593,8 @@ class Prefs:
         """``order/corner/fade/resume``, e.g. ``youtube-spotify/topleft/fade/no-resume`` ("-" = not set)."""
         def onoff(v: Optional[bool], word: str) -> str:
             return "-" if v is None else word if v else "no-" + word
-        return "/".join((self.order or "-", self.corner or "-", onoff(self.fade, "fade"), onoff(self.resume, "resume")))
+        text = "/".join((self.order or "-", self.corner or "-", onoff(self.fade, "fade"), onoff(self.resume, "resume")))
+        return text if self.volume is None else f"{text}/volume={self.volume}"
 
 
 @dataclass(frozen=True)
@@ -793,7 +799,7 @@ def _fit_body(vals: dict[int, bytes], budget: int = MAX_FRAME, prefer: str = PRE
     search), 4 dropId (placeKey stays), 5 shorten the query -- artist and title separately, each
     keeping :data:`MIN_QUERY_PART` bytes, else the whole query goes (:func:`_fit_query`) -- 6
     volume, 7 the provider id that is not preferred. placeKey, start, length, the flags, the last
-    provider id and the HELLO / CONFIG fields (PREFS, ACTION, CLIENT_ID) are never removed.
+    provider id and the HELLO / CONFIG fields (PREFS, ACTION, CLIENT_ID, MUSIC_VOLUME) are never removed.
     Returns the frame size, over the budget only when those alone exceed it."""
     size = _frame_size(vals)
     if size <= budget:
@@ -921,7 +927,10 @@ def build_frame(type: Any, *, seq: Any = 0, flags: Any = 0, drop_id: Any = None,
             vals[TAG_SET_ID] = sid.encode("ascii")
     pr = Prefs.coerce(prefs) if TAG_PREFS in allow else None
     if pr is not None:
-        vals[TAG_PREFS] = pr.codes()
+        if any(pr.codes()):
+            vals[TAG_PREFS] = pr.codes()
+        if pr.volume is not None:
+            vals[TAG_MUSIC_VOLUME] = bytes((pr.volume,))
     ac = Action.coerce(action) if TAG_ACTION in allow else None
     if ac is not None:
         vals[TAG_ACTION] = ac.value()
@@ -1019,7 +1028,14 @@ def encode_frame(frame: Frame) -> bytes:
     if frame.prefs is not None:
         if not isinstance(frame.prefs, Prefs):
             raise ValueError(f"prefs must be a Prefs, got {frame.prefs!r}")
-        tlvs.append((TAG_PREFS, frame.prefs.codes()))
+        codes = frame.prefs.codes()
+        if any(codes) or frame.prefs.volume is None:
+            tlvs.append((TAG_PREFS, codes))
+        volume = frame.prefs.volume
+        if volume is not None:
+            if not isinstance(volume, int) or isinstance(volume, bool) or not 0 <= volume <= 100:
+                raise ValueError(f"prefs.volume must be an integer 0..100, got {volume!r}")
+            tlvs.append((TAG_MUSIC_VOLUME, bytes((volume,))))
     if frame.action is not None:
         if not isinstance(frame.action, Action):
             raise ValueError(f"action must be an Action, got {frame.action!r}")
@@ -1057,7 +1073,7 @@ def decode_frame(data: Any) -> Optional[Frame]:
     event type (0..6), exact length, the 4-byte check (:func:`frame_check`), TLV structure
     (non-zero, strictly ascending tags that fit the body) and known-tag formats (lengths, id
     character sets, volume <= 100, strict UTF-8 query and label, PREFS 4 / ACTION 6 / CLIENT_ID
-    16 bytes, the ACTION check byte). Unknown PREFS / ACTION codes are not errors (the field
+    16 bytes, MUSIC_VOLUME 1 byte <= 100, the ACTION check byte). Unknown PREFS / ACTION codes are not errors (the field
     decodes as None / an action without a name). TLVs with unknown tags are skipped into
     :attr:`Frame.extra`. Decoders do not enforce :data:`TYPE_TAGS`. Never raises."""
     try:
@@ -1132,6 +1148,10 @@ def decode_frame(data: Any) -> Optional[Frame]:
             if ln != CLIENT_ID_LEN:
                 return None
             f["client_id"] = v.hex()
+        elif tag == TAG_MUSIC_VOLUME:
+            if ln != 1 or v[0] > 100:
+                return None
+            f["prefs"] = replace(f.get("prefs", Prefs()), volume=v[0])
         else:
             extra.append(TLV(tag, v))
         last = tag

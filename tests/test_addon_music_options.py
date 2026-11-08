@@ -55,14 +55,15 @@ def music_buttons(h) -> dict:
     return {e.name: e for e in raw_elements(h) if e.kind == "button"}
 
 
-def test_the_section_sits_between_needle_drops_and_playback_with_ten_rows():
+def test_the_section_sits_between_needle_drops_and_playback_with_eleven_rows():
     h = make()
     headers = [e["name"] for e in rendered(h) if e["kind"] == "header"]
     assert headers[:3] == ["Needle drops", "Music services", "Playback"]
     rows = [(e["kind"], e.get("variable") or e["name"]) for e in section(h)]
     assert rows == [("button", "NeedleDropper app"), ("button", "Spotify account"), ("button", "YouTube account"),
                     ("dropdown", "NeedleDropper_musicOrder"), ("dropdown", "NeedleDropper_youtubeCorner"),
-                    ("checkbox", "NeedleDropper_musicFade"), ("checkbox", "NeedleDropper_resumeMyMusic"),
+                    ("checkbox", "NeedleDropper_musicFade"), ("slider", "NeedleDropper_musicVolume"),
+                    ("checkbox", "NeedleDropper_resumeMyMusic"),
                     ("button", "Test Spotify"), ("button", "Test YouTube"), ("button", "Refresh status")]
     assert [e["text"] for e in section(h) if e["kind"] == "button"] == [
         "App not found", "Set up Spotify…", "Sign in to YouTube…", "Test Spotify", "Test YouTube", "Reload UI"]
@@ -197,14 +198,14 @@ def test_settings_rows_change_the_choices():
     assert p2.frame_from_event(cfg).prefs.order == "youtube"
 
 
-def test_old_settings_api_gets_the_four_settings_only():
+def test_old_settings_api_gets_the_five_settings_only():
     h = AddonHarness(sets=[SET], before_load=lambda hh: hh.shim.RemoveSettingsExtras())
     els = rendered(h)
     assert not any(e["kind"] == "button" for e in els)
     variables = [e.get("variable") for e in els]
     i = variables.index("NeedleDropper_musicOrder")
-    assert variables[i:i + 4] == ["NeedleDropper_musicOrder", "NeedleDropper_youtubeCorner",
-                                  "NeedleDropper_musicFade", "NeedleDropper_resumeMyMusic"]
+    assert variables[i:i + 5] == ["NeedleDropper_musicOrder", "NeedleDropper_youtubeCorner",
+                                  "NeedleDropper_musicFade", "NeedleDropper_musicVolume", "NeedleDropper_resumeMyMusic"]
     h.slash("music")
     d = h.g.NeedleDropperMusicDialog
     assert d.IsShown(d)

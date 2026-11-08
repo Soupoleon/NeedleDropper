@@ -6,6 +6,7 @@ local ADDON, ns = ...
 
 local L = {}
 ns.Location = L
+local T = ns.L or setmetatable({}, { __index = function(_, key) return key end })
 
 local DEBOUNCE = 0.5          -- seconds to wait after the last zone event before re-reading
 local MAX_DEBOUNCE = 2.0      -- never postpone a read for longer than this under event spam
@@ -42,6 +43,15 @@ L.loginAt = nil
 local function call(fn, ...)
   if type(fn) ~= "function" then return false end
   return pcall(fn, ...)
+end
+
+local function text(fn)
+  local ok, value = call(fn)
+  return (ok and ns.SafeString(value)) or ""
+end
+
+local function nonEmpty(value)
+  return value and value ~= "" and value or nil
 end
 
 -- Walks parentMapID up while mapType > Zone. Returns zoneMapID, mapInfo or nil.
@@ -86,10 +96,21 @@ function L.Snapshot()
     snap.zoneMapID = zid
     snap.zoneInfoName = info and ns.SafeString(info.name) or nil
   end
-  local okz, zone = call(GetZoneText)
-  snap.zoneName = (okz and ns.SafeString(zone)) or snap.zoneInfoName or ""
-  local oks, sub = call(GetSubZoneText)
-  snap.subzone = (oks and ns.SafeString(sub)) or ""
+  snap.zoneText = text(GetZoneText)
+  snap.realZoneText = text(GetRealZoneText)
+  snap.subzoneText = text(GetSubZoneText)
+  -- GetZoneText can name a landmark while GetSubZoneText is empty (or repeats the
+  -- zone). The normalized map names the containing zone; use the same landmark
+  -- text for capture AND arrival detection so leaving it ends edit suppression.
+  snap.zoneName = nonEmpty(snap.zoneInfoName) or nonEmpty(snap.realZoneText) or snap.zoneText
+  snap.subzone = snap.subzoneText
+  snap.subzoneSource = snap.subzone ~= "" and "GetSubZoneText" or "none"
+  if not snap.inInstance and snap.zoneMapID and nonEmpty(snap.zoneInfoName)
+     and (snap.subzone == "" or string.lower(snap.subzone) == string.lower(snap.zoneName))
+     and snap.zoneText ~= "" and string.lower(snap.zoneText) ~= string.lower(snap.zoneName) then
+    snap.subzone = snap.zoneText
+    snap.subzoneSource = "GetZoneText"
+  end
   snap.subLower = string.lower(snap.subzone)
   return snap
 end
@@ -155,6 +176,10 @@ function L.Refresh(reason, since, place)
   if subChanged then st.subEnteredAt = since end
   st.ready = true
 
+  -- Editing can capture a fresh place while this read is still debounced. Let
+  -- the Director carry that edit hold onto this visit before it evaluates, even
+  -- when an out-and-back move left the observed location unchanged.
+  ns.Fire("ND_LOCATION_READ", st)
   if zoneChanged or instChanged or subChanged then
     ns.Debug("location: %s / '%s'%s (%s)", tostring(st.zoneKey), st.subzone,
       st.inInstance and (" instance " .. tostring(st.instanceID)) or "", tostring(reason))
@@ -288,6 +313,9 @@ function L.Describe()
   else
     lines[#lines + 1] = "zone key: none (not inside a zone map)"
   end
+  lines[#lines + 1] = string.format(T["location text: zone='%s', real='%s', sub='%s', minimap='%s'"],
+    snap.zoneText, snap.realZoneText, snap.subzoneText, text(GetMinimapZoneText))
+  lines[#lines + 1] = string.format(T["landmark source: %s"], snap.subzoneSource)
   if snap.subzone ~= "" then
     local slug = string.gsub(string.lower(snap.subzone), "[^a-z0-9]+", "-")
     slug = string.gsub(string.gsub(slug, "^%-+", ""), "%-+$", "")
@@ -323,6 +351,10 @@ function L.Describe()
       local d = cands[i]
       local state = ""
       if ns.Director and ns.Director.IsDone and ns.Director.IsDone(d) then state = " (heard)" end
+      local D = ns.Director
+      if D and D.suppress and D.EntryTime and D.suppress[d.id] == D.EntryTime(d) then
+        state = state .. T[" (held for this visit)"]
+      end
       parts[#parts + 1] = string.format("%s \"%s\"%s", d.id, ns.EscapeText and ns.EscapeText(d.label or "") or (d.label or ""), state)
     end
     lines[#lines + 1] = "matching drops: " .. table.concat(parts, ", ")

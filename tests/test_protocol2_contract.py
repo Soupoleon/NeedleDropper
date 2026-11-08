@@ -83,7 +83,7 @@ def lua_decoded(d) -> dict:
         if d[k] is not None:
             out[k] = d[k]
     if d.prefs is not None:
-        out["prefs"] = {k: d.prefs[k] for k in ("order", "corner", "fade", "resume") if d.prefs[k] is not None}
+        out["prefs"] = {k: d.prefs[k] for k in ("order", "corner", "fade", "resume", "volume") if d.prefs[k] is not None}
     if d.action is not None:
         out["action"] = {k: d.action[k] for k in ("code", "name", "at") if d.action[k] is not None}
     return out
@@ -774,8 +774,8 @@ def test_constants_match(lua):
     for t in range(7):
         lua_tags = {int(k) for k, v in lua.P.TYPE_TAGS[t].items() if v}
         assert lua_tags == set(p2.TYPE_TAGS[EventType(t)]), t
-    assert p2.TYPE_TAGS[EventType.HELLO] == {p2.TAG_PLACE_KEY, p2.TAG_PREFS}
-    assert p2.TYPE_TAGS[EventType.CONFIG] == {p2.TAG_PREFS, p2.TAG_ACTION, p2.TAG_CLIENT_ID}
+    assert p2.TYPE_TAGS[EventType.HELLO] == {p2.TAG_PLACE_KEY, p2.TAG_PREFS, p2.TAG_MUSIC_VOLUME}
+    assert p2.TYPE_TAGS[EventType.CONFIG] == {p2.TAG_PREFS, p2.TAG_ACTION, p2.TAG_CLIENT_ID, p2.TAG_MUSIC_VOLUME}
     assert p2.TAG_PREFS not in p2.TYPE_TAGS[EventType.FIRE] | p2.TYPE_TAGS[EventType.ARM]
 
 
@@ -1112,19 +1112,78 @@ def test_utf8_valid_matches_python_strict_codec(lua):
 
 
 def test_unknown_tags_are_skipped_forward_compatible(lua):
-    # was 0x0B (3 bytes): 0x0B-0x0D are PREFS / ACTION / CLIENT_ID now, so the unknown tag is 0x0E
-    body = b"\x02\x09zone:1429" + b"\x0e\x03abc" + b"\x7f\x00" + b"\xfe\x02\x01\x02"
+    # was 0x0B (3 bytes): 0x0B-0x0E are known now, so the unknown tag is 0x0F
+    body = b"\x02\x09zone:1429" + b"\x0f\x03abc" + b"\x7f\x00" + b"\xfe\x02\x01\x02"
     data = _with_body(body)
     f = p2.decode_frame(data)
     assert f is not None and f.drop_id == "zone:1429"
-    assert f.extra == (p2.TLV(0x0E, b"abc"), p2.TLV(0x7F, b""), p2.TLV(0xFE, b"\x01\x02"))
+    assert f.extra == (p2.TLV(0x0F, b"abc"), p2.TLV(0x7F, b""), p2.TLV(0xFE, b"\x01\x02"))
     assert p2.encode_frame(f) == data  # extras round-trip in tag order
     d = lua.P.DecodeFrame(ltable(lua, data))
-    assert d.dropId == "zone:1429" and len(d.unknown) == 3 and d.unknown[1].tag == 0x0E and d.unknown[1].value == "abc"
+    assert d.dropId == "zone:1429" and len(d.unknown) == 3 and d.unknown[1].tag == 0x0F and d.unknown[1].value == "abc"
     # a decoder of this version still accepts every known tag in a frame from a newer encoder
-    for tag in (0x05, 0x0B, 0x0C, 0x0D):
+    for tag in (0x05, 0x0B, 0x0C, 0x0D, 0x0E):
         with pytest.raises(ValueError):
             p2.encode_frame(dataclasses.replace(f, extra=(p2.TLV(tag, b"x"),)))  # known tag as "extra"
+
+
+def test_master_volume_extension_all_percentages_and_legacy_frames(lua):
+    for typ in (1, 6):
+        for volume in range(101):
+            for prefs in ({"volume": volume}, {"order": "youtube", "fade": False, "volume": volume}):
+                ev = {"type": typ, "seq": 17, "prefs": prefs}
+                raw = py_frame(ev)
+                assert lua_frame(lua, ev) == raw
+                assert p2.decode_frame(raw).prefs.volume == volume
+                assert lua_decoded(lua.P.DecodeFrame(ltable(lua, raw))) == py_decoded(p2.decode_frame(raw))
+    # Old four-byte PREFS remains byte-exact; missing volume never means reset to 100.
+    raw = _with_body(b"\x0b\x04\x01\x01\x01\x01", t=6)
+    assert p2.decode_frame(raw).prefs.volume is None
+    assert p2.encode_frame(p2.decode_frame(raw)) == raw
+    assert lua.P.DecodeFrame(ltable(lua, raw)).prefs.volume is None
+    assert p2.decode_frame(py_frame({"type": 1})).prefs is None
+    for typ in (0, 2, 3, 4, 5):
+        ev = {"type": typ, "prefs": {"volume": 0}}
+        assert lua_frame(lua, ev) == py_frame(ev)
+        assert p2.decode_frame(py_frame(ev)).prefs is None
+
+
+def test_master_volume_rejects_invalid_lengths_and_values(lua):
+    for length in range(256):
+        if length == 1:
+            continue
+        raw = _with_body(bytes((0x0E, length)) + (bytes(length) if length <= 253 else b""), t=6)
+        assert p2.decode_frame(raw) is None
+        assert lua.P.DecodeFrame(ltable(lua, raw)) is None
+    for volume in range(101, 256):
+        raw = _with_body(bytes((0x0E, 1, volume)), t=1)
+        assert p2.decode_frame(raw) is None
+        assert lua.P.DecodeFrame(ltable(lua, raw)) is None
+    for volume in (-1, 101, True, 1.5, "50"):
+        with pytest.raises(ValueError):
+            p2.encode_frame(p2.Frame(type=EventType.CONFIG, prefs=p2.Prefs(volume=volume)))
+
+
+def test_master_volume_normalization_and_beacon_capacity(lua):
+    for volume, expected in ((-3, 0), (101, 100), (49.5, 50), (0, 0), (False, None), ("50", None),
+                             (float("nan"), None), (float("inf"), None)):
+        ev = {"type": 6, "prefs": {"volume": volume}}
+        raw = py_frame(ev)
+        assert lua_frame(lua, ev) == raw
+        decoded = p2.decode_frame(raw)
+        assert (decoded.prefs.volume if decoded.prefs else None) == expected
+    prefs = {"order": "spotify-youtube", "corner": "topright", "fade": True, "resume": True, "volume": 50}
+    events = [({"type": 1, "placeKey": 42, "prefs": prefs}, 22),
+              ({"type": 6, "prefs": prefs}, 18),
+              ({"type": 6, "prefs": prefs, "action": {"name": "test-spotify", "at": 7}}, 26),
+              ({"type": 6, "prefs": {"volume": 50}, "clientId": CLIENT_ID,
+                "action": {"name": "connect-spotify", "at": 7}}, 38)]
+    for ev, length in events:
+        for pixels in (2, 3, 4):
+            grid = p2.encode_event_cells(ev, p2.Geometry.beacon(pixels))
+            assert grid.frame_len == length and grid.rows == 1
+            assert lua_frame(lua, ev, p2.capacity(1)) == py_frame(ev, p2.capacity(1))
+            assert len(py_frame(ev, p2.capacity(1))) <= p2.capacity(1)
 
 
 def test_encode_frame_is_strict():

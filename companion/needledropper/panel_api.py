@@ -678,6 +678,10 @@ class Companion:
         self.on_pause_changed: Optional[Callable[[bool], Any]] = None
 
         self._lock = threading.RLock()
+        # The latest game choice is applied before queued FIREs. Older config-worker writes
+        # must not roll it back while newer slider frames are still waiting to be persisted.
+        self._music_volume_lock = threading.RLock()
+        self._game_music_volume: Optional[int] = None
         self._rebuild_lock = threading.RLock()  # serialises provider / transport / engine rebuilds
         self.engine: Any = None
         self.providers: list = []
@@ -916,6 +920,15 @@ class Companion:
                 setter(music_choices(self.cfg)["order"])
             except Exception:  # noqa: BLE001 - an engine without it plays the default order
                 log.debug("set_music_order failed", exc_info=True)
+        self._set_music_volume(engine)
+
+    def _set_music_volume(self, engine: Any) -> None:
+        """Apply the latest received choice, even while older config writes are queued."""
+        setter = getattr(engine, "set_music_volume", None) if engine is not None else None
+        if callable(setter):
+            with self._music_volume_lock:
+                volume = self._game_music_volume
+                setter(music_choices(self.cfg)["volume"] if volume is None else volume)
 
     def _replace_engine(self) -> None:
         """A new engine with the current providers (after a crash, or a provider change the engine
@@ -932,7 +945,9 @@ class Companion:
             new = self._make_engine(self.providers)
             new.start()
             with self._lock:
-                self.engine = new
+                with self._music_volume_lock:
+                    self._set_music_volume(new)
+                    self.engine = new
 
     def _start_transports(self) -> list:
         if self._transport_factory is None:
@@ -970,6 +985,14 @@ class Companion:
                 setter(order)
             except Exception:  # noqa: BLE001 - the worker applies it again
                 log.debug("set_music_order failed", exc_info=True)
+
+        volume = getattr(getattr(frame, "prefs", None), "volume", None)
+        if volume is not None:
+            with self._music_volume_lock:
+                self._game_music_volume = volume
+                setter = getattr(self.engine, "set_music_volume", None) if self.engine is not None else None
+                if callable(setter):
+                    setter(volume)
 
     def _configure_deck(self) -> None:
         d = self.cfg.get("deck") or {}

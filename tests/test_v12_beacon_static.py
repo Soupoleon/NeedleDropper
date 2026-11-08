@@ -67,7 +67,7 @@ def test_protocol2_exposes_what_v1_callers_need():
 def test_a3_files_create_no_globals_and_register_known_events():
     h = BeaconHarness(settings={"chatlog": True})
     h.emit(1)
-    base = BeaconHarness(settings={"chatlog": True}, files=["Protocol2.lua", "Core.lua"])
+    base = BeaconHarness(settings={"chatlog": True}, files=["Locale.lua", "Protocol2.lua", "Core.lua"])
     assert h.new_globals() - base.new_globals() == {"NeedleDropperBeacon"}
     assert h.from_lua(h.log.unknownEvents) == {}
     assert h.from_lua(h.ns.unsupportedEvents) == {}

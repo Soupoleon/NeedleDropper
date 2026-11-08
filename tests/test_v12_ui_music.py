@@ -180,7 +180,8 @@ def test_how_songs_play_controls_write_the_settings():
     assert h.text(d.Choices) == "The NeedleDropper app follows this within a second while the game runs."
     assert h.text(d.StatusLines[2]).endswith("not used: Play music with is YouTube only")
     h.advance(1.1)
-    assert configs(h)[-1]["prefs"] == {"order": "youtube", "corner": "bottomleft", "fade": False, "resume": True}
+    assert configs(h)[-1]["prefs"] == {"order": "youtube", "corner": "bottomleft", "fade": False, "resume": True,
+                                       "volume": 100}
 
 
 def test_refresh_reloads_once_and_the_signal_button_pings():

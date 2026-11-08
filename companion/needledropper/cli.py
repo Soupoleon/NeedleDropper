@@ -35,7 +35,7 @@ from . import __version__, zones
 from .config import (
     KNOWN_PROVIDERS, LOG_BACKUP_COUNT, LOG_MAX_BYTES, REPO_ADDON_DIR, RETIRED_ADDON_FILES, ConfigError, Paths,
     addon_status, addon_toc, atomic_write_bytes, config_path, expand_path, is_game_running, load_config,
-    pack_paths_from_config, parse_position, paths_from_config, provider_enabled, read_install_receipt,
+    music_choices, pack_paths_from_config, parse_position, paths_from_config, provider_enabled, read_install_receipt,
     read_toc_version, update_config_file, write_install_receipt,
 )
 
@@ -1088,6 +1088,7 @@ def _test_drop(ctx: Ctx, args: argparse.Namespace) -> int:
 
         engine = construct_engine(Engine, providers, deck, {
             "fade_in_ms": int(ctx.cfg.get("fadeInMs", 2500)), "fade_out_ms": int(ctx.cfg.get("fadeOutMs", 3000)),
+            "music_volume": music_choices(ctx.cfg)["volume"],
             "log": logging.getLogger("needledropper.engine")})
         engine.start()
         engine.submit(frame, "test-drop")

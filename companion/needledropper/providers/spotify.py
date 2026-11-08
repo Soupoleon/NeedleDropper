@@ -1558,6 +1558,12 @@ class SpotifyProvider(Provider):
                 s.volume_ok = False
         return ok
 
+    def _require_muted(self, s: _Session) -> None:
+        """A requested zero must be established before sending any play command."""
+        if s.orig_volume != 0 and not self._set_volume(s, 0):
+            raise ProviderError("Spotify cannot mute this device. Choose NeedleDropper (this app) under "
+                                "Play on, or use a device with volume control.")
+
     def _ramp(self, s: _Session, start: int, end: int, duration_ms: int,
               wait: Callable[[float], bool]) -> bool:
         """Move the volume start -> end in <= 8 steps. ``wait`` returns True to cancel."""
@@ -1766,11 +1772,15 @@ class SpotifyProvider(Provider):
         device = self._acquire_device()
         s = self._new_session(uri, device, start_ms, snapshot)
         target, fade = self._plan_volume(s, device, drop, fade_in_ms)
+        muted = _clamp_volume(drop.volume) == 0 or self._fixed_volume == 0
         low = int(round(target * FADE_FLOOR)) if fade and target is not None else None
         preset = False
         started = False  # Spotify accepted the play command: from then on it may start late
         try:
-            if fade and low is not None:
+            if muted:
+                self._require_muted(s)
+                target, fade, preset = 0, False, True
+            elif fade and low is not None:
                 preset = self._set_volume(s, low)
                 if not preset:
                     with s.lock:
@@ -1778,9 +1788,14 @@ class SpotifyProvider(Provider):
             elif target is not None and target != s.orig_volume:
                 preset = self._set_volume(s, target)
 
-            used = self._start_playback(device, uri, start_ms)
+            def mute_retry(retry: dict) -> None:
+                if str(retry["id"]) != s.device_id:
+                    self._rebind_device(s, retry)
+                self._require_muted(s)
+
+            used = self._start_playback(device, uri, start_ms, before_retry=mute_retry if muted else None)
             started = True
-            if used.get("id") != device.get("id"):
+            if used.get("id") != s.device_id:
                 self._rebind_device(s, used)
                 target, fade = self._plan_volume(s, used, drop, fade_in_ms)
                 low = int(round(target * FADE_FLOOR)) if fade and target is not None else None
@@ -1871,7 +1886,8 @@ class SpotifyProvider(Provider):
         self._call("PUT", "/me/player/play", params={"device_id": device_id},
                    body={"uris": [uri], "position_ms": int(start_ms)})
 
-    def _start_playback(self, device: dict, uri: str, start_ms: int) -> dict:
+    def _start_playback(self, device: dict, uri: str, start_ms: int,
+                        *, before_retry: Optional[Callable[[dict], None]] = None) -> dict:
         """PUT play; on 404/NO_ACTIVE_DEVICE refetch devices (or wake Spotify) and retry once."""
         try:
             self._play_command(str(device["id"]), uri, start_ms)
@@ -1886,6 +1902,8 @@ class SpotifyProvider(Provider):
             retry = self._wake_device() or retry
         if retry is None:
             raise self._device_error()
+        if before_retry is not None:
+            before_retry(retry)
         try:
             self._play_command(str(retry["id"]), uri, start_ms)
         except SpotifyApiError as exc:

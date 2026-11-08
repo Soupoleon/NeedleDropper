@@ -119,8 +119,12 @@ def test_pcall_only_around_optional_client_apis(fname):
 
 
 def test_only_binding_globals_are_added():
-    base = AddonHarness(files=["Json.lua", "Base64.lua", "Protocol2.lua", "Core.lua"])
-    core_globals = base.new_globals()
+    base = AddonHarness(files=["Locale.lua", "Json.lua", "Base64.lua", "Protocol2.lua", "Core.lua"])
+    bindings = {"BINDING_HEADER_NEEDLEDROPPER", "BINDING_NAME_NEEDLEDROPPER_TOGGLE",
+                "BINDING_NAME_NEEDLEDROPPER_ADD_HERE", "BINDING_NAME_NEEDLEDROPPER_STOP"}
+    # Locale is a Core prerequisite; leave its intended globals in the comparison
+    # so the model still has to add exactly these four bindings and nothing else.
+    core_globals = base.new_globals() - bindings
     h = ModelHarness(profile="model")
     h.call("Soundtracks.Create", "Mine")
     h.call("Soundtracks.OverrideHere", "zone:1429", {"title": "x"})
@@ -128,8 +132,7 @@ def test_only_binding_globals_are_added():
     h.call("Companion.Read")
     h.logout()
     extra = h.new_globals() - core_globals - {"SHIM_ENCODING_BRIDGE", "C_EncodingUtil"}
-    assert extra == {"BINDING_HEADER_NEEDLEDROPPER", "BINDING_NAME_NEEDLEDROPPER_TOGGLE",
-                     "BINDING_NAME_NEEDLEDROPPER_ADD_HERE", "BINDING_NAME_NEEDLEDROPPER_STOP"}
+    assert extra == bindings
 
 
 # -------------------------------------------------------------------- Locale --

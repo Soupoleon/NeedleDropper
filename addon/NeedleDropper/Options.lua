@@ -7,14 +7,14 @@ local ADDON, ns = ...
 --     that is showing, so the effect is visible while dragging);
 --   * "Send a test signal" under Companion link (PING + TEST: the app shows a notification);
 --   * the Music services section (DESIGN-v1.2.1 1.2): rows 1-3 (the app's status, the Spotify
---     account, the YouTube sign-in), the four music settings, rows 8-10 (Test Spotify, Test
+--     account, the YouTube sign-in), the five music settings, rows 9-11 (Test Spotify, Test
 --     YouTube, Refresh status). Button texts and tooltips are functions (forever's
 --     SettingsButtonControlMixin:EvaluateName and Settings.InitTooltip call them each time the row
 --     is shown), each row adds its own search tags, and the rows that send a request to the app
 --     are disabled (AddModifyPredicate) while the app can't take one.
 -- Every Settings call is guarded; if the API is missing or changed, the addon stays fully
 -- usable through /needle settings and /needle set, and a missing header or button never
--- costs a setting (without button initializers only the four music settings appear; /needle
+-- costs a setting (without button initializers only the five music settings appear; /needle
 -- music opens the Music services dialog).
 
 local O = {}
@@ -39,12 +39,13 @@ local SECTIONS = {
 local PREVIEW_AFTER = "toastSeconds"   -- the title card's Preview button follows this setting
 local SIGNAL_AFTER = "chatlogPadBytes" -- "Send a test signal" ends the Companion link section
 local MUSIC_BEFORE = "musicOrder"      -- Music services rows 1-3 sit between the header and this setting
-local MUSIC_AFTER = "resumeMyMusic"    -- rows 8-10 follow this one
--- Search tags of the four music settings (their labels are searched anyway).
+local MUSIC_AFTER = "resumeMyMusic"    -- rows 9-11 follow this one
+-- Search tags of the five music settings (their labels are searched anyway).
 local SETTING_TAGS = {
   musicOrder = { "Spotify", "YouTube" },
   youtubeCorner = { "YouTube", "corner", "player" },
   musicFade = { "fade" },
+  musicVolume = { "volume", "Spotify", "YouTube" },
   resumeMyMusic = { "Spotify", "resume" },
 }
 
@@ -72,6 +73,7 @@ end
 -- Slider value label: a percentage for percent settings, two decimals for fine steps, whole
 -- numbers otherwise.
 function O.FormatSliderValue(meta, v)
+  if meta.percentValue and type(v) == "number" then return string.format("%d%%", math.floor(v + 0.5)) end
   if type(v) ~= "number" then return tostring(v) end
   if meta.percent then return string.format("%d%%", math.floor(v * 100 + 0.5)) end
   if not meta.integer and (meta.step or 1) < 1 then return string.format("%.2f", v) end

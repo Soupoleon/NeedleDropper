@@ -24,7 +24,7 @@ from needledropper import protocol2 as p2  # noqa: E402,F401
 
 #: Files the default harness loads, in final-TOC order (CONTRACTS-v1.2 2.1), restricted to A3's
 #: modules and the core services they need.
-V12_FILES = ["Protocol2.lua", "Core.lua", "Emit.lua", "Beacon.lua", "ChatLink.lua"]
+V12_FILES = ["Locale.lua", "Protocol2.lua", "Core.lua", "Emit.lua", "Beacon.lua", "ChatLink.lua"]
 
 #: The whole addon in TOC order, for the integration check.
 INTEGRATED_FILES = toc_files()

@@ -1639,9 +1639,9 @@ function S.PlaceHere()
   end
   local zone = posInt(snap.zoneMapID)
   if not zone then return nil, L["You aren't in a zone that can have a needle drop."] end
-  local zoneName = nonEmpty(snap.zoneName) or mapName(zone) or format(L["Zone %s"], intText(zone))
+  local zoneName = nonEmpty(snap.zoneInfoName) or nonEmpty(snap.zoneName) or mapName(zone) or format(L["Zone %s"], intText(zone))
   local subzone = nonEmpty(snap.subzone)
-  if subzone and asciiLower(subzone) ~= asciiLower(snap.zoneName or "") then
+  if subzone and asciiLower(subzone) ~= asciiLower(zoneName) then
     local areaID = S.CurrentAreaID(zone, subzone, snap.rawMapID)
     if areaID then
       local place = { kind = "subzone", mapID = zone, areaID = areaID, subzone = subzone, label = subzone, zoneName = zoneName }

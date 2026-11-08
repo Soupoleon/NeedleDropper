@@ -117,7 +117,7 @@ flowchart LR
    **WoW: Forever** installation and the **Beta** channel, then install NeedleDropper **1.2.1**
    with WoW closed. If the file is still awaiting moderation or absent from the manager, use the
    GitHub-only option below. Already have the 1.2.1 addon from CurseForge? Keep it and get the app.
-2. **For Spotify and YouTube, get the companion from [1.2.1 beta 2 on GitHub](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2).**
+2. **For Spotify and YouTube, get the companion from [1.2.1 beta 3 on GitHub](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3).**
    Download **`NeedleDropper.exe`**, or unzip `NeedleDropper-1.2.1-win64.zip`, somewhere permanent
    and run it. CurseForge supplies the addon; the companion download is on GitHub.
    If Windows says *"Windows protected your PC"*, click **More info → Run anyway**
@@ -142,7 +142,7 @@ flowchart LR
 5. **Share.** On the Soundtracks tab, **Share...** gives you a code to paste into Discord; friends paste
    it into **Import...** ([share codes](docs/PACKS.md#share-codes)).
 
-**GitHub-only option:** from the same [beta 2 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2),
+**GitHub-only option:** from the same [beta 3 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3),
 download `NeedleDropper-1.2.1-addon.zip` and `NeedleDropper.exe`. With WoW closed, put the zip's
 `NeedleDropper` folder into `World of Warcraft\_forever_\Interface\AddOns`, then follow step 2 for
 the app. No repository clone, developer tools, GitHub account or invitation is needed.
@@ -166,8 +166,10 @@ New betas are announced to testers directly; the app's update check reports stab
 | `/needle stop` | Stop the song that is playing; nothing else starts here until you move on |
 | `/needle help` | Every command |
 
-The add-on compartment (the small numbered button by the minimap) opens the window with a left-click
-and the settings with a right-click; hovering over it shows what is playing. The complete list of
+The minimap icon opens the window with a left-click and the settings with a right-click. Drag it
+around the minimap or hide it with **Show minimap icon** in settings. The add-on compartment also
+provides access. **Music volume** in settings controls the next companion song or test; in-game
+files use WoW's Music volume. The complete list of
 commands and settings is in the [command reference](docs/TROUBLESHOOTING.md#needle-command-reference).
 
 ## Documentation

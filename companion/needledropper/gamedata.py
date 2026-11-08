@@ -224,7 +224,7 @@ MAX_TIME = 4102444800
 _MUSIC_FIELDS = ("spotify", "youtube", "prefs", "actions")
 _MUSIC_SPOTIFY_FIELDS = ("clientId", "redirectUri", "account", "product", "state", "mode", "problem")
 _MUSIC_YOUTUBE_FIELDS = ("enabled", "player", "signInOpened")
-_MUSIC_PREFS_FIELDS = ("order", "corner", "fade", "resume", "fromGame")
+_MUSIC_PREFS_FIELDS = ("order", "corner", "fade", "resume", "volume", "fromGame")
 _MUSIC_ACTION_FIELDS = ("id", "action", "result", "text", "at")
 _CLIENT_ID_RE = re.compile(r"[0-9a-f]{32}")
 _REDIRECT_RE = re.compile(r"http://127\.0\.0\.1:[0-9]{1,5}/callback")
@@ -543,6 +543,8 @@ def _music_youtube(name: str, value: Any) -> Any:
 
 def _music_prefs(name: str, value: Any) -> Any:
     what = f"music.prefs.{name}"
+    if name == "volume":
+        return _whole(value, what, 100)
     if name == "order":
         return _one_of(value, MUSIC_ORDERS, what)
     if name == "corner":

@@ -3,9 +3,9 @@
 This guide takes you from a clean Windows PC to your first needle drop, without any programming
 tools. Install the **WoW: Forever addon from [CurseForge](https://www.curseforge.com/wow/addons/needledropper)**
 (Beta channel, version 1.2.1), then get **`NeedleDropper.exe` from
-[GitHub's beta 2 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2)**.
-Already have the 1.2.1 CurseForge addon? You only need the new companion. A complete GitHub-only
-route is below if you prefer it or the CurseForge file is still awaiting moderation.
+[GitHub's beta 3 release](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3)**.
+Update both the addon and companion to beta 3 for the location fixes, volume setting and minimap icon.
+A complete GitHub-only route is below if you prefer it or the CurseForge file is still awaiting moderation.
 
 > **What is NeedleDropper?** The first time your character arrives somewhere new in World of Warcraft:
 > Forever, the zone music fades, one hand-picked song starts, and a quiet title card drifts in at the
@@ -50,15 +50,15 @@ NeedleDropper has two parts:
 1. Install the addon through [CurseForge](https://www.curseforge.com/wow/addons/needledropper), selecting
    **WoW: Forever**, **Beta** files and version **1.2.1** ([step 2](#2-install-the-addon)).
    If it is still awaiting moderation or does not appear, use the GitHub-only alternative below.
-2. Open [NeedleDropper 1.2.1 beta 2](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.2),
+2. Open [NeedleDropper 1.2.1 beta 3](https://github.com/Soupoleon/NeedleDropper/releases/tag/v1.2.1-beta.3),
    or the [Releases page](https://github.com/Soupoleon/NeedleDropper/releases) for a newer beta.
-   Note the tag, `v1.2.1-beta.2`: the bug report form asks for it.
+   Note the tag, `v1.2.1-beta.3`: the bug report form asks for it.
 3. Under **Assets**, download **`NeedleDropper.exe`** for Spotify and YouTube. The companion is
    always downloaded from GitHub, even if CurseForge manages your addon. These are all five assets:
 
    | File | What it is |
    |---|---|
-   | `NeedleDropper-1.2.1-addon.zip` | The addon for manual installation; skip if CurseForge already installed 1.2.1 |
+   | `NeedleDropper-1.2.1-addon.zip` | The addon for manual installation; skip if CurseForge already installed beta 3 |
    | `NeedleDropper.exe` | The app, for Spotify and YouTube (skip it if you only want title cards) |
    | `NeedleDropper-1.2.1-win64.zip` | The same app with a quick start |
    | `NeedleDropper-1.2.1-win64-folder.zip` | The same app as a folder; keep its files together ([step 3](#3-start-the-app)) |
@@ -77,8 +77,8 @@ installation: no CurseForge, repository clone, developer tools, GitHub account o
 
 **CurseForge:** close WoW, select its **WoW: Forever** installation in the CurseForge app, find
 **NeedleDropper**, and enable **Beta** files for it. Install the newest **1.2.1 Beta** file, or choose
-it from the project's **Files** tab. If you already have the 1.2.1 addon, keep it and continue to
-step 3; beta.2 does not change the base addon version. A 1.2.1 app cannot read a 1.2.0 addon's signals.
+it from the project's **Files** tab. Update an older beta even if its base version also says 1.2.1;
+beta 3 changes both the addon and the app. A 1.2.1 app cannot read a 1.2.0 addon's signals.
 
 **GitHub-only/manual install:** if you downloaded the addon zip, follow these steps:
 
@@ -253,6 +253,16 @@ resolution, Windows scaling, HDR and display mode.
 
 ## 6. The quick test (about 15 minutes)
 
+**Beta 3 controls:** left-click the new minimap icon to open the addon; right-click it for settings.
+Drag it around the minimap, or turn off **Show minimap icon**. Set **Music volume**, then use a
+service test to check the next song's level. The slider does not change a song already playing.
+
+**Custom landmark check:** after updating the addon, stand inside Zoram Strand (or another landmark)
+and press **Use my location** on the intended drop. Verify the place names the landmark, not all of
+Ashenvale. Leave until `/needle where` shows another location, return, and wait for the landmark
+delay. If it already says *heard*, choose **Play again next visit** before leaving. *Fresh* exploration
+history does not repeat heard songs or remove the cooldown.
+
 Needle drops are rare on purpose: each place plays once per character, the next drop waits 10
 minutes, and places your character has already explored count as heard. For testing, relax these
 rules first:
@@ -414,8 +424,8 @@ All the details: [Uninstalling](INSTALL.md#uninstalling).
 - [ ] **A release:** push a beta tag (`v1.2.1-beta.N`). The release workflow builds and publishes the
       pre-release with its five files; check that they are there and match `SHA256SUMS.txt`.
       Check CurseForge's Beta file for WoW: Forever, and give testers the GitHub addon zip if it
-      awaits moderation. Both parts need base version 1.2.1; an existing 1.2.1 CurseForge addon
-      works with the beta.2 app. A 1.2.0 app and a 1.2.1 addon cannot read each other.
+      awaits moderation. Update both parts to beta 3 for these fixes, even though their base
+      versions remain 1.2.1. A 1.2.0 app and a 1.2.1 addon cannot read each other.
 - [ ] **Spotify:** point the tester to step 4 to create their own developer app. Never send them
       the owner's Client ID, tokens or Client secret.
 - [ ] **Send** this guide and the link to the release.

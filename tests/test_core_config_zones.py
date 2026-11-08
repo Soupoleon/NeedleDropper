@@ -26,7 +26,7 @@ def test_default_config_matches_spec():
         "deck": {"port": 8322, "autoOpen": "youtube", "browser": "edge", "playerPosition": "",
                  "playerCorner": "topright", "panelOnStart": "first-run"},
         # 1.2.1 (DESIGN-v1.2.1 3.2): the music choices the game sends ("Play music with", fade)
-        "music": {"order": "spotify-youtube", "fade": True, "fromGame": False},
+        "music": {"order": "spotify-youtube", "fade": True, "volume": 100, "fromGame": False},
         # v1.2: the capture region is the client area's top-left 512 x 48 px (DESIGN-v1.2 2.3)
         "transport": {"pixel": {"enabled": True, "method": "auto", "hz": 4, "regionW": 512, "regionH": 48},
                       "chatlog": {"enabled": True, "pollMs": 250, "match": "strict"}},

@@ -44,6 +44,19 @@ elseif locale == "zhTW" then
   --@localization(locale="zhTW", format="lua_additive_table", handle-unlocalized="ignore")@
 end
 
+-- Shared settings labels and minimap instructions. Keep literal keys here so the
+-- localization catalogue can discover text used by the settings metadata too.
+ns.MinimapText = {
+  label = L["Show minimap icon"],
+  tip = L["Left-click the minimap icon to open NeedleDropper. Right-click for settings. Drag to move it."],
+  drag = L["Drag to move around the minimap."],
+  hide = L["Hide this icon in Options > AddOns > NeedleDropper."],
+}
+ns.MusicVolumeText = {
+  label = L["Music volume"],
+  tip = L["Volume for Spotify, YouTube and companion audio files. Combined with each drop's volume. Changes apply to the next drop or music test."],
+}
+
 -- Key bindings (Bindings.xml). The keybinding settings page shows a binding's category as
 -- _G[category] when that is a string (GetBindingCategoryName in
 -- Blizzard_SettingsDefinitions_Frame/Keybindings.lua), and each binding as its

@@ -194,6 +194,7 @@ local function checkMusic(raw)
     if ORDER[pr.order] then p.order = pr.order end
     if CORNER[pr.corner] then p.corner = pr.corner end
     p.fade, p.resume, p.fromGame = bool(pr.fade), bool(pr.resume), bool(pr.fromGame)
+    p.volume = uint(pr.volume, 100)
   end
   if type(raw.actions) == "table" then
     local list = {}

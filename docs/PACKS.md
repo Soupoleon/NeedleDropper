@@ -71,7 +71,9 @@ settings.
 1. **Go there:** a zone, a town, an inn, a bridge, a dungeon.
 2. **Press Add drop here** (or type `/needle add`, or use its key binding). NeedleDropper works out
    the place for you: inside a dungeon or raid, that instance; inside a landmark (when the game shows
-   a subzone name that isn't the zone's), that landmark; otherwise the whole zone. If a drop for this
+   a landmark name through its zone or sub-zone text), that landmark; otherwise the whole zone. The
+   landmark is compared with the zone map's name, so matching zone/sub-zone labels do not turn it
+   into a whole-zone drop. If a drop for this
    place already exists, NeedleDropper selects it instead of making a second one (a built-in drop
    then shows **Change song here**, [below](#change-a-song-from-a-built-in-soundtrack)).
 3. **Fill in the song:** type the **Artist** and **Title**, and paste a link if you have one: a

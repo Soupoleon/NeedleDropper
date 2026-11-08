@@ -654,7 +654,8 @@ end
 -- once set in game), or nil. The HELLO on screen changes at once.
 function B.SetPrefs(prefs)
   if type(prefs) == "table" then
-    B.prefs = { order = prefs.order, corner = prefs.corner, fade = prefs.fade, resume = prefs.resume }
+    B.prefs = { order = prefs.order, corner = prefs.corner, fade = prefs.fade, resume = prefs.resume,
+                volume = prefs.volume }
   else
     B.prefs = nil
   end

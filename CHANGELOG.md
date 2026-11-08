@@ -4,6 +4,38 @@ All notable changes to NeedleDropper (the addon and the companion app). The form
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1-beta.3] - 2026-11-07
+
+Update **both the addon and companion app**, including older betas whose base version also says 1.2.1.
+
+### Fixed
+
+- **Use my location** distinguishes the zone map from a landmark reported through the client's zone
+  text. It no longer saves the whole zone just because the separate sub-zone field is empty, or
+  because the zone and sub-zone text both name the landmark. Landmark capture and playback use the
+  same location reading. This fixes a case where a drop intended for Zoram Strand became an Ashenvale
+  zone drop and stayed suppressed while editing until the player left Ashenvale.
+- Saving a drop immediately after crossing a boundary keeps it quiet during that visit, even while
+  the location reader is catching up. It can no longer fire during editing and silently count as
+  heard before the next arrival.
+- A muted Spotify Connect drop refuses to start when the device cannot accept mute, so it cannot
+  unexpectedly play at its previous audible volume.
+
+### Added
+
+- A **Music volume** slider in the addon's settings for companion songs and service tests. It scales
+  the drop's own volume, saves between sessions, and applies to the next song or test. In-game audio
+  files continue to use WoW's Music volume.
+- A draggable **minimap icon**: left-click to open NeedleDropper, right-click for settings. Hide it
+  with **Show minimap icon** in settings; its position is saved.
+
+### Clarified
+
+- **Exploration history: Fresh** ignores explored-map history; songs still play once per character
+  or account, and the cooldown still applies. To repeat a heard drop, use **Play again next visit**
+  or **Replay**. When a previously saved drop targets the whole zone, stand inside the landmark and
+  press **Use my location** again after updating.
+
 ## [1.2.1-beta.2] - 2026-11-06
 
 The addon and app keep the compatible 1.2.1 version. Update the companion app to get these fixes.

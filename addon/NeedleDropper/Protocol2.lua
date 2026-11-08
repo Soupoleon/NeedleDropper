@@ -27,7 +27,7 @@ local ADDON, ns = ...
 --     setId = "azeroth-mixtape",       -- soundtrack set id
 --     prefer = "spotify" | "youtube" } -- not sent: the id the fit rule keeps last (default youtube)
 -- HELLO and CONFIG (DESIGN-v1.2.1 2) also take:
---     prefs = { order = "spotify-youtube", corner = "topright", fade = true, resume = true },
+--     prefs = { order = "spotify-youtube", corner = "topright", fade = true, resume = true, volume = 100 },
 --     action = { name = "connect-spotify", at = 1762380123 },   -- CONFIG only
 --     clientId = "0123456789abcdef0123456789abcdef",            -- CONFIG only
 -- and a HELLO carries placeKey (the playing drop's, with DROP_ACTIVE) but no other song field.
@@ -39,7 +39,7 @@ local ADDON, ns = ...
 -- 3 query (only when the preferred provider's id is present), 4 dropId (placeKey stays),
 -- 5 shorten the query (artist and title each keep MIN_QUERY_PART bytes and the separator, or
 -- the whole query goes), 6 volume, 7 the provider id that is not preferred. placeKey, start,
--- length, the flags, the last provider id and PREFS / ACTION / CLIENT_ID are never removed.
+-- length, flags, the last provider id and PREFS / ACTION / CLIENT_ID / MUSIC_VOLUME are never removed.
 -- The beacon's budget is the capacity of its rows (Capacity / RowsCap / AdaptiveLayout and
 -- geom.maxRows below).
 
@@ -67,8 +67,8 @@ P2.FLAG = { IN_COMBAT = 1, IN_INSTANCE = 2, ON_TAXI = 4, DEAD = 8, LOCAL_PLAYBAC
 
 P2.TAG = { PLACE_KEY = 0x01, DROP_ID = 0x02, SPOTIFY = 0x03, YOUTUBE = 0x04, QUERY = 0x05,
            START_DS = 0x06, LENGTH_DS = 0x07, VOLUME = 0x08, LABEL = 0x09, SET_ID = 0x0A,
-           PREFS = 0x0B, ACTION = 0x0C, CLIENT_ID = 0x0D }
-local MAX_TAG = 0x0D
+           PREFS = 0x0B, ACTION = 0x0C, CLIENT_ID = 0x0D, MUSIC_VOLUME = 0x0E }
+local MAX_TAG = 0x0E
 
 P2.MAX_DROP_ID = 40      -- bytes, sanitized ASCII
 P2.MAX_QUERY = 120       -- bytes, UTF-8 "artist" .. 0x1F .. "title"
@@ -128,8 +128,8 @@ local WHITEN_TOP = 1073741824 -- 2^30: the keystream bit is the state's top bit
 -- CLIENT_ID, PING / NONE nothing.
 local SONG_TAGS = { true, true, true, true, true, true, true, true, true, true }
 local PLACE_TAGS = { true, true }
-local HELLO_TAGS = { [0x01] = true, [0x0B] = true }
-local CONFIG_TAGS = { [0x0B] = true, [0x0C] = true, [0x0D] = true }
+local HELLO_TAGS = { [0x01] = true, [0x0B] = true, [0x0E] = true }
+local CONFIG_TAGS = { [0x0B] = true, [0x0C] = true, [0x0D] = true, [0x0E] = true }
 local NO_TAGS = {}
 P2.TYPE_TAGS = { [0] = NO_TAGS, [1] = HELLO_TAGS, [2] = SONG_TAGS, [3] = SONG_TAGS, [4] = PLACE_TAGS,
                  [5] = NO_TAGS, [6] = CONFIG_TAGS }
@@ -641,6 +641,9 @@ function P2.EncodeFrame(ev, maxBytes, prefer)
   if allow[11] then vals[11] = prefsValue(ev.prefs) end
   if allow[12] then vals[12] = actionValue(ev.action) end
   if allow[13] then vals[13] = clientIdValue(ev.clientId) end
+  if allow[14] and type(ev.prefs) == "table" and isnum(ev.prefs.volume) then
+    vals[14] = schar(clamp(floor(ev.prefs.volume + 0.5), 0, 100))
+  end
   fitBody(vals, budget, preferOf(prefer))
 
   local bytes = { P2.MAGIC, P2.VERSION * 16 + t, seq, flags, 0 }
@@ -675,10 +678,10 @@ local BOOL_OF = { [1] = true, [2] = false }
 -- Validates a frame (byte array) and returns its fields, or nil. Mirrors protocol2.decode_frame:
 -- magic, version, known type (0..6), exact length, the 4-byte check, strictly ascending
 -- non-zero tags, and known tags with valid lengths / characters (strict UTF-8 query and label;
--- PREFS 4, ACTION 6 with its check byte, CLIENT_ID 16 bytes). Unknown PREFS / ACTION codes
+-- PREFS 4, ACTION 6 with its check byte, CLIENT_ID 16, MUSIC_VOLUME 1 byte (0..100)). Unknown PREFS / ACTION codes
 -- decode as nil fields, not errors. Unknown tags are skipped (forward compatible) and listed
 -- in `unknown` as { tag = t, value = "<bytes>" }. TYPE_TAGS is not enforced here.
--- Results: prefs = { order, corner, fade, resume }, action = { code, name, at }, clientId.
+-- Results: prefs = { order, corner, fade, resume, volume }, action = { code, name, at }, clientId.
 function P2.DecodeFrame(bytes)
   if type(bytes) ~= "table" then return nil end
   local n = #bytes
@@ -746,6 +749,10 @@ function P2.DecodeFrame(bytes)
       local hex = {}
       for k = 1, len do hex[k] = string.format("%02x", bytes[i + 1 + k]) end
       ev.clientId = concat(hex)
+    elseif tag == 14 then
+      if len ~= 1 or bytes[i + 2] > 100 then return nil end
+      ev.prefs = ev.prefs or {}
+      ev.prefs.volume = bytes[i + 2]
     else
       ev.unknown[#ev.unknown + 1] = { tag = tag, value = v }
     end

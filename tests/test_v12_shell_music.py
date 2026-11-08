@@ -226,7 +226,7 @@ def test_prefs_map_onto_config_json(rig):
                                "deck": {"playerCorner": "topleft", "playerPosition": ""},
                                "spotify": {"restorePrevious": False}}]
     assert config.music_choices(rig.app.cfg) == {"order": "youtube-spotify", "corner": "topleft", "fade": False,
-                                                 "resume": False, "fromGame": True}
+                                                 "resume": False, "fromGame": True, "volume": 100}
     assert ("push", False) in rig.app.events                            # the music.prefs echo for the game
 
 

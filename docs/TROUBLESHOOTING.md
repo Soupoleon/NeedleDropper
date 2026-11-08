@@ -102,6 +102,19 @@ warns: *the beacon overlaps your player frame: move the frame in Edit Mode or se
 time, combat, flight path, cooldown, another drop playing). The window's Drops tab shows each place's
 state in words: *heard* (with a tick), *needs a song*, *off*, *overridden*.
 
+**A landmark such as Zoram Strand does not fire after re-entering:** update both parts to beta 3
+or newer. Older builds could save the whole zone when the client reported the landmark in its zone
+text but left its sub-zone text empty. Stand inside the landmark, press **Use my location** again,
+and check that the saved place is the landmark. Walk far enough out that `/needle where` reports
+another location, then return and wait for the landmark delay. If both game location fields only
+report Ashenvale, the addon cannot identify Zoram Strand by name at that position; use
+`/needle where` and `/needle report` to report what the client exposes.
+
+**Exploration history: Fresh does not mean every visit.** It ignores explored-map history; the
+once-per-character/account rule and cooldown still apply. Use **Play again next visit** for a heard
+drop, or **Replay** to hear it now. A drop saved while standing in its place waits until your next
+arrival so unfinished edits cannot interrupt play.
+
 | Reason | What to do |
 |---|---|
 | **This character already heard it.** Each place plays once per character | The Journal tab lists what you have heard; **Play again next visit** on a row lets that place play again, **Replay** plays it now |
@@ -455,7 +468,7 @@ NeedleDropper*. The Settings panel is searchable. Every option can also be chang
 `/needle set <setting> <value>` (on/off values: `on` or `off`).
 
 The page starts with an **Open NeedleDropper** button, then groups the options under *Needle drops*,
-*Music services* (the app's status, the Spotify and YouTube accounts, the four music options below,
+*Music services* (the app's status, the Spotify and YouTube accounts, the music options below,
 **Test Spotify**, **Test YouTube** and **Refresh status**), *Playback*, *Title card* (with a **Preview**
 button), *Companion link* (with a **Send a test signal** button) and *Troubleshooting*. Your
 soundtracks are edited in the NeedleDropper window, not here.
@@ -463,6 +476,7 @@ soundtracks are edited in the NeedleDropper window, not here.
 | Option | Setting | Default | Values | What it does |
 |---|---|---|---|---|
 | Enable needle drops | `enabled` | on | on / off | Play a song the first time you arrive somewhere |
+| Show minimap icon | `minimapIcon` | on | on / off | Left-click to open the addon, right-click for settings; drag to reposition |
 | Zone arrival delay (s) | `dwellSec` | 10 | 0 – 300 | Seconds in a new zone before its song starts |
 | Delay after discovery (s) | `minDwellSec` | 3 | 0 – 300 | Shorter delay after the game's "Discovered: …" message (also used for instances) |
 | Landmark delay (s) | `landmarkDwellSec` | 4 | 0 – 300 | Seconds inside a landmark before its song starts (right away on discovery) |
@@ -472,6 +486,7 @@ soundtracks are edited in the NeedleDropper window, not here.
 | Wait while on a flight path | `suppressOnTaxi` | on | on / off | Hold drops until you land |
 | Instance drops | `instanceDrops` | on | on / off | Allow drops for dungeons and raids |
 | Play music with | `musicOrder` | spotify-youtube | `spotify-youtube` / `youtube-spotify` / `spotify` / `youtube` / `none` | Which service the NeedleDropper app uses for a song, and which it tries next. `none` (*Neither*): title cards and in-game files only |
+| Music volume | `musicVolume` | 100 | 0 – 100 | Percentage for the next companion song or service test, multiplied by the drop's volume. In-game files use WoW's Music volume |
 | YouTube box position | `youtubeCorner` | topright | `topright` / `topleft` / `bottomright` / `bottomleft` | Where the small YouTube player box shows while a YouTube song plays. A top-left box sits below the beacon; a change moves an open box at once |
 | Fade songs in and out | `musicFade` | on | on / off | Off: songs start and stop at once |
 | Resume my Spotify music afterwards | `resumeMyMusic` | on | on / off | When a Spotify needle drop ends, Spotify goes back to what you were listening to |

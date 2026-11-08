@@ -180,6 +180,7 @@ class _Active:
     local: bool = False  # addon plays it in game; we only show the card
     test: bool = False
     service_test: bool = False  # a service-only sample runs its full length after startup
+    music_volume: int = 100  # captured per drop, including any later provider fallback
     version: int = 1  # protocol of the event that started it (1 also for play_now)
     place_key: Optional[int] = None
     query_key: Optional[str] = None
@@ -434,7 +435,8 @@ class Engine:
                  dedupe_sec: float = DEDUPE_SEC, hello_stale_sec: float = HELLO_STALE_SEC,
                  poll_interval: float = POLL_INTERVAL_SEC, switch_fade_ms: int = SWITCH_FADE_MS,
                  fallback_window_sec: float = FALLBACK_WINDOW_SEC, card_only_sec: float = CARD_ONLY_SEC,
-                 fire_wait_sec: float = FIRE_WAIT_SEC, music_order: str = DEFAULT_MUSIC_ORDER) -> None:
+                 fire_wait_sec: float = FIRE_WAIT_SEC, music_order: str = DEFAULT_MUSIC_ORDER,
+                 music_volume: int = 100) -> None:
         if len(legacy) > 1:
             raise TypeError("Engine(providers, deck) takes at most one more positional argument "
                             "(the v1.1 form Engine(providers, registry, deck))")
@@ -462,6 +464,7 @@ class Engine:
         self.prewarm_async = bool(prewarm_async)
         self.log = _Log(log)
         self._music_order = music_order if music_order in MUSIC_ORDERS else DEFAULT_MUSIC_ORDER
+        self.set_music_volume(music_volume)
 
         self._queue: "queue.Queue[tuple]" = queue.Queue()
         self._lock = threading.RLock()
@@ -565,6 +568,17 @@ class Engine:
         """The provider instance playing the current drop, if any."""
         cur = self._current
         return cur.provider if cur is not None else None
+
+    def set_music_volume(self, volume: Any) -> int:
+        """Set the master percentage for the next drop/test; active drops keep their level.
+
+        Like set_music_order, this is one atomic store and never waits on a playing provider.
+        Providers retain their own base-volume and restoration semantics.
+        """
+        from .config import music_volume
+
+        self._music_volume = music_volume(volume)
+        return self._music_volume
 
     def start(self) -> "Engine":
         if self._thread and self._thread.is_alive():
@@ -1499,7 +1513,7 @@ class Engine:
         self._idle_evt.clear()
         cur = _Active(drop=drop, started_at=now, origin=origin, map_hash=map_hash, local=local, test=test,
                       version=version, place_key=place_key, query_key=qkey, frame_drop_id=frame_drop_id,
-                      fire_seq=fire_seq, late=late)
+                      fire_seq=fire_seq, late=late, music_volume=self._music_volume)
         cur.service_test = bool(test and only in ("spotify", "youtube") and drop.kind == "test")
         if routes is None:
             routes = [_Route(p, drop) for p in self.providers]
@@ -1551,7 +1565,13 @@ class Engine:
                     continue
             cur.tried.append(p.name)
             try:
-                handle = p.play(drop, fade_in_ms=self.fade_in_ms)
+                # Keep the source Drop untouched. Snapshot the master for the entire drop so a
+                # delayed fallback uses the same level, and preserve absent volume at 100%.
+                playback_drop = drop
+                if cur.music_volume != 100:
+                    per_drop = 100 if drop.volume is None else drop.volume
+                    playback_drop = dataclasses.replace(drop, volume=int(per_drop * cur.music_volume / 100 + 0.5))
+                handle = p.play(playback_drop, fade_in_ms=self.fade_in_ms)
             except ProviderError as exc:
                 if isinstance(exc, ProviderUnavailable):
                     self.log.warning("%s unavailable: %s", p.name, exc)

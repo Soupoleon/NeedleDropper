@@ -52,7 +52,8 @@ MS.CORNERS = { "topright", "topleft", "bottomright", "bottomleft" }
 MS.ACTIONS = ns.MUSIC_ACTIONS or { "connect-spotify", "disconnect-spotify", "test-spotify", "test-youtube",
                                    "youtube-sign-in" }
 -- Setting key -> PREFS field.
-MS.KEYS = { musicOrder = "order", youtubeCorner = "corner", musicFade = "fade", resumeMyMusic = "resume" }
+MS.KEYS = { musicOrder = "order", youtubeCorner = "corner", musicFade = "fade", resumeMyMusic = "resume",
+            musicVolume = "volume" }
 -- Seconds: the same request is refused (and its button disabled) this long. The app's own limit
 -- (music_config.ACTION_INTERVAL_S), so the game never announces a request the app turns away (INGAME-8).
 MS.SEND_GAP = 10
@@ -243,10 +244,11 @@ function MS.Corner()
   return "topright"
 end
 
--- The four music settings as a PREFS table.
+-- The music settings as a PREFS table (volume uses the optional MUSIC_VOLUME TLV).
 function MS.Prefs()
   return { order = MS.Order(), corner = MS.Corner(), fade = setting("musicFade") ~= false,
-           resume = setting("resumeMyMusic") ~= false }
+           resume = setting("resumeMyMusic") ~= false,
+           volume = ns.CoerceSetting("musicVolume", setting("musicVolume")) or 100 }
 end
 
 -- PREFS for the wire: nil until the player has chosen a music setting in game (DESIGN-v1.2.1 1.4).
