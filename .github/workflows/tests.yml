@@ -37,7 +37,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-          cache-dependency-path: companion/build-requirements.txt
+          # Test packages are declared here. A main push must not seed an incomplete
+          # build-tool cache; release 3.14 tests share the build job's requirements key.
+          cache-dependency-path: ${{ inputs.build_tools && 'companion/build-requirements.txt' || '.github/workflows/tests.yml' }}
 
       - name: Install test dependencies
         run: |
