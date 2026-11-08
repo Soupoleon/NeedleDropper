@@ -29,15 +29,48 @@ signals.
 
 ## Automation (one tag → every site)
 
-The **BigWigs packager** GitHub Action (`BigWigsMods/packager@v2`) does the following:
-- reads `.pkgmeta` (already in the repo);
-- substitutes `@project-version@` where it appears (the TOC's `## Version:` is written by hand today,
-  `1.2.1`; `tools/build_release.ps1` warns when it differs from the app's version);
-- zips `NeedleDropper/`;
-- uploads it to every site whose project id is in the TOC;
-- chooses alpha, beta or release from the tag.
+Publishing is automatic when a version tag is pushed. Ordinary pushes to `main` and pull requests
+run **CI**; they do not publish. Both CI and Release call the same [test workflow](../.github/workflows/tests.yml).
 
-The same workflow builds `NeedleDropper.exe` with `tools/build_release.ps1` and attaches it to the GitHub release.
+The [Release workflow](../.github/workflows/release.yml) follows this sequence:
+
+1. Validate the tag and versions, then record the tag's exact commit.
+2. Run the tests, generated soundtrack check and byte-compilation on Python **3.10, 3.12 and 3.14**.
+   Release tests also include the frozen-launcher checks on 3.14. Every version must pass.
+3. Build the EXE and ZIPs **once**, from that tested commit. Check their contents and SHA256 sums.
+4. Publish the GitHub release with all five files.
+5. Package the addon with **BigWigs packager**, check the addon-only ZIP, and upload to CurseForge
+   with the tag's Alpha, Beta or Release channel. Other sites remain optional.
+
+Python package downloads are cached. Tag pushes no longer start a second CI build or a redundant
+fourth test run. The publishing jobs depend on the entire test matrix, so a failed version blocks
+both GitHub publication and CurseForge upload.
+
+For the next beta, after committing the changes and updating the changelog:
+
+```powershell
+git push origin main
+git tag -a v1.2.1-beta.5 -m "NeedleDropper 1.2.1 beta 5"
+git push origin v1.2.1-beta.5
+```
+
+Choose a new tag each time; never move an already published tag. Base versions must match the tag
+(the current base is 1.2.1). The `CF_API_KEY` secret and CurseForge project ID are already configured.
+CurseForge may review a file after accepting the upload; the workflow cannot approve moderation.
+CurseForge updates the addon; the Windows companion remains a separate GitHub download.
+
+### Test release packaging without publishing
+
+In **Actions → Release → Run workflow**, choose the current branch and an existing version tag.
+Or run:
+
+```powershell
+gh workflow run release.yml --ref main -f tag=v1.2.1-beta.4
+```
+
+Every manual run is a **dry run**: it validates the selected tag, runs all three test versions and
+builds/checks the release files. Download the five files from the run's artifact. It never creates
+or changes a GitHub release, and it skips addon-site publishing. Actual publishing requires a tag push.
 
 The betas use the addon's English fallback on every client language. Both packager calls pass `-l`
 to skip optional CurseForge localization exports, which currently reject project access. File

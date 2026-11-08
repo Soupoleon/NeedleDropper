@@ -156,6 +156,10 @@ The token belongs only in that secret. Never put it in the TOC, a file, an issue
 The Release workflow ([release.yml](../../.github/workflows/release.yml), the source of truth)
 runs on every version tag:
 
+Pushes to `main` and pull requests run CI without publishing. A tag runs the same Python
+3.10/3.12/3.14 checks inside Release; every check must pass before the single EXE/ZIP build and
+automatic uploads. See [the release guide](../RELEASING.md#automation-one-tag--every-site).
+
 | Tag | GitHub | CurseForge |
 |---|---|---|
 | `v1.2.1-alpha.N` | pre-release | Alpha |
@@ -165,12 +169,12 @@ runs on every version tag:
 It refuses any other tag (`v1.2.1-rc.1`, `v1.2`). For the next beta:
 
 ```powershell
-git tag -a v1.2.1-beta.3 -m "NeedleDropper 1.2.1 beta 3"
-git push origin v1.2.1-beta.3
+git tag -a v1.2.1-beta.5 -m "NeedleDropper 1.2.1 beta 5"
+git push origin v1.2.1-beta.5
 ```
 
-- **Every beta uses this workflow.** Beta.1 and beta.2 are already published; beta.3 updates both
-  the addon and companion. Do not recreate an existing tag or upload the same beta manually.
+- **Every beta uses this workflow.** Betas 1 through 4 are already published. Choose a new tag;
+  do not recreate an existing tag or upload the same beta manually.
 - The workflow checks the tag against `__version__` in `companion/needledropper/__init__.py` and the
   TOC's `## Version:`, and says what to fix when they don't match.
 - It builds the app and the GitHub release first. Then the BigWigs packager zips the addon and
@@ -184,6 +188,11 @@ git push origin v1.2.1-beta.3
   `ADDON_SITE_UPLOADS` with the value `off` (*Settings → Secrets and variables → Actions →
   Variables*). Delete it to turn the uploads back on.
 - WoWInterface stays off, because it has no WoW: Forever versions yet.
+
+To test the packaging without another upload, use **Actions → Release → Run workflow** with an
+existing version tag, or `gh workflow run release.yml --ref main -f tag=v1.2.1-beta.4`. Manual runs
+are always dry runs: tests and release-file artifacts, with GitHub publishing and addon-site jobs
+skipped. Tag pushes remain the only publishing trigger.
 
 ## Optional: Wago Addons
 

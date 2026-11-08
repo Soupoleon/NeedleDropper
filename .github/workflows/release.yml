@@ -12,8 +12,9 @@
 #
 # Jobs:
 #   prepare      checks the tag against the versions in the repository and works out which
-#                addon sites are set up.
-#   github       (Windows) runs the tests, builds NeedleDropper.exe and the zips with
+#                addon sites are set up; freezes its commit for every later checkout.
+#   test         uses tests.yml: all three Python versions must pass before publishing.
+#   github       (Windows) builds NeedleDropper.exe and the zips once with
 #                tools/build_release.ps1, and publishes the GitHub release.
 #   addon-sites  runs after github succeeded: packages the addon from .pkgmeta with the
 #                BigWigs packager, checks the zip, then uploads it to CurseForge and Wago.
@@ -33,6 +34,12 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to test (dry run; no releases or site uploads)
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -52,6 +59,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       tag: ${{ steps.check.outputs.tag }}
+      sha: ${{ steps.check.outputs.sha }}
       version: ${{ steps.check.outputs.version }}
       base: ${{ steps.check.outputs.base }}
       channel: ${{ steps.check.outputs.channel }}
@@ -62,13 +70,15 @@ jobs:
       - name: Check out the tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
 
       - name: Check the tag, the versions and the upload targets
         id: check
         shell: bash
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
           # Only whether each secret is set ("true" / "false"); the values stay out of this job.
           HAS_CF_TOKEN: ${{ secrets.CF_API_KEY != '' }}
           HAS_WAGO_TOKEN: ${{ secrets.WAGO_API_TOKEN != '' }}
@@ -165,9 +175,15 @@ jobs:
           fi
           upload=false
           if [[ "$cf" == "true" || "$wago" == "true" ]]; then upload=true; fi
+          if [[ "$DRY_RUN" == "true" ]]; then
+            upload=false
+            cf_note="dry run: no upload (project ${cf_id:-not set})"
+            wago_note="dry run: no upload"
+          fi
 
           {
             echo "tag=$TAG"
+            echo "sha=$(git rev-parse HEAD)"
             echo "version=$version"
             echo "base=$base"
             echo "channel=$channel"
@@ -182,6 +198,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Tag | \`$TAG\` |"
+            echo "| Mode | $([[ "$DRY_RUN" == "true" ]] && echo "dry run: no publishing" || echo "publish") |"
             echo "| Channel | $channel |"
             echo "| GitHub release | $([[ "$prerelease" == "true" ]] && echo "pre-release" || echo "latest release") |"
             echo "| App (\`__version__\`) | $app_version |"
@@ -192,9 +209,19 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           echo "$title: channel $channel, pre-release $prerelease; CurseForge: $cf_note; Wago: $wago_note"
 
+  test:
+    name: Validate release
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/tests.yml
+    with:
+      source_ref: ${{ needs.prepare.outputs.sha }}
+      build_tools: true
+
   github:
     name: Build the app and publish the GitHub release
-    needs: prepare
+    needs: [prepare, test]
     runs-on: windows-latest
     timeout-minutes: 45
     permissions:
@@ -205,6 +232,7 @@ jobs:
       - name: Check out the tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
@@ -212,17 +240,14 @@ jobs:
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: companion/build-requirements.txt
 
-      - name: Install the build and test tools
+      - name: Install the build tools
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r companion/build-requirements.txt pytest lupa
-
-      # Before the version is stamped in: tests/test_addon_misc.py compares the TOC byte for byte.
-      - name: Run the test suite
-        shell: pwsh
-        run: python -m pytest tests -q -p no:cacheprovider
+          python -m pip install -r companion/build-requirements.txt
 
       # The packager replaces @project-version@ in its own zip. The GitHub zips are built by
       # build_release.ps1 from the checkout, and NeedleDropper.exe bundles the addon (for
@@ -364,6 +389,7 @@ jobs:
           cat release-notes.md
 
       - name: Publish the GitHub release
+        if: github.event_name == 'push'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -385,8 +411,16 @@ jobs:
           fi
           gh release view "$TAG" --json url,isPrerelease,assets --jq '"\(.url) (pre-release: \(.isPrerelease))", (.assets[] | "  \(.name)  \(.size) bytes")'
 
+      - name: Dry-run summary
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          echo '## Dry run complete' >> "$GITHUB_STEP_SUMMARY"
+          echo 'All three Python versions passed. Release files and checksums were built and checked; download them from the artifacts attached to this workflow run. No GitHub release was created or changed, and no addon-site upload was run.' >> "$GITHUB_STEP_SUMMARY"
+
   addon-sites:
     name: Package the addon for CurseForge and Wago
+    if: github.event_name == 'push'
     needs: [prepare, github]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -394,6 +428,7 @@ jobs:
       - name: Check out the tag with its history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           # The packager reads the tags (version, previous version); its wiki asks for the full history.
           fetch-depth: 0
           persist-credentials: false
